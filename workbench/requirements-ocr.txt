@@ -1,0 +1,8 @@
+# 可选依赖（按需安装，装哪个启用哪个解析能力）：
+# 图片 OCR（较大，约1.5GB，含模型）：pip install -r requirements-ocr.txt
+paddlepaddle==2.6.1
+paddleocr==2.7.3
+
+# CAD 解析（DXF；DWG 需另装 ODA File Converter 免费转换工具）：
+# pip install ezdxf
+ezdxf==1.3.1

@@ -1,0 +1,17 @@
+# 繁工AI 本地解析工作台 - 核心依赖（安装：pip install -r requirements.txt）
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+requests==2.32.3
+
+# 文档解析
+pypdf==4.2.0                 # PDF 文本提取（轻量）
+python-docx==1.1.2           # Word 文本+表格
+openpyxl==3.1.5              # Excel 表格结构化（台账）
+
+# 向量化
+sentence-transformers==3.0.1 # 本地 embedding（首次运行自动下载模型）
+chromadb==0.5.5              # 向量库存储
+
+# 进度条/日志
+tqdm==4.66.4

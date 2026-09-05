@@ -1,0 +1,6 @@
+# 运行时数据（不入版本库；各电脑本地生成）
+data/
+venv/
+__pycache__/
+*.pyc
+.venv/
