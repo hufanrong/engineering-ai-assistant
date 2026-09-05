@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Tasks>
+    <Task><UID>1</UID><Name>设备基础施工</Name><WBS>1</WBS><Start>2026-09-01T08:00:00</Start><Finish>2026-09-15T17:00:00</Finish><Duration>PT80H</Duration><Milestone>0</Milestone></Task>
+    <Task><UID>2</UID><Name>设备吊装就位</Name><WBS>2</WBS><Start>2026-09-16T08:00:00</Start><Finish>2026-09-20T17:00:00</Finish><Duration>PT40H</Duration><PredecessorLink><PredecessorUID>1</PredecessorUID></PredecessorLink><Milestone>0</Milestone></Task>
+    <Task><UID>3</UID><Name>验收</Name><WBS>3</WBS><Start>2026-09-21T08:00:00</Start><Finish>2026-09-21T17:00:00</Finish><Duration>PT8H</Duration><Milestone>1</Milestone></Task>
+  </Tasks>
+</Project>

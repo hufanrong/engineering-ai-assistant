@@ -57,22 +57,22 @@ def extract_entities(text: str, limit: int = 200) -> list:
     return out
 
 
-# ============ 解析器注册表 ============
+# ============ 解析器注册表（优先级：Project → 表格台账 → 图片OCR → CAD → PDF/Word/Text） ============
 def _pick_parser(ext: str):
-    if ext in config.EXT_PDF and config.PARSE_PDF:
-        return parse_pdf
-    if ext in config.EXT_WORD and config.PARSE_WORD:
-        return parse_word
+    if ext in config.EXT_PROJECT and config.PARSE_PROJECT:
+        return parse_project
     if ext in config.EXT_EXCEL and config.PARSE_EXCEL:
         return parse_excel
-    if ext in config.EXT_TEXT and config.PARSE_TEXT:
-        return parse_text
     if ext in config.EXT_IMAGE and config.PARSE_IMAGE:
         return parse_image
     if ext in config.EXT_CAD and config.PARSE_CAD:
         return parse_cad
-    if ext in config.EXT_PROJECT and config.PARSE_PROJECT:
-        return parse_project
+    if ext in config.EXT_PDF and config.PARSE_PDF:
+        return parse_pdf
+    if ext in config.EXT_WORD and config.PARSE_WORD:
+        return parse_word
+    if ext in config.EXT_TEXT and config.PARSE_TEXT:
+        return parse_text
     return None
 
 
@@ -148,11 +148,18 @@ def parse_word(res: ParseResult):
 
 # ============ Excel（台账结构化，v3.6 核心） ============
 def _normalize_header(cells):
-    """表头归一：合并单元格/多行表头 → 取首个非空作为列名。"""
+    """表头归一：合并单元格/多行表头 → 取首个非空作为列名；同名列自动加序号去重。"""
     out = []
+    seen = {}
     for c in cells:
         v = (c or "").strip()
-        out.append(v if v else f"列{len(out)+1}")
+        name = v if v else f"列{len(out)+1}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        out.append(name)
     return out
 
 
@@ -288,6 +295,15 @@ def _dwg_to_dxf(dwg_path: str) -> Optional[str]:
 
 
 # ============ Project 计划（.xml，纯 Python；.mpp 需先另存为 XML） ============
+def _project_link_uid(task_elem, ns) -> str:
+    """取 PredecessorLink 下的 PredecessorUID 子元素（前置任务编号）。"""
+    link = task_elem.find("p:PredecessorLink", ns)
+    if link is None:
+        return ""
+    uids = [e.text or "" for e in link.findall("p:PredecessorUID", ns) if e.text]
+    return ",".join(uids)
+
+
 def parse_project(res: ParseResult):
     import xml.etree.ElementTree as ET
     res.parser = "project"
@@ -308,7 +324,8 @@ def parse_project(res: ParseResult):
             "start": g("Start"),
             "finish": g("Finish"),
             "duration": g("Duration"),
-            "predecessors": g("PredecessorLink") or g("Predecessors"),
+            "predecessors": g("PredecessorLink") or g("Predecessors")
+                or _project_link_uid(t, ns),
             "milestone": g("Milestone"),
         }
         if task["name"]:

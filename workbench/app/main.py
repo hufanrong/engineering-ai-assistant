@@ -17,7 +17,7 @@ from . import scanner
 from .vector_store import VectorStore
 from . import upload_queue
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.0-mvp")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.2")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -38,7 +38,7 @@ def status():
     idx = scanner._load_index() if scanner.INDEX_FILE or True else {}
     return {
         "app": "fangong-workbench",
-        "version": "0.1.0-mvp",
+        "version": "0.1.2",
         "node_name": config.NODE_NAME,
         "scan_running": SCAN_STATUS.get("running", False),
         "parse_switches": {
@@ -162,6 +162,24 @@ def queue_list():
 def do_upload():
     result = upload_queue.upload_all()
     return result
+
+
+@app.get("/api/upload/log")
+def upload_log(limit: int = 100):
+    """上传/打包留痕记录（upload_log.jsonl 尾部）。"""
+    log_path = os.path.join(config.DATA_DIR, "upload_log.jsonl")
+    if not os.path.exists(log_path):
+        return {"items": []}
+    lines = []
+    with open(log_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    lines.append(json.loads(line))
+                except Exception:  # noqa: BLE001
+                    continue
+    return {"items": lines[-limit:]}
 
 
 # 静态资源（前端 js/css）
