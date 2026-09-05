@@ -1,0 +1,31 @@
+{
+  "id": "engineering_document_parser_1",
+  "pluginKey": "@official-plugins/ai-doc-parser",
+  "pluginVersion": "1.0.16",
+  "name": "工程台账/图纸文件解析",
+  "description": "将工程台账、图纸类文档文件（支持PDF/DOC/DOCX/PPTX/XLSX/CSV/TXT/MARKDOWN/HTML格式）解析为纯文本markdown内容，供下游实体结构化提取使用。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "fileUrl": {
+        "type": "array",
+        "format": "plugin-file-url",
+        "description": "文件URL列表，目前仅支持上传一个文件",
+        "items": {
+          "description": "文件URL",
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "fileUrl"
+    ]
+  },
+  "formValue": {
+    "fileUrl": "{{input.fileUrl}}"
+  },
+  "createdAt": 1788530453802,
+  "updatedAt": 1788530453802,
+  "createdBy": 7677557460982320426
+}

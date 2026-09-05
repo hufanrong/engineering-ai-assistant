@@ -1,0 +1,38 @@
+@import '@lark-apaas/client-toolkit/lib/index.css';
+@import "tw-animate-css";
+@import "./tailwind-theme.css";
+@import "./typography.css";
+
+@source "../../node_modules/streamdown/dist/*.js";
+@config "../../tailwind.config.ts";
+
+/* 繁工AI 品牌启动动画（CSS 动效，仅 transform/opacity） */
+@keyframes brand-logo-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes brand-splash-out {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+.brand-logo-in {
+  animation: brand-logo-in 0.45s ease-out both;
+}
+
+.brand-logo-in-delay {
+  animation-delay: 0.15s;
+}
+
+.brand-splash {
+  animation: brand-splash-out 0.4s ease 1.15s forwards;
+}

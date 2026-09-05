@@ -1,0 +1,32 @@
+{
+  "id": "mobile_voice_transcription_1",
+  "pluginKey": "@official-plugins/speech-file-to-text",
+  "pluginVersion": "1.0.15",
+  "name": "移动端现场语音采集转文字",
+  "description": "用于移动端现场采集的10分钟内音频文件转写为纯文本记录",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "fileUrl": {
+        "type": "array",
+        "format": "plugin-file-url",
+        "description": "音频文件URL列表，仅支持10分钟内的wav、mp3、ogg格式音频",
+        "items": {
+          "type": "string",
+          "description": "单个音频文件URL"
+        }
+      }
+    },
+    "required": [
+      "fileUrl"
+    ]
+  },
+  "formValue": {
+    "audioUrl": "{{input.fileUrl}}",
+    "language": "zh"
+  },
+  "createdAt": 1788530484358,
+  "updatedAt": 1788530484358,
+  "createdBy": 7677557460982320426
+}

@@ -1,0 +1,38 @@
+{
+  "id": "engineering_ledger_entity_extraction_1",
+  "pluginKey": "@official-plugins/ai-text-to-json",
+  "pluginVersion": "1.0.26",
+  "name": "工程台账实体结构化提取",
+  "description": "从工程台账解析文本中提取设备/材料实体列表，包含实体编号、名称、型号、规格、类型等信息",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "待提取的工程台账文本"
+      }
+    },
+    "required": [
+      "text"
+    ]
+  },
+  "formValue": {
+    "prompt": "你是一位专业的工程台账数据分析专家，擅长从工程文档中精准提取设备和材料相关的结构化信息。\n\n请从以下工程台账文本中提取所有设备、管道、阀门、仪表、材料等实体信息：\n{{input.text}}\n\n提取规则：\n1. 实体类型(entityType)只能是以下枚举值之一：equipment(设备)/pipe(管道)/valve(阀门)/instrument(仪表)/material(材料)\n2. 每个实体必须包含code(实体编号)、name(实体名称)、model(型号)、spec(规格)、entityType(实体类型)五个字段\n3. 字段值如果无法从文本中找到，填空字符串\n4. 将提取到的所有实体作为数组赋值给entities字段\n5. 确保输出格式符合JSON规范，无语法错误",
+    "jsonStructure": [
+      {
+        "name": "entities",
+        "paramType": "String",
+        "paramDescription": "实体列表的JSON数组字符串，每个元素包含code(实体编号)、name(实体名称)、model(型号)、spec(规格)、entityType(实体类型，取值equipment/pipe/valve/instrument/material)"
+      }
+    ],
+    "modelID": "2015",
+    "modelParams": {
+      "maxTokens": 8192,
+      "temperature": 0.5
+    }
+  },
+  "createdAt": 1788530470973,
+  "updatedAt": 1788530470973,
+  "createdBy": 7677557460982320426
+}

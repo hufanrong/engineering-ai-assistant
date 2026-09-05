@@ -1,0 +1,58 @@
+{
+  "id": "site_photo_structured_extraction_1",
+  "pluginKey": "@official-plugins/ai-image-to-json",
+  "pluginVersion": "1.0.18",
+  "name": "现场照片结构化提取",
+  "description": "从现场照片中提取结构化信息，包括记录标题、内容描述、位置信息及其他关键信息",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "imageUrl": {
+        "description": "图片 URL 列表，仅支持一张",
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "format": "plugin-image-url"
+      }
+    },
+    "required": [
+      "imageUrl"
+    ]
+  },
+  "formValue": {
+    "images": "{{input.imageUrl}}",
+    "jsonStructure": [
+      {
+        "paramType": "String",
+        "name": "title",
+        "paramDescription": "记录标题，简要概括现场记录的核心内容"
+      },
+      {
+        "name": "content",
+        "paramDescription": "记录完整内容描述，包含设备名称、编号、数量、施工部位、作业内容等关键信息",
+        "paramType": "String"
+      },
+      {
+        "name": "location",
+        "paramDescription": "部位或位置，描述事件发生的具体位置或部位",
+        "paramType": "String"
+      },
+      {
+        "name": "extraInfo",
+        "paramDescription": "其他关键信息，无则填空字符串",
+        "paramType": "String"
+      }
+    ],
+    "modelID": "2015",
+    "modelParams": {
+      "maxTokens": 8192,
+      "temperature": 0.5
+    },
+    "prompt": "你是一位专业的现场记录提取专家。请从提供的现场照片中提取结构化信息，严格按照指定的JSON结构输出。content字段需要完整包含设备名称、编号、数量、施工部位、作业内容等所有可见的关键信息。如果没有相关信息，对应字段填空字符串。"
+  },
+  "createdAt": 1788530501382,
+  "updatedAt": 1788530501382,
+  "createdBy": 7677557460982320426
+}

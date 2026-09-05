@@ -1,0 +1,31 @@
+{
+  "id": "engineering_database_agent_search_summary_1",
+  "pluginKey": "@official-plugins/ai-search-summary",
+  "pluginVersion": "1.0.13",
+  "name": "工程资料库Agent检索结果摘要洞察",
+  "description": "针对工程资料库Agent的检索查询词与命中内容要点，执行智能搜索并生成结构化的摘要洞察文本，辅助工程领域信息快速获取与分析。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "search_query": {
+        "description": "工程领域检索查询词",
+        "type": "string"
+      },
+      "content_highlights": {
+        "type": "string",
+        "description": "检索命中的内容要点"
+      }
+    },
+    "required": [
+      "search_query"
+    ]
+  },
+  "formValue": {
+    "query": "{{input.search_query}}",
+    "instruction": "你是专业的工程领域信息分析专家，请针对以下检索命中的内容要点进行深度总结与洞察：\n命中内容要点：{{input.content_highlights}}\n\n总结要求：\n1. 提取核心结论与关键数据点\n2. 梳理信息间的逻辑关系\n3. 标注内容的适用场景与参考价值\n4. 输出结构清晰，重点突出，适合工程技术人员快速获取关键信息"
+  },
+  "createdAt": 1788532296356,
+  "updatedAt": 1788532296356,
+  "createdBy": 7677557460982320426
+}
