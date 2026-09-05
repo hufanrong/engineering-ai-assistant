@@ -63,3 +63,7 @@ pnpm-lock.yaml
 # Agent files
 .agent/
 .npm_cache
+
+# 例外：壳项目的 webDir 需要纳入版本管理
+!packaging/fangong-android/dist/
+!packaging/fangong-android/dist/index.html

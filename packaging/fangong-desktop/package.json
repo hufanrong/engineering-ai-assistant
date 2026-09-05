@@ -1,0 +1,28 @@
+{
+  "name": "fangong-ai",
+  "version": "3.3.0",
+  "main": "main.js",
+  "description": "繁工AI - 复杂工程，AI 化简",
+  "author": "胡繁荣",
+  "build": {
+    "appId": "com.fangong.ai",
+    "productName": "繁工AI",
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "scripts": {
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

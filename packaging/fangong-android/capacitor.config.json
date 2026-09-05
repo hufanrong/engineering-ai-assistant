@@ -1,0 +1,9 @@
+{
+  "appId": "com.fangong.ai",
+  "appName": "繁工AI",
+  "webDir": "dist",
+  "server": {
+    "url": "https://dcn2cmvd8vnq.feishuapp.com/app/app_17dfhhexbzp",
+    "cleartext": false
+  }
+}

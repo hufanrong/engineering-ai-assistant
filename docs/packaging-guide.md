@@ -1,181 +1,98 @@
-# 繁工AI 打包交付指南（v3.3）
+# 繁工AI 打包交付说明（v3.3）
 
-> 本应用已内置 **PWA 可安装能力**（`client/public/manifest.webmanifest` + 品牌图标），可直接在手机/电脑浏览器安装为独立 App。
-> 如需产出原生 **APK** 或 **Windows 安装包（.exe）**，按本指南在你自己的电脑上执行（当前开发环境无法产出原生安装包）。
+> 本仓库已内置 **PWA 可安装能力**，并已把手机端壳（`packaging/fangong-android`）与电脑端壳（`packaging/fangong-desktop`）纳入仓库。
+> **自动化构建已配置**：`.github/workflows/build.yml` —— push 到 `main` 或手动触发，即可自动产出 **Android APK** 与 **Windows 安装版（Setup exe）**。
 
 ---
 
-## 一、PWA 安装（已落地，无需任何操作）
+## 一、PWA 在线版（已落地，无需任何操作）
 
 - **手机（Android / iOS）**：用浏览器打开应用线上地址 → 菜单 →「添加到主屏幕 / 安装应用」，桌面即出现繁工AI图标，独立窗口运行。
-- **电脑（Chrome / Edge）**：打开应用地址，点击地址栏右侧的安装图标（⊕）→ 安装，开始菜单/桌面出现「繁工AI」。
+- **电脑（Chrome / Edge）**：打开应用地址，点击地址栏右侧安装图标（⊕）→ 安装。
 - 安装后图标、启动画面、主题色均为品牌元素（工程蓝 `#1E5AA8`、安全橙 `#FF7A00`）。
-- 应用线上地址：在妙搭平台点击「预览/发布」后获得的 URL（形如 `https://xxx.feishu.cn/app/<appId>/`），也可在飞书工作台打开应用后复制地址。
+- **应用线上地址**：在妙搭平台点击「预览/发布」后获得的 URL（形如 `https://xxx.feishu.cn/app/<appId>/`），或飞书工作台打开应用后复制地址。
 
-## 二、手机端打包 Android APK（Capacitor）
+---
 
-**前置**：Node.js ≥ 18、JDK 17、Android Studio（含 SDK，配置 `ANDROID_HOME`）。
+## 二、手机端 Android APK
 
-1. 新建空目录并初始化 Capacitor：
+### 方式 A：GitHub Actions 自动构建（推荐）
+1. push 代码到 `main`，或到仓库 **Actions** 页手动触发 `Build APK & Windows Installer`。
+2. 构建完成后在运行页的 **Artifacts** 中下载 `fangong-ai-apk`，得到 `app-debug.apk`。
+3. 传到 Android 手机安装（需允许「安装未知来源应用」）。
 
-```bash
-mkdir fangong-android && cd fangong-android
-npm init -y
-npm install @capacitor/core @capacitor/cli @capacitor/android
-npx cap init "繁工AI" com.fangong.ai --web-dir=dist
-```
-
-2. 编辑 `capacitor.config.json`，WebView 直接加载线上地址（把 `https://你的应用线上地址/` 换成实际 URL）：
-
-```json
-{
-  "appId": "com.fangong.ai",
-  "appName": "繁工AI",
-  "webDir": "dist",
-  "server": {
-    "url": "https://你的应用线上地址/",
-    "cleartext": false
-  }
-}
-```
-
-3. 生成品牌图标与启动页（把 `client/public/icons/icon-512.png` 复制为 `assets/icon.png`，2732×2732 的 `assets/splash.png` 可由它放大或另行导出）：
+### 方式 B：本地构建
+前置：Node.js ≥ 18、**JDK 21**、Android SDK（配置 `ANDROID_HOME`）。
 
 ```bash
-mkdir -p assets
-# 复制图标后执行：
-npx @capacitor/assets generate --android
-```
-
-4. 添加 Android 平台并构建 APK：
-
-```bash
-npx cap add android
+cd packaging/fangong-android
+npm ci
+npx cap copy android
 cd android
-./gradlew assembleDebug        # 产物：app/build/outputs/apk/debug/app-debug.apk
-# 正式包（需签名）：
-./gradlew assembleRelease
+./gradlew assembleDebug
+# 产物：android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-5. 真机安装 `app-debug.apk`，验证：安装、加载、拍照/语音/文字上传、类型识别、完整性补充。
+### 说明
+- 壳项目位于 `packaging/fangong-android/`，WebView 加载地址配置在 `capacitor.config.json` 的 `server.url`（改地址只需改这一处）。
+- 当前为 **debug 签名包**，可正常安装使用；正式上架需生成 release 签名 keystore。
 
-**GitHub Actions 云端构建（可选，免本地 Android Studio）**：在仓库新建 `.github/workflows/android.yml`：
+---
 
-```yaml
-name: Android APK
-on: [workflow_dispatch]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '17' }
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm install
-      - run: npx cap add android || true
-      - run: cd android && ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: fangong-ai-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-```
+## 三、电脑端 Windows 安装版（Setup exe）
 
-运行后在 Actions 页面的 Artifacts 里下载 APK。
+### 方式 A：GitHub Actions 自动构建（推荐）
+与 APK 同一工作流：push 到 `main` 或手动触发，在 **Artifacts** 下载 `fangong-ai-windows-setup`，得到 `繁工AI Setup <版本>.exe`（NSIS 安装向导版，可选择安装路径）。
 
-## 三、电脑端打包 Windows 安装包（Electron）
-
-> 说明：本应用后端（NestJS + 数据库）由妙搭平台托管，桌面端打包为「在线壳」形态——安装包内含前端壳，启动后加载应用线上地址。原方案中 FastAPI/SQLite 本地部署不适用于当前架构，无需 PyInstaller。
-
-1. 初始化 Electron 项目：
+### 方式 B：本地构建（Windows 电脑上执行）
+前置：Node.js ≥ 18。
 
 ```bash
-mkdir fangong-desktop && cd fangong-desktop
-npm init -y
-npm install electron electron-builder --save-dev
+cd packaging/fangong-desktop
+npm ci
+npx electron-builder --win nsis
+# 产物：dist/繁工AI Setup <版本>.exe
 ```
 
-2. 新建 `main.js`：
+> 注意：`electron-builder --win nsis` 需在 **Windows 环境**（或配置好 Wine 的环境）构建；Linux 直接构建 NSIS 会因缺少 Wine 失败。GitHub Actions 已用 `windows-latest` runner，无需担心。
+> 若只需免安装绿色版，用 `npx electron-builder --win zip`，产物为 `dist/繁工AI-<版本>-win.zip`，解压即用。
 
-```js
-const { app, BrowserWindow, Tray, Menu } = require('electron');
-const path = require('path');
+### 说明
+- 壳项目位于 `packaging/fangong-desktop/`（Electron 在线壳，加载应用线上地址）。
+- `main.js`：窗口标题「繁工AI」、关闭最小化到托盘、托盘「退出」正常结束进程。
+- 应用图标：`icon-512.png`。
 
-let win = null;
-let tray = null;
+---
 
-function createWindow() {
-  win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    title: '繁工AI',
-    icon: path.join(__dirname, 'icon-512.png'), // 用 client/public/icons/icon-512.png
-  });
-  win.loadURL('https://你的应用线上地址/'); // 换成实际 URL
-  win.on('close', (e) => { e.preventDefault(); win.hide(); }); // 关闭即最小化到托盘
-}
+## 四、发布安装包到 GitHub Release（分发给他人下载）
 
-app.whenReady().then(() => {
-  createWindow();
-  tray = new Tray(path.join(__dirname, 'icon-512.png'));
-  tray.setToolTip('繁工AI');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '显示主窗口', click: () => win.show() },
-    { label: '退出', click: () => { win.destroy(); app.quit(); } },
-  ]));
-});
-```
+在 Actions 页手动运行 `Build APK & Windows Installer`，填写版本标签（如 `3.3.0`），构建成功后自动创建一个 **GitHub Release**，附带 APK 与 Windows 安装包，直接分享 Release 链接即可。
 
-3. `package.json` 增加构建配置：
+---
 
-```json
-{
-  "name": "fangong-ai",
-  "version": "3.3.0",
-  "main": "main.js",
-  "build": {
-    "appId": "com.fangong.ai",
-    "productName": "繁工AI",
-    "win": { "target": "nsis", "icon": "icon-512.png" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
-  },
-  "scripts": { "dist": "electron-builder --win" }
-}
-```
-
-4. 构建带安装向导的 exe：
-
-```bash
-npm run dist
-# 产物在 dist/ 目录：繁工AI Setup 3.3.0.exe
-```
-
-5. 安装自测：安装 → 启动出现繁工AI窗口 → 项目创建 / 文件上传 / 检索 → 关闭窗口最小化到托盘 → 托盘「退出」正常结束进程。
-
-## 四、代码上传 GitHub
-
-**有权限时（优先）**：
+## 五、代码上传 GitHub（首次 / 手动）
 
 ```bash
 cd 项目根目录
 git init
 git add .
-git commit -m "繁工AI v3.3：品牌统一 + PWA 可安装"
+git commit -m "繁工AI v3.3：品牌统一 + PWA 可安装 + 双端打包 CI"
 gh repo create engineering-ai-assistant --public --source=. --push
-# 或手动：git remote add origin https://github.com/<你的用户名>/engineering-ai-assistant.git
-#          git branch -M main && git push -u origin main
 ```
 
-**无 GitHub Token 时**：在妙搭工作台把本应用源码导出/下载为 zip（或直接压缩项目目录，排除 `node_modules/`、`dist/`、`build/`），在 GitHub 网页新建仓库 `engineering-ai-assistant` → 「uploading an existing file」→ 拖入解压后的源码 → Commit。
+无 GitHub Token 时：把项目目录压缩为 zip（排除 `node_modules/`、`dist/`、`build/`），到 GitHub 网页新建仓库 `engineering-ai-assistant` → 「uploading an existing file」→ 拖入解压后的源码 → Commit。
 
-## 五、品牌资源位置
+---
+
+## 六、品牌资源与打包结构
 
 | 资源 | 路径 |
 |---|---|
 | PWA 图标 192/512 | `client/public/icons/icon-192.png` / `icon-512.png` |
-| 浏览器图标 | `client/public/icons/icon-192.png`（index.html 引用） |
 | PWA 清单 | `client/public/manifest.webmanifest` |
 | 品牌色 | 工程蓝 `#1E5AA8`（主色）、安全橙 `#FF7A00`（点缀） |
 | 页内 Logo | `client/src/components/BrandLogo.tsx`（齿轮 + 图纸折线 + 智能节点） |
 | 启动动画 | `client/src/components/BrandSplash.tsx` |
+| 手机端壳 | `packaging/fangong-android/` |
+| 电脑端壳 | `packaging/fangong-desktop/` |
+| CI 自动构建 | `.github/workflows/build.yml` |
