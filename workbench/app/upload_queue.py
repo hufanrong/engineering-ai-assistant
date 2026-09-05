@@ -21,7 +21,8 @@ def _ensure():
     if QUEUE_DIR is None:
         QUEUE_DIR = os.path.join(config.DATA_DIR, "upload_queue")
         LOG_PATH = os.path.join(config.DATA_DIR, "upload_log.jsonl")
-        os.makedirs(QUEUE_DIR, exist_ok=True)
+    # 目录可能被外部删除/移动（如整库迁移、导入合并后继续扫描），每次确保存在
+    os.makedirs(QUEUE_DIR, exist_ok=True)
 
 
 def enqueue(parse_result) -> str:

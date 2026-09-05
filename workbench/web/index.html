@@ -105,6 +105,16 @@
       </div>
       <div class="msg" id="uploadFilesMsg"></div>
     </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2>解析库导出 / 多机合并（.fglib）</h2>
+      <div class="msg" style="margin-bottom:8px">多台电脑各自解析后：A 机点"导出库包"生成 .fglib → 传到 B 机点"导入库包合并"。SHA256 相同自动去重，不同版本全部保留（最新时间戳为准），合并后自动重建关联图谱。</div>
+      <div class="row">
+        <button class="btn ghost" id="btnLibExport">导出库包 (.fglib)</button>
+        <input type="file" id="libImportFile" accept=".fglib" style="display:none">
+        <button class="btn ghost" id="btnLibImport">导入库包合并</button>
+        <span class="msg" id="libMsg" style="margin-left:8px"></span>
+      </div>
+    </div>
   </div>
 
   <!-- ② 结果库 -->

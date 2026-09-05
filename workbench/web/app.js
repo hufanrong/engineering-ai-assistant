@@ -369,6 +369,36 @@
     }).catch(function (e) { $("dgMsg").textContent = "生成失败：" + e.message; });
   });
 
+  // ---------- 解析库导出/合并 ----------
+  $("btnLibExport").addEventListener("click", function () {
+    fetch("/api/library/export").then(function (r) {
+      if (!r.ok) throw new Error("导出失败");
+      return r.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = "繁工AI_解析库_" + new Date().toISOString().slice(0, 16).replace(/[T:]/g, "_") + ".fglib";
+      document.body.appendChild(a); a.click(); a.remove();
+      $("libMsg").textContent = "库包已导出，可传到另一台电脑导入合并。";
+    }).catch(function (e) { $("libMsg").textContent = "导出失败：" + e.message; });
+  });
+  $("btnLibImport").addEventListener("click", function () { $("libImportFile").click(); });
+  $("libImportFile").addEventListener("change", function () {
+    var f = this.files[0];
+    if (!f) return;
+    var fd = new FormData();
+    fd.append("file", f);
+    $("libMsg").textContent = "导入合并中…";
+    fetch("/api/library/import", { method: "POST", body: fd })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.detail || "导入失败"); return d; }); })
+      .then(function (d) {
+        var st = d.stats || {};
+        $("libMsg").textContent = "合并完成：新增 " + st.index_added + " 项，去重跳过 " + st.index_dup + " 项，图谱已重建。";
+        loadStatus(); loadResults();
+      }).catch(function (e) { $("libMsg").textContent = "导入失败：" + e.message; });
+    this.value = "";
+  });
+
   // ---------- 工具 ----------
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {

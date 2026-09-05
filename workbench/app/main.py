@@ -18,9 +18,10 @@ from .vector_store import VectorStore
 from . import upload_queue
 from . import relations
 from . import docgen
+from . import packager
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.7")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.9")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -313,6 +314,29 @@ def docgen_generate(req: DocGenReq):
 def datetime_now() -> str:
     import datetime
     return datetime.datetime.now().strftime("%Y%m%d_%H%M")
+
+
+# ---------- 库导出/合并（v0.1.9，多电脑解析合并打底） ----------
+@app.get("/api/library/export")
+def library_export():
+    """导出 .fglib 库包（index + parsed_cache + relations + manifest）。"""
+    import io
+    from urllib.parse import quote
+    content = packager.export_library()
+    fname = f"繁工AI_解析库_{datetime_now()}.fglib"
+    ascii_name = f"fangong_library_{datetime_now()}.fglib"
+    return StreamingResponse(io.BytesIO(content), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(fname)}'})
+
+
+@app.post("/api/library/import")
+async def library_import(file: UploadFile = File(...)):
+    """导入 .fglib 库包：SHA256 去重合并，随后重建关联图谱。"""
+    raw = await file.read()
+    stats = packager.import_library(raw)
+    if stats.get("error"):
+        raise HTTPException(400, stats["error"])
+    return {"ok": True, "stats": stats}
 
 
 # 静态资源（前端 js/css）
