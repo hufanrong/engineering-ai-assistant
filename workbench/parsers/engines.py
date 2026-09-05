@@ -105,7 +105,7 @@ def parse_file(path: str) -> ParseResult:
     return res
 
 
-# ============ PDF ============
+# ============ PDF（文本 + 表格；pdfplumber 缺失时降级为纯文本） ============
 def parse_pdf(res: ParseResult):
     from pypdf import PdfReader
     res.parser = "pdf"
@@ -119,10 +119,47 @@ def parse_pdf(res: ParseResult):
         if t.strip():
             parts.append(f"【第{i+1}页】\n{t}")
     res.text = "\n\n".join(parts)
-    res.structure = {"page_count": len(reader.pages), "text_chars": len(res.text)}
+    tables = _extract_pdf_tables(res.file_path)
+    if tables:
+        for ti, tb in enumerate(tables):
+            parts.append(f"【PDF表格{ti+1}】\n" + "\n".join(" | ".join(row) for row in tb))
+        res.text = "\n\n".join(parts)
+    res.structure = {
+        "page_count": len(reader.pages),
+        "text_chars": len(res.text),
+        "tables": tables[:50],
+    }
     if not res.text:
         res.status = "partial"
         res.error = "PDF 无可提取文本层（可能是扫描件，建议启用 OCR）"
+
+
+def _extract_pdf_tables(path: str) -> list:
+    """用 pdfplumber 提取跨页表格（可选依赖；缺失/失败时返回空，不影响主流程）。
+    先按画线识别；无边框表格（常见于导出的 PDF）再用文本策略兜底。"""
+    try:
+        import pdfplumber
+    except ImportError:
+        return []
+
+    def _run(table_settings=None):
+        out = []
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                for tb in page.extract_tables(table_settings=table_settings):
+                    rows = [[(c or "").replace("\n", " ").strip() for c in row] for row in tb]
+                    if any(any(c for c in row) for row in rows):
+                        out.append(rows)
+        return out
+
+    try:
+        out = _run()
+        if out:
+            return out
+        # 无画线表格 → 按文本对齐策略识别
+        return _run({"vertical_strategy": "text", "horizontal_strategy": "text"})
+    except Exception:  # noqa: BLE001
+        return []
 
 
 # ============ Word ============

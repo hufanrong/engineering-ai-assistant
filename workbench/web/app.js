@@ -186,6 +186,30 @@
     }).catch(function (e) { m.textContent = "上传失败：" + e.message; });
   });
 
+  // ---------- 手动上传文件 ----------
+  $("btnUploadFiles").addEventListener("click", function () {
+    var inp = $("upfiles");
+    if (!inp.files || !inp.files.length) { $("uploadFilesMsg").textContent = "请先选择文件"; return; }
+    var fd = new FormData();
+    fd.append("uploader", $("uploader").value.trim());
+    for (var i = 0; i < inp.files.length; i++) fd.append("files", inp.files[i]);
+    var m = $("uploadFilesMsg");
+    m.textContent = "上传解析中…（" + inp.files.length + " 个文件）";
+    fetch("/api/upload-files", { method: "POST", body: fd })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var html = "";
+        d.results.forEach(function (it) {
+          html += '<div style="font-size:13px">[' + it.status + "/" + (it.parser || "-") + "] " + esc(it.file) +
+            (it.error ? ' <span style="color:#C0392B">' + esc(it.error) + "</span>" : "") +
+            (it.entities ? " · 实体 " + it.entities + " 个" : "") + "</div>";
+        });
+        m.innerHTML = html;
+        refreshStatus();
+      })
+      .catch(function (e) { m.textContent = "上传失败：" + e.message; });
+  });
+
   // ---------- 工具 ----------
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {

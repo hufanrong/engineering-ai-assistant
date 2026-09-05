@@ -93,6 +93,16 @@
     <div class="prog"><i id="progBar"></i></div>
     <div class="msg" id="scanMsg">等待扫描…</div>
     <div class="qr" id="scanStats"></div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2>手动上传文件（手机端/浏览器直传）</h2>
+      <label>上传人姓名（现场记录必填，方便溯源）</label>
+      <div class="row">
+        <input type="text" id="uploader" style="max-width:220px" placeholder="例如：胡繁荣">
+        <input type="file" id="upfiles" multiple style="flex:1;min-width:200px;font-size:13px">
+        <button class="btn orange" id="btnUploadFiles">上传并解析</button>
+      </div>
+      <div class="msg" id="uploadFilesMsg"></div>
+    </div>
   </div>
 
   <!-- ② 结果库 -->

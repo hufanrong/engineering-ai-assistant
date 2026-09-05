@@ -7,7 +7,7 @@ import json
 import threading
 from typing import Union, List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -16,8 +16,9 @@ from . import config
 from . import scanner
 from .vector_store import VectorStore
 from . import upload_queue
+from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.2")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.3")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -180,6 +181,47 @@ def upload_log(limit: int = 100):
                 except Exception:  # noqa: BLE001
                     continue
     return {"items": lines[-limit:]}
+
+
+@app.post("/api/upload-files")
+async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form("")):
+    """浏览器/手机端直接上传文件 → 落盘 → 解析 → 向量化 → 上传队列。
+    uploader：上传人姓名（手机端场景，非必填）。"""
+    import hashlib
+    save_dir = os.path.join(config.DATA_DIR, "uploads")
+    os.makedirs(save_dir, exist_ok=True)
+    results = []
+    for f in files:
+        try:
+            name = os.path.basename(f.filename or "unnamed")
+            raw = await f.read()
+            if len(raw) > config.MAX_FILE_MB * 1024 * 1024:
+                results.append({"file": name, "status": "failed", "error": "超过大小上限"})
+                continue
+            if not raw:
+                results.append({"file": name, "status": "failed", "error": "空文件"})
+                continue
+            sha = hashlib.sha256(raw).hexdigest()
+            saved = os.path.join(save_dir, f"{sha[:12]}_{name}")
+            with open(saved, "wb") as fh:
+                fh.write(raw)
+            res = parse_file(saved)
+            if res.status == "parsed" or res.status == "partial":
+                _store.index_file(res)
+                upload_queue.enqueue(res)
+                scanner._save_parsed_cache(res)
+            results.append({
+                "file": name,
+                "status": res.status,
+                "parser": res.parser,
+                "error": res.error,
+                "sha256": res.sha256,
+                "entities": len(res.entities),
+                "uploader": uploader,
+            })
+        except Exception as e:  # noqa: BLE001
+            results.append({"file": f.filename or "unnamed", "status": "failed", "error": str(e)})
+    return {"ok": True, "results": results}
 
 
 # 静态资源（前端 js/css）

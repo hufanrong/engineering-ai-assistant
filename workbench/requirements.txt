@@ -6,6 +6,7 @@ requests==2.32.3
 
 # 文档解析
 pypdf==4.2.0                 # PDF 文本提取（轻量）
+pdfplumber==0.11.2           # PDF 表格提取（增强，缺省自动降级）
 python-docx==1.1.2           # Word 文本+表格
 openpyxl==3.1.5              # Excel 表格结构化（台账）
 
