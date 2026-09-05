@@ -22,7 +22,7 @@ from . import packager
 from . import platform_store
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.10")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.11")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}

@@ -100,7 +100,9 @@ def upload_all(progress_cb=None) -> dict:
         return {"ok": 0, "failed": 0, "skipped": len(list_pending()),
                 "message": "未配置 CLOUD_ENDPOINT，仅保留在本地队列"}
     url = config.CLOUD_ENDPOINT.rstrip("/") + "/api/parse-nodes/payloads"
-    headers = {"X-Node-Id": _node_id()}
+    # 节点标识已随 payload 的 node_name/node_id 上传，header 只放纯 ASCII 鉴权头
+    # （HTTP header 不支持中文，避免 latin-1 编码崩溃）
+    headers = {}
     if config.CLOUD_API_KEY:
         headers["Authorization"] = f"Bearer {config.CLOUD_API_KEY}"
     files = [f for f in os.listdir(QUEUE_DIR) if f.endswith(".json")]
