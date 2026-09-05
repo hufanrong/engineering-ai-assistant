@@ -255,6 +255,19 @@
   </div>
 </div>
 
+
+    <section id="tab10" class="tab-content">
+        <h3>⑩ AI 助手</h3>
+        <p style="color:#666">自动调用解析数据库（项目库+平台库+工程关系+资料待办）。输入含模板名（如"吊装方案"）即离线生成 Word 资料；其他提问先本地检索，配置 AI 网关后升级联网问答。</p>
+        <div id="aiChatBox" style="height:300px;overflow:auto;border:1px solid #d0d7e2;border-radius:8px;padding:10px;background:#fafbfc;margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input id="aiInput" style="flex:1;min-width:200px;padding:8px;border:1px solid #c0c9d6;border-radius:6px;" placeholder="问 AI：如『生成 1号车间 P-101 吊装方案，设备重3.5t』或『P-101 安装要求』">
+            <button onclick="aiSend()">发送</button>
+            <button onclick="aiStatus()">助手状态</button>
+        </div>
+        <div id="aiSuggest" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+    </section>
+
 <script src="/web/app.js"></script>
 </body>
 </html>

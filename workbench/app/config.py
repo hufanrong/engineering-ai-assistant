@@ -73,6 +73,9 @@ PLATFORM_CHECK_DAYS = 180        # 规范有效期检查周期（天）= 每 6 �
 PLATFORM_SEARCH_ENDPOINT = ""
 STD_VERIFY_OPENSTD = True        # 是否允许访问全国标准信息公共服务平台核验（尽力而为）
 STD_VERIFY_ON_UPLOAD = True      # 首次上传规范时立即核验是否过期（废止立即标注最新版）
+AI_MODE = "local"                # AI 助手模式：local=离线检索+资料生成；gateway=接入 AI 网关联网问答
+AI_GATEWAY_ENDPOINT = ""         # AI 网关端点（豆包/企业 Agent），POST {"query","context","history"} → {"answer"}
+AI_GATEWAY_API_KEY = ""          # AI 网关鉴权
 # v0.1.12：联网优化资料模板端点（预留）。配置后 docgen 生成时自动请求
 # POST {"doc_type":..., "keywords":[...]} → {"template_hints":["..."]} 用于优化模板章节；
 # 未配置时仅用本地解析库内容预填（设备清单/平台规范引用），不影响生成。

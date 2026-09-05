@@ -651,3 +651,64 @@
   refreshStatus();
   setInterval(refreshStatus, 5000);
 })();
+// ---------- ⑩ AI 助手 ----------
+function aiAdd(role, html) {
+    var box = document.getElementById("aiChatBox");
+    var row = document.createElement("div");
+    row.style.cssText = "margin:6px 0;padding:8px 10px;border-radius:8px;white-space:pre-wrap;word-break:break-all;font-size:13px;line-height:1.6;";
+    if (role === "me") { row.style.cssText += "background:#e8f0fe;text-align:right;margin-left:60px;"; }
+    else { row.style.cssText += "background:#fff;border:1px solid #e3e8ef;margin-right:60px;"; }
+    row.innerHTML = html;
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+}
+function aiStatus() {
+    fetch("/api/ai/status").then(function(r){ return r.json(); }).then(function(d){
+        aiAdd("ai", "助手模式：" + d.mode + "  |  AI 网关：" + (d.gateway || "未配置") + "\n可生成资料类型：" + (d.doc_types || []).join("、"));
+    });
+}
+function aiDownloadDoc(name) {
+    fetch("/api/ai/chat", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({query: "生成 " + name})}).then(function(r){ return r.json(); }).then(function(d){
+        if (d.mode !== "local_doc" || !d.doc) { alert("重新生成失败"); return; }
+        var bin = atob(d.doc.content_b64);
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([bytes], {type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}));
+        a.download = d.doc.file_name;
+        a.click();
+    });
+}
+function aiSend() {
+    var q = document.getElementById("aiInput").value.trim();
+    if (!q) return;
+    aiAdd("me", q);
+    document.getElementById("aiInput").value = "";
+    aiAdd("ai", "思考中…");
+    fetch("/api/ai/chat", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({query: q})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        var box = document.getElementById("aiChatBox");
+        if (box.lastChild) box.removeChild(box.lastChild);
+        var html = (d.answer || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/\n/g,"<br>");
+        if (d.mode === "local_doc" && d.doc) {
+            html += "<br><button onclick=\"aiDownloadDoc('" + d.doc.file_name + "')\">下载生成的 Word 文档</button>";
+        }
+        if (d.mode === "error") { html = "<span style='color:#c0392b'>" + html + "</span>"; }
+        aiAdd("ai", html);
+    })
+    .catch(function(e){
+        var box = document.getElementById("aiChatBox");
+        if (box.lastChild) box.removeChild(box.lastChild);
+        aiAdd("ai", "<span style='color:#c0392b'>请求失败：" + e + "</span>");
+    });
+}
+(function(){
+    var el = document.getElementById("aiSuggest");
+    if (!el) return;
+    var SUGGEST = ["生成 1号车间 P-101 吊装方案，设备重3.5t", "P-101 安装要求", "当前资料待办有哪些", "1号车间有哪些设备"];
+    el.innerHTML = SUGGEST.map(function(t){
+        return "<button onclick=\"document.getElementById('aiInput').value='" + t + "';aiSend();\">" + t + "</button>";
+    }).join("");
+})();

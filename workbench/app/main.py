@@ -17,13 +17,13 @@ from . import scanner
 from .vector_store import VectorStore
 from . import upload_queue
 from . import relations
-from . import docgen
+from . import ai_chat, docgen
 from . import packager
 from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.15")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.16")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -174,6 +174,25 @@ def search(req: SearchReq):
         except Exception as e:  # noqa: BLE001
             results.append({"source": "platform", "error": str(e)})
     return {"query": req.query, "results": results}
+
+
+# ---------- AI 助手（v0.1.16） ----------
+class AiChatReq(BaseModel):
+    query: str
+    history: list | None = None
+
+
+@app.get("/api/ai/status")
+def ai_status():
+    return {"mode": config.AI_MODE,
+            "gateway": config.AI_GATEWAY_ENDPOINT or "(未配置)",
+            "doc_types": docgen.TYPES}
+
+
+@app.post("/api/ai/chat")
+def ai_chat_api(req: AiChatReq):
+    r = ai_chat.chat(req.query, req.history)
+    return r
 
 
 # ---------- 上传队列 ----------
