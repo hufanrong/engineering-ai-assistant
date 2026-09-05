@@ -19,7 +19,7 @@ from . import upload_queue
 from . import relations
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.5")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.6")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -250,13 +250,24 @@ def relations_rebuild():
 
 @app.get("/api/relations/workshop/{workshop}")
 def relations_workshop(workshop: str):
-    """单个车间详情：图纸列表 + 设备列表 + 全场图位置。"""
+    """单个车间详情：图纸列表 + 设备列表 + 全场图位置 + 车间内设备间距。"""
     g = relations.load_relations()
     ws = next((w for w in g.get("workshops", []) if w["workshop"] == workshop), None)
     if not ws:
         raise HTTPException(404, f"未找到车间：{workshop}")
     devs = [d for d in g.get("devices", []) if workshop in d.get("workshops", [])]
-    return {"workshop": ws, "devices": devs}
+    dists = [r for r in g.get("distances", []) if r.get("workshop") == workshop]
+    return {"workshop": ws, "devices": devs, "distances": dists}
+
+
+@app.get("/api/relations/distances")
+def relations_distances(workshop: str = ""):
+    """设备间距清单（可选按车间过滤）。口径：同图坐标差 × 标题栏比例 / 1000 = 米。"""
+    g = relations.load_relations()
+    dists = g.get("distances", [])
+    if workshop:
+        dists = [r for r in dists if r.get("workshop") == workshop]
+    return {"count": len(dists), "distances": dists}
 
 
 # 静态资源（前端 js/css）

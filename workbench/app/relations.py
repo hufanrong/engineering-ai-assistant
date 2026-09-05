@@ -149,6 +149,55 @@ def _equipment_from_cache(cache: dict) -> list:
     return out
 
 
+def _parse_scale(title_block: dict) -> int:
+    """标题栏比例 → 分母：'1:100' → 100；'1:20' → 20；缺省 1（坐标单位即毫米）。"""
+    raw = (title_block or {}).get("比例", "") or ""
+    m = re.search(r"1\s*[:：]\s*(\d+)", raw)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:  # noqa: BLE001
+            return 1
+    return 1
+
+
+# ---------------- 设备间距（同图两两距离） ----------------
+def _compute_distances(devices: list, docs: dict) -> list:
+    """同一张图纸内的设备两两距离。
+    口径：DXF 模型空间坐标按真实毫米计（工程 CAD 惯例），实际米 = 坐标差 / 1000；
+    标题栏比例（如 1:100）为打印比例，仅作展示不参与换算。
+    仅统计同图共坐标系；不同图纸坐标系不同，暂不跨图算距。"""
+    out = []
+    per_file = {}
+    for d in devices:
+        for p in d.get("cad_positions", []):
+            per_file.setdefault(p["file"], []).append((d["tag"], p["x"], p["y"]))
+    for fname, items in per_file.items():
+        if len(items) < 2:
+            continue
+        # 该文件的比例（车间图标题栏，仅展示）
+        sha = None
+        for k, v in docs.items():
+            if v["file_name"] == fname:
+                sha = k
+                break
+        scale = _parse_scale(docs[sha]["title_block"]) if sha and sha in docs else 1
+        ws = docs[sha]["workshop"] if sha and sha in docs else None
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                t1, x1, y1 = items[i]
+                t2, x2, y2 = items[j]
+                mm = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                out.append({
+                    "workshop": ws, "file": fname, "from": t1, "to": t2,
+                    "mm": round(mm, 1),
+                    "meters": round(mm / 1000.0, 2),
+                    "scale": scale,
+                })
+    out.sort(key=lambda r: (r["workshop"] or "", r["file"], r["from"], r["to"]))
+    return out[:2000]
+
+
 # ---------------- 主构建 ----------------
 def build_relations(force: bool = False) -> dict:
     _ensure()
@@ -251,17 +300,21 @@ def build_relations(force: bool = False) -> dict:
         workshops[w]["doc_count"] = len(workshops[w]["docs"])
         workshops[w]["device_count"] = len(workshops[w]["tags"])
 
+    devices_out = [{"tag": t, "workshops": list(set(d["workshops"])), "files": [f["file"] for f in d["in_files"]],
+                    "cad_positions": [{"x": f["x"], "y": f["y"], "file": f["file"]} for f in d["in_files"] if f["x"] is not None]}
+                   for t, d in sorted(device_map.items())]
+    distances = _compute_distances(devices_out, docs)
     graph = {
         "workshops": list(workshops.values()),
-        "devices": [{"tag": t, "workshops": list(set(d["workshops"])), "files": [f["file"] for f in d["in_files"]],
-                     "cad_positions": [{"x": f["x"], "y": f["y"], "file": f["file"]} for f in d["in_files"] if f["x"] is not None]}
-                    for t, d in sorted(device_map.items())],
+        "devices": devices_out,
+        "distances": distances,
         "unassigned_docs": [{"file": d["file_name"], "doc_type": d["doc_type"]} for d in docs.values() if not d["workshop"]],
         "human_confirm": human_confirm[:500],
         "stats": {
             "docs": len(docs),
             "workshops": len(workshops),
             "devices": len(device_map),
+            "distances": len(distances),
             "relations": sum(len(w["docs"]) for w in workshops.values()) + sum(len(d["in_files"]) for d in device_map.values()),
             "unassigned_docs": len([1 for d in docs.values() if not d["workshop"]]),
             "human_confirm": len(human_confirm),
@@ -302,6 +355,9 @@ def _append_spatial_summary(graph: dict, docs: dict, idx: dict):
     for d in graph["devices"]:
         for p in d.get("cad_positions", [])[:3]:
             summaries.append(f"设备 {d['tag']} 位于 {p['file']} 坐标({p['x']},{p['y']})，车间：{'/'.join(d['workshops']) or '待确认'}")
+    # 设备间距摘要（让 AI 回答"某设备距离某设备多远"）
+    for r in graph.get("distances", [])[:500]:
+        summaries.append(f"设备 {r['from']} 距设备 {r['to']} 约 {r['meters']} 米（{r['file']}，比例1:{r['scale']}，车间：{r['workshop'] or '待确认'}）")
     # 入库（带车间元数据）
     for i, s in enumerate(summaries):
         if not s.strip():

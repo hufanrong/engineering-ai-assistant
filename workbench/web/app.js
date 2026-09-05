@@ -217,8 +217,8 @@
       var st = g.stats || {};
       var chips = [
         ["已解析文件", st.docs || 0], ["车间", st.workshops || 0],
-        ["关联设备", st.devices || 0], ["关联关系", st.relations || 0],
-        ["未归属文档", st.unassigned_docs || 0], ["待人工确认", st.human_confirm || 0]
+        ["关联设备", st.devices || 0], ["设备间距", st.distances || 0],
+        ["关联关系", st.relations || 0], ["待人工确认", st.human_confirm || 0]
       ];
       $("relStats").innerHTML = chips.map(function (c) {
         return '<span class="chip">' + c[0] + " <b>" + c[1] + "</b></span>";
@@ -270,7 +270,16 @@
         var pos = (dev.cad_positions || []).map(function (p) { return "(" + p.x + "," + p.y + ")@" + p.file; }).join("、") || "—";
         html += "<tr><td><b>" + esc(dev.tag) + "</b></td><td>" + (dev.files || []).length + " 份</td><td>" + esc(pos) + "</td></tr>";
       });
-      html += "</table></div>";
+      html += "</table>";
+      var dists = d.distances || [];
+      if (dists.length) {
+        html += "<b style='display:block;margin-top:10px'>设备间距（" + dists.length + " 条，同图坐标差×比例/1000=米）</b><table><tr><th>设备A</th><th>设备B</th><th>距离</th><th>来源图纸</th></tr>";
+        dists.forEach(function (r) {
+          html += "<tr><td><b>" + esc(r.from) + "</b></td><td><b>" + esc(r.to) + "</b></td><td>" + r.meters + " m</td><td>" + esc(r.file) + "（1:" + r.scale + "）</td></tr>";
+        });
+        html += "</table>";
+      }
+      html += "</div>";
       $("relOut").innerHTML = html;
     }).catch(function (e) { $("relOut").innerHTML = '<span class="msg">加载失败：' + esc(e.message) + "</span>"; });
   }
