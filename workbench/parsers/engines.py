@@ -44,8 +44,15 @@ def sha256_of_file(path: str) -> str:
 _TAG_RE = re.compile(config.EQUIPMENT_TAG_RE)
 
 
+_PARAM_RE = re.compile(
+    r"(?:流量|扬程|功率|电压|电流|转速|重量|介质|温度|压力|频率|防爆等级|防护等级|绝缘等级|出厂编号|出厂日期|重量|容积|材质)"
+    r"\s*[:：]?\s*[0-9A-Za-z./×xX·\-~～%℃m³kgKVWkWh]*")
+_MFR_RE = re.compile(r"[\u4e00-\u9fa5A-Za-z0-9（）()·]{2,20}?(?:有限公司|股份公司|制造厂|机械厂|实业公司|集团)")
+
+
 def extract_entities(text: str, limit: int = 200) -> list:
-    """从文本中提取疑似设备位号（浅层，后续由云端图谱归并）。"""
+    """从文本中提取实体：设备位号 / 铭牌参数 / 厂家 / 车间。
+    浅层提取，后续由云端图谱归并去重。"""
     seen, out = set(), []
     for m in _TAG_RE.finditer(text or ""):
         tag = m.group(1)
@@ -54,6 +61,31 @@ def extract_entities(text: str, limit: int = 200) -> list:
             out.append({"type": "equipment", "tag": tag})
         if len(out) >= limit:
             break
+    if len(out) < limit:
+        for m in _PARAM_RE.finditer(text or ""):
+            kv = m.group(0).strip()
+            key = kv.split("：")[0].split(":")[0].strip()
+            if kv not in seen:
+                seen.add(kv)
+                out.append({"type": "parameter", "name": key, "value": kv})
+            if len(out) >= limit:
+                break
+    if len(out) < limit:
+        for m in _MFR_RE.finditer(text or ""):
+            v = m.group(0)
+            if v not in seen:
+                seen.add(v)
+                out.append({"type": "manufacturer", "name": v})
+            if len(out) >= limit:
+                break
+    if len(out) < limit:
+        for m in re.finditer(r"\d+\s*号\s*车间", text or ""):
+            v = m.group(0)
+            if v not in seen:
+                seen.add(v)
+                out.append({"type": "workshop", "name": v})
+            if len(out) >= limit:
+                break
     return out
 
 
@@ -264,18 +296,40 @@ def _get_ocr():
 
 
 def parse_image(res: ParseResult):
+    """图片 OCR：提取文本块（带置信度与位置）→ 铭牌结构化（位号/型号/参数/厂家）→ 全文。
+    支持 PaddleOCR 2.x（ocr.ocr）与 3.x（ocr.predict）。"""
     res.parser = "ocr"
     ocr = _get_ocr()
-    result = ocr.ocr(res.file_path, cls=True)
     lines = []
     blocks = []
-    for page in result or []:
-        for item in page or []:
-            box, (text, conf) = item
-            lines.append(text)
-            blocks.append({"text": text, "conf": round(float(conf), 3), "box": box})
-    res.text = "\n".join(lines)
-    res.structure = {"blocks": blocks, "line_count": len(lines)}
+    try:
+        result = ocr.ocr(res.file_path, cls=True)          # PaddleOCR 2.x
+        for page in result or []:
+            for item in page or []:
+                box, (text, conf) = item
+                lines.append(text)
+                blocks.append({"text": text, "conf": round(float(conf), 3), "box": box})
+    except TypeError:
+        result = ocr.predict(res.file_path)                # PaddleOCR 3.x
+        for page in result or []:
+            for item in getattr(page, "rec_texts", []) or []:
+                lines.append(item)
+                blocks.append({"text": item, "conf": None, "box": None})
+
+    full = "\n".join(lines)
+    # 铭牌结构化：位号 / 参数 / 厂家
+    plate = {
+        "tags": [m.group(1) for m in _TAG_RE.finditer(full)][:20],
+        "params": [kv for kv in (_m.group(0).strip() for _m in _PARAM_RE.finditer(full))][:30],
+        "manufacturers": [m.group(0) for m in _MFR_RE.finditer(full)][:5],
+        "workshops": [m.group(0) for m in re.finditer(r"\d+\s*号\s*车间", full)][:5],
+    }
+    res.text = full
+    res.structure = {
+        "blocks": blocks, "line_count": len(lines),
+        "plate": plate,
+        "is_plate": bool(plate["tags"] or plate["params"] or plate["manufacturers"]),
+    }
 
 
 # ============ CAD（可选，需 ezdxf；DWG 需 ODA 转 DXF）

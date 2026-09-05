@@ -118,6 +118,10 @@ def _equipment_from_cache(cache: dict) -> list:
             if m.group(1) == title_no:
                 continue
             out.append({"tag": m.group(1), "where": "cad_text"})
+    elif parser in ("text", "ocr"):
+        # 文本/OCR（现场照片铭牌识别）中的位号
+        for m in _TAG_RE.finditer(text):
+            out.append({"tag": m.group(1), "where": "ocr" if parser == "ocr" else "text"})
     elif parser == "excel":
         ws = _norm_workshop(fname) or None
         for sheet in structure.get("sheets", [])[:10]:
@@ -261,9 +265,9 @@ def build_relations(force: bool = False) -> dict:
                 "tag": tag,
                 "in_files": [],        # [{file, workshop, where, x, y}]
                 "workshops": [],       # 去重车间列表
-                "sources": {"cad": 0, "excel": 0, "text": 0},
+                "sources": {"cad": 0, "excel": 0, "text": 0, "ocr": 0},
             })
-            src_key = {"cad_block": "cad", "cad_text": "text", "excel_row": "excel", "text": "text"}.get(e["where"], "text")
+            src_key = {"cad_block": "cad", "cad_text": "text", "excel_row": "excel", "text": "text", "ocr": "ocr"}.get(e["where"], "text")
             dev["sources"][src_key] = dev["sources"].get(src_key, 0) + 1
             entry = {
                 "file": d["file_name"], "workshop": d["workshop"],
@@ -301,6 +305,7 @@ def build_relations(force: bool = False) -> dict:
         workshops[w]["device_count"] = len(workshops[w]["tags"])
 
     devices_out = [{"tag": t, "workshops": list(set(d["workshops"])), "files": [f["file"] for f in d["in_files"]],
+                    "sources": d["sources"],
                     "cad_positions": [{"x": f["x"], "y": f["y"], "file": f["file"]} for f in d["in_files"] if f["x"] is not None]}
                    for t, d in sorted(device_map.items())]
     distances = _compute_distances(devices_out, docs)
