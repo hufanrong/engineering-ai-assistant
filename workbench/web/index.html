@@ -82,11 +82,12 @@
   <!-- ① 扫描 -->
   <div class="panel on" id="p-scan">
     <h2>扫描文件夹 → 深度解析 → 向量化 → 待上传</h2>
-    <label>要解析的文件夹路径（支持中文路径，点击"扫描"后自动递归处理全部支持的文件）</label>
-    <div class="row">
-      <input type="text" id="folder" placeholder="例如 D:\工程资料\XX项目\施工图纸">
+    <label>文件夹路径（支持多个：每行一个路径；可输入 D:\资料 形式，自动递归处理全部支持的文件）</label>
+    <textarea id="folder" rows="3" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;box-sizing:border-box;resize:vertical" placeholder="例如：&#10;D:\工程资料\XX项目\施工图纸&#10;D:\工程资料\XX项目\设备台账"></textarea>
+    <div class="row" style="margin-top:8px">
       <button class="btn" id="btnScan">扫描解析</button>
       <button class="btn ghost" id="btnForce">强制重扫</button>
+      <button class="btn ghost" id="btnRetry">重试失败文件</button>
       <button class="btn orange" id="btnCancel" style="display:none">停止</button>
     </div>
     <div class="prog"><i id="progBar"></i></div>

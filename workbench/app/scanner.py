@@ -45,23 +45,25 @@ SUPPORTED_EXTS = (
 )
 
 
-def scan_folder(folder: str, force: bool = False, progress_cb=None, cancel_event=None) -> dict:
-    """扫描文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
-    返回统计。cancel_event: threading.Event，置位则停止后续处理。"""
-    folder = os.path.abspath(folder)
-    if not os.path.isdir(folder):
-        return {"error": f"路径不存在：{folder}"}
+def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None) -> dict:
+    """扫描一个或多个文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
+    folder 可为字符串或字符串列表。返回统计。"""
+    folders = [folder] if isinstance(folder, str) else list(folder)
+    for f in folders:
+        if not os.path.isdir(f):
+            return {"error": f"路径不存在：{f}"}
 
     idx = _load_index()
     store = VectorStore()
     stats = {"found": 0, "parsed": 0, "vectorized": 0, "skipped": 0, "failed": 0, "duplicate": 0}
 
     file_list = []
-    for root, _dirs, files in os.walk(folder):
-        for fn in sorted(files):
-            ext = os.path.splitext(fn)[1].lower()
-            if ext in SUPPORTED_EXTS:
-                file_list.append(os.path.join(root, fn))
+    for folder in folders:
+        for root, _dirs, files in os.walk(folder):
+            for fn in sorted(files):
+                ext = os.path.splitext(fn)[1].lower()
+                if ext in SUPPORTED_EXTS:
+                    file_list.append(os.path.join(root, fn))
     stats["found"] = len(file_list)
 
     for i, path in enumerate(file_list):
@@ -105,6 +107,7 @@ def scan_folder(folder: str, force: bool = False, progress_cb=None, cancel_event
             key = key or res.sha256
             idx[key] = {
                 "file_name": res.file_name,
+                "file_path": path,
                 "status": res.status,
                 "parser": res.parser,
                 "error": res.error,
@@ -136,7 +139,45 @@ def _save_parsed_cache(res: ParseResult):
         }, f, ensure_ascii=False, indent=1)
 
 
-def background_scan(folder: str, force: bool = False, status: dict = None):
+def retry_failed_files(status: dict = None) -> dict:
+    """从登记里找出 failed 文件，重新解析并入库（供人工点"重试失败"）。"""
+    idx = _load_index()
+    store = VectorStore()
+    targets = [(sha, info) for sha, info in idx.items() if info.get("status") == "failed"]
+    stats = {"retried": 0, "recovered": 0, "still_failed": 0, "missing": 0}
+
+    for i, (sha, info) in enumerate(targets):
+        path = info.get("file_path")
+        if not path or not os.path.exists(path):
+            stats["missing"] += 1
+            if status is not None:
+                status.update({"msg": f"文件已不在原位置: {info.get('file_name')}"})
+            continue
+        res = parse_file(path)
+        if res.status == "parsed" or res.status == "partial":
+            store.index_file(res)
+            upload_queue.enqueue(res)
+            _save_parsed_cache(res)
+            stats["recovered"] += 1
+            idx[sha] = {
+                "file_name": res.file_name, "file_path": path,
+                "status": res.status, "parser": res.parser,
+                "error": res.error, "entities": len(res.entities),
+                "ts": datetime.datetime.now().isoformat(),
+            }
+        else:
+            stats["still_failed"] += 1
+            idx[sha] = {**info, "ts": datetime.datetime.now().isoformat()}
+        stats["retried"] += 1
+        _save_index(idx)
+        if status is not None:
+            status.update({"done": i + 1, "total": len(targets), "msg": f"重试: {info.get('file_name')}"})
+    if status is not None:
+        status.update({"running": False, "stats": stats, "msg": "重试完成"})
+    return stats
+
+
+def background_scan(folder, force: bool = False, status: dict = None):
     """后台线程执行扫描（任务线程，不阻塞 API）。status: 共享 dict 用于轮询进度。"""
     cancel = threading.Event()
     if status is not None:

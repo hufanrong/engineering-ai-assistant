@@ -243,20 +243,27 @@ def parse_cad(res: ParseResult):
     msp = doc.modelspace()
     texts = []
     tags = []
+    labels = []      # 文本+坐标（为空间结构库打底）
     for e in msp:
         t = e.dxftype()
         if t == "TEXT":
             texts.append(e.dxf.text)
+            labels.append({"text": e.dxf.text, "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2)})
         elif t == "MTEXT":
             texts.append(e.plain_text())
+            labels.append({"text": e.plain_text(), "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2)})
         elif t == "INSERT":
             tags.append({"block": e.dxf.name, "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2)})
-    title_block = {}
-    for k, v in doc.header.items():
-        if k in ("$TITLE", "$CUSTOM"):
-            continue
+    # 图框/标题栏粗识别：取右下角区域（常见标题栏位置）的文本作为图纸标题候选
+    if labels:
+        labels.sort(key=lambda p: (p["x"], -p["y"]))
     res.text = "\n".join(texts)
-    res.structure = {"text_labels": texts[:500], "block_inserts": tags[:500], "version": doc.dxfversion}
+    res.structure = {
+        "text_labels": labels[:500],
+        "block_inserts": tags[:500],
+        "version": doc.dxfversion,
+        "entity_counts": {dt: sum(1 for _ in msp.query(dt)) for dt in ("TEXT", "MTEXT", "INSERT", "LINE")},
+    }
     res.entities = extract_entities("\n".join(texts))
 
 

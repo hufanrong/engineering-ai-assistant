@@ -33,16 +33,30 @@
   // ---------- 扫描 ----------
   var pollTimer = null;
   function startScan(force) {
-    var folder = $("folder").value.trim();
-    if (!folder) { $("scanMsg").textContent = "请先输入文件夹路径"; return; }
+    var folders = $("folder").value.split("\n").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!folders.length) { $("scanMsg").textContent = "请先输入至少一个文件夹路径"; return; }
     fetch("/api/scan", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder: folder, force: force })
+      body: JSON.stringify({ folder: folders, force: force })
     }).then(function (r) {
       if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || "启动失败"); });
       return r.json();
     }).then(function () {
-      $("scanMsg").textContent = "扫描中…";
+      $("scanMsg").textContent = "扫描中…（" + folders.length + " 个文件夹）";
+      $("progBar").style.width = "0%";
+      pollTimer = setInterval(pollScan, 800);
+      refreshStatus();
+    }).catch(function (e) {
+      $("scanMsg").textContent = "启动失败：" + e.message;
+    });
+  }
+
+  function startRetry() {
+    fetch("/api/scan/retry-failed", { method: "POST" }).then(function (r) {
+      if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || "启动失败"); });
+      return r.json();
+    }).then(function () {
+      $("scanMsg").textContent = "重试失败文件中…";
       $("progBar").style.width = "0%";
       pollTimer = setInterval(pollScan, 800);
       refreshStatus();
@@ -70,6 +84,7 @@
 
   $("btnScan").addEventListener("click", function () { startScan(false); });
   $("btnForce").addEventListener("click", function () { startScan(true); });
+  $("btnRetry").addEventListener("click", function () { startRetry(); });
   $("btnCancel").addEventListener("click", function () {
     fetch("/api/scan/cancel", { method: "POST" }).then(refreshStatus);
   });

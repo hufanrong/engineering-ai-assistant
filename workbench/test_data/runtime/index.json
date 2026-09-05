@@ -1,0 +1,29 @@
+{
+ "9149ac2d413e452fe506df72185f8a9f7b82d3a09f5bbc920d2a54deda2bc189": {
+  "file_name": "文档1.txt",
+  "file_path": "test_data/folderA/文档1.txt",
+  "status": "parsed",
+  "parser": "text",
+  "error": null,
+  "entities": 1,
+  "ts": "2026-09-06T05:41:25.988306"
+ },
+ "07bcbca5e5cff5eadb6a3578850bb9413f9bfd2406d9210b0c25b7f78449889a": {
+  "file_name": "坏文件.pdf",
+  "file_path": "test_data/folderB/坏文件.pdf",
+  "status": "failed",
+  "parser": "pdf",
+  "error": "PdfStreamError: Stream has ended unexpectedly",
+  "entities": 0,
+  "ts": "2026-09-06T05:41:26.363663"
+ },
+ "8377a8aeec13cac626a9e8e06d908ef2b3c428abdf9baaf5ee803d314646444f": {
+  "file_name": "文档2.txt",
+  "file_path": "test_data/folderB/文档2.txt",
+  "status": "parsed",
+  "parser": "text",
+  "error": null,
+  "entities": 1,
+  "ts": "2026-09-06T05:41:26.228158"
+ }
+}

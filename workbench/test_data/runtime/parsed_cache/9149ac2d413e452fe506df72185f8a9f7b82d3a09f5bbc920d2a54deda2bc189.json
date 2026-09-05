@@ -1,0 +1,20 @@
+{
+ "file_name": "文档1.txt",
+ "file_size": 40,
+ "sha256": "9149ac2d413e452fe506df72185f8a9f7b82d3a09f5bbc920d2a54deda2bc189",
+ "ext": ".txt",
+ "parser": "text",
+ "status": "parsed",
+ "error": null,
+ "text": "P-201 空压机 2号车间 重量1500kg\n",
+ "structure": {
+  "chars": 24
+ },
+ "entities": [
+  {
+   "type": "equipment",
+   "tag": "P-201"
+  }
+ ],
+ "created_at": "2026-09-06T05:41:25.841905"
+}

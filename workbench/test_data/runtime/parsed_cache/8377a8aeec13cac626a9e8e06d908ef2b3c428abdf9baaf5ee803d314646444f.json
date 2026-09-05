@@ -1,0 +1,20 @@
+{
+ "file_name": "文档2.txt",
+ "file_size": 24,
+ "sha256": "8377a8aeec13cac626a9e8e06d908ef2b3c428abdf9baaf5ee803d314646444f",
+ "ext": ".txt",
+ "parser": "text",
+ "status": "parsed",
+ "error": null,
+ "text": "V-301 储罐 3号车间\n",
+ "structure": {
+  "chars": 14
+ },
+ "entities": [
+  {
+   "type": "equipment",
+   "tag": "V-301"
+  }
+ ],
+ "created_at": "2026-09-06T05:41:26.133689"
+}

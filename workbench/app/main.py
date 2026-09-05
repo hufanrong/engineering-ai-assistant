@@ -5,9 +5,10 @@
 import os
 import json
 import threading
+from typing import Union, List
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -56,20 +57,22 @@ def status():
 
 # ---------- 扫描 ----------
 class ScanReq(BaseModel):
-    folder: str
+    folder: Union[str, List[str]]
     force: bool = False
 
 
 @app.post("/api/scan")
 def start_scan(req: ScanReq):
-    if not os.path.isdir(req.folder):
-        raise HTTPException(400, f"路径不存在或不可访问：{req.folder}")
+    folders = [req.folder] if isinstance(req.folder, str) else list(req.folder)
+    for f in folders:
+        if not os.path.isdir(f):
+            raise HTTPException(400, f"路径不存在或不可访问：{f}")
     if SCAN_STATUS.get("running"):
         raise HTTPException(409, "已有扫描任务在运行")
     SCAN_STATUS.update({"running": False, "done": 0, "total": 0, "msg": "", "stats": None})
-    t = threading.Thread(target=scanner.background_scan, args=(req.folder, req.force, SCAN_STATUS), daemon=True)
+    t = threading.Thread(target=scanner.background_scan, args=(folders, req.force, SCAN_STATUS), daemon=True)
     t.start()
-    return {"ok": True, "folder": req.folder}
+    return {"ok": True, "folders": folders}
 
 
 @app.get("/api/scan/status")
@@ -90,6 +93,24 @@ def cancel_scan():
         ce.set()
         return {"ok": True}
     return {"ok": False, "msg": "当前没有运行中的扫描"}
+
+
+@app.post("/api/scan/retry-failed")
+def retry_failed():
+    """重试全部 failed 文件（人工触发，后台执行）。"""
+    if SCAN_STATUS.get("running"):
+        raise HTTPException(409, "已有任务在运行")
+    SCAN_STATUS.update({"running": False, "done": 0, "total": 0, "msg": "", "stats": None})
+
+    def _run():
+        try:
+            scanner.retry_failed_files(SCAN_STATUS)
+        except Exception as e:  # noqa: BLE001
+            SCAN_STATUS.update({"running": False, "msg": f"重试异常: {e}"})
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return {"ok": True}
 
 
 # ---------- 结果 ----------
