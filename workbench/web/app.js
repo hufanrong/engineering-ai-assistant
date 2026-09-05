@@ -16,6 +16,7 @@
       if (t.dataset.p === "relations") loadRelations();
       if (t.dataset.p === "docgen") initDocGen();
       if (t.dataset.p === "platform") loadPlatform();
+      if (t.dataset.p === "docplan") loadDocPlan();
     });
   });
 
@@ -342,11 +343,12 @@
     var ws = $("dgWorkshop").value;
     fetch("/api/docgen/prefill?workshop=" + encodeURIComponent(ws), { method: "POST" })
       .then(function (r) { return r.json(); }).then(function (d) {
+        var refTxt = (d.references && d.references.length) ? "；平台规范可引用：" + d.references.slice(0, 3).map(function (r) { return r.std_no + " " + r.std_name; }).join("、") : "";
         if (d.devices && d.devices.length) {
-          $("dgMsg").textContent = "已预填 " + d.devices.length + " 台设备（" + (ws || "全项目") + "）：" + d.devices.slice(0, 12).map(function (v) { return v.tag; }).join("、") + (d.devices.length > 12 ? "…" : "");
+          $("dgMsg").textContent = "已预填 " + d.devices.length + " 台设备（" + (ws || "全项目") + "）：" + d.devices.slice(0, 12).map(function (v) { return v.tag; }).join("、") + (d.devices.length > 12 ? "…" : "") + refTxt;
           if ($("dg_车间")) $("dg_车间").value = ws;
         } else {
-          $("dgMsg").textContent = "该车间暂无设备，请先扫描解析并重建图谱";
+          $("dgMsg").textContent = "该车间暂无设备，请先扫描解析并重建图谱" + refTxt;
         }
       }).catch(function (e) { $("dgMsg").textContent = "预填失败：" + e.message; });
   });
@@ -483,6 +485,79 @@
     this.value = "";
   });
   loadPlatform();
+
+  // ---------- ⑧ 工程资料生成计划（v0.1.12） ----------
+  function loadDocPlan() {
+    fetch("/api/docplan/status").then(function (r) { return r.json(); }).then(function (d) {
+      var box = $("docplanList");
+      var html = '<div class="row" style="margin:6px 0;gap:8px;flex-wrap:wrap">' +
+        '<span class="st parsed">可生成 ' + d.ready + "</span>" +
+        '<span class="st partial">缺部分 ' + d.partial + "</span>" +
+        '<span class="st failed">无前置 ' + d.missing + "</span>" +
+        '<span style="font-size:12px;color:var(--text2)">库内资料类别：' + Object.keys(d.classes).join(" / ") + "</span></div>";
+      d.plans.forEach(function (p) {
+        var st = { ready: "parsed", partial: "partial", missing: "failed" }[p.state];
+        var lacks = p.missing.length ? '<div style="color:var(--err);font-size:12px">缺：' + p.missing.join("、") + "</div>" : "";
+        var act = p.state === "ready"
+          ? '<button class="btn ghost docplanGen" data-t="' + p.doc_type + '" style="padding:3px 10px;font-size:12px">去生成</button>'
+          : "";
+        html += '<div class="search-item"><div class="meta"><span class="st ' + st + '">' +
+          (p.state === "ready" ? "可生成" : p.state === "partial" ? "缺部分" : "无前置") + "</span> " +
+          esc(p.key) + " · 已有前置 " + p.have_files + " 份文件</div>" +
+          esc(p.desc) + lacks + act + "</div>";
+      });
+      box.innerHTML = html;
+      box.querySelectorAll(".docplanGen").forEach(function (b) {
+        b.addEventListener("click", function () {
+          var t = b.dataset.t;
+          var sel = $("docplanType");
+          if (t && t !== "施工方案") {
+            var opt = Array.prototype.find.call(sel.options, function (o) { return o.value === t; });
+            if (opt) sel.value = t;
+          }
+          // 跳转⑥页并带入类型
+          document.querySelectorAll(".tab").forEach(function (x) { x.classList.remove("on"); });
+          document.querySelectorAll(".panel").forEach(function (x) { x.classList.remove("on"); });
+          document.querySelector(".tab[data-p=\"docgen\"]").classList.add("on");
+          $("p-docgen").classList.add("on");
+          if (window.initDocGen) initDocGen();
+        });
+      });
+    }).catch(function (e) { $("docplanList").innerHTML = '<div class="msg">加载失败：' + esc(e.message) + "</div>"; });
+    // 人工任务列表
+    fetch("/api/docplan/tasks").then(function (r) { return r.json(); }).then(function (d) {
+      var box = $("docplanMsg");
+      var tasks = d.items || [];
+      if (!tasks.length) { box.innerHTML = '<div class="msg">暂无人工登记的资料任务</div>'; return; }
+      var html = '<div style="margin-top:10px"><b>人工登记任务：</b><table><tr><th>名称</th><th>类型</th><th>状态</th><th>登记时间</th><th>操作</th></tr>';
+      tasks.forEach(function (t) {
+        html += "<tr><td>" + esc(t.name) + "</td><td>" + esc(t.doc_type) + "</td><td>" + esc(t.status) + "</td><td>" +
+          esc((t.created_at || "").slice(0, 16).replace("T", " ")) + "</td>" +
+          '<td><button class="btn ghost docplanDone" data-id="' + t.id + '" style="padding:2px 8px;font-size:12px">完成</button> ' +
+          '<button class="btn ghost docplanDel" data-id="' + t.id + '" style="padding:2px 8px;font-size:12px">删除</button></td></tr>';
+      });
+      html += "</table></div>";
+      box.innerHTML = html;
+      box.querySelectorAll(".docplanDone").forEach(function (b) {
+        b.addEventListener("click", function () {
+          fetch("/api/docplan/task/" + b.dataset.id, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "已完成" }) })
+            .then(function () { loadDocPlan(); });
+        });
+      });
+      box.querySelectorAll(".docplanDel").forEach(function (b) {
+        b.addEventListener("click", function () {
+          if (!confirm("删除该资料任务？")) return;
+          fetch("/api/docplan/task/" + b.dataset.id, { method: "DELETE" }).then(function () { loadDocPlan(); });
+        });
+      });
+    }).catch(function () {});
+  }
+  $("btnDocPlanTask").addEventListener("click", function () {
+    fetch("/api/docplan/task", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_type: $("docplanType").value, name: $("docplanName").value, status: "待补充" }) })
+      .then(function (r) { return r.json(); }).then(function () { $("docplanName").value = ""; loadDocPlan(); })
+      .catch(function (e) { $("docplanMsg").textContent = "登记失败：" + e.message; });
+  });
 
   // ---------- 工具 ----------
   function esc(s) {

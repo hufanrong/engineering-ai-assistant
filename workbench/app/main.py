@@ -20,9 +20,10 @@ from . import relations
 from . import docgen
 from . import packager
 from . import platform_store
+from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.11")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.12")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -296,6 +297,13 @@ class DocGenReq(BaseModel):
     data: dict = {}
 
 
+class DocPlanTaskReq(BaseModel):
+    doc_type: str = ""
+    name: str = ""
+    fields: dict = None
+    status: str = ""
+
+
 @app.get("/api/docgen/types")
 def docgen_types():
     """方案类型 + 必填/可选字段清单。"""
@@ -304,12 +312,56 @@ def docgen_types():
 
 @app.post("/api/docgen/prefill")
 def docgen_prefill(workshop: str = "", doc_type: str = ""):
-    """从解析库（关联图谱）自动预填：车间设备清单等。"""
+    """从解析库（关联图谱）自动预填：车间设备清单 + 平台库规范引用（v0.1.12）。"""
     g = relations.load_relations()
     devices = [d for d in g.get("devices", []) if not workshop or workshop in d.get("workshops", [])]
     dev_list = [{"tag": d["tag"], "name": "见台账", "count": 1,
                  "files": d.get("files", [])[:3]} for d in devices[:100]]
-    return {"workshop": workshop, "devices": dev_list}
+    refs = []
+    try:
+        idx = platform_store.list_items().get("items", [])
+        refs = [{"std_no": it.get("std_no", ""), "std_name": it.get("std_name", ""),
+                 "status": it.get("status", "")} for it in idx[:8] if it.get("std_no")]
+    except Exception:  # noqa: BLE001
+        pass
+    return {"workshop": workshop, "devices": dev_list, "references": refs}
+
+
+@app.get("/api/docplan/status")
+def docplan_status():
+    """工程资料生成计划：库里已有什么、每类资料缺什么（缺项进待办补完再生成）。"""
+    return docplan.plan_status()
+
+
+@app.get("/api/docplan/tasks")
+def docplan_tasks():
+    return {"items": docplan.load_tasks()}
+
+
+@app.post("/api/docplan/task")
+def docplan_task_add(req: DocPlanTaskReq):
+    t = docplan.add_task(req.doc_type, req.name or "", req.fields or {}, req.status or "待补充")
+    return {"ok": True, "task": t}
+
+
+@app.post("/api/docplan/task/{task_id}")
+def docplan_task_update(task_id: str, req: DocPlanTaskReq):
+    patch = {}
+    if req.doc_type: patch["doc_type"] = req.doc_type
+    if req.name: patch["name"] = req.name
+    if req.fields is not None: patch["fields"] = req.fields
+    if req.status: patch["status"] = req.status
+    t = docplan.update_task(task_id, patch)
+    if not t:
+        raise HTTPException(404, "任务不存在")
+    return {"ok": True, "task": t}
+
+
+@app.delete("/api/docplan/task/{task_id}")
+def docplan_task_delete(task_id: str):
+    if not docplan.delete_task(task_id):
+        raise HTTPException(404, "任务不存在")
+    return {"ok": True}
 
 
 @app.post("/api/docgen/generate")

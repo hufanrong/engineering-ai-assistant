@@ -80,6 +80,7 @@
     <div class="tab" data-p="relations">⑤ 关联图谱</div>
     <div class="tab" data-p="docgen">⑥ 方案生成</div>
     <div class="tab" data-p="platform">⑦ 平台规范库</div>
+    <div class="tab" data-p="docplan">⑧ 资料生成计划</div>
   </div>
 
   <!-- ① 扫描 -->
@@ -207,6 +208,30 @@
       <button class="btn ghost" id="btnPlatImport">导入平台库</button>
     </div>
     <div id="platList"></div>
+  </div>
+
+  <!-- ⑧ 工程资料生成计划（v0.1.12） -->
+  <div class="panel" id="p-docplan">
+    <h2>工程资料生成计划（按项目进度，缺项进待办）</h2>
+    <div class="msg" style="margin-bottom:8px">系统根据解析库自动判断"库里已有什么、每类资料缺什么"。缺的部分列出清单，把资料补进库后该资料自动转为"可生成"；也可在下方人工登记资料任务（现场进度需要做什么就登记什么）。生成结果优先 Word，签字由人工下载打印。</div>
+    <div class="row" style="margin:10px 0;gap:8px">
+      <select id="docplanType" style="max-width:180px">
+        <option value="施工方案">施工方案</option>
+        <option value="吊装方案">吊装方案</option>
+        <option value="技术交底">技术交底</option>
+        <option value="开箱验收记录">开箱验收记录</option>
+        <option value="隐蔽工程验收记录">隐蔽工程验收记录</option>
+        <option value="施工计划">施工计划</option>
+        <option value="施工日志">施工日志</option>
+        <option value="设计变更">设计变更</option>
+        <option value="货损报告">货损报告</option>
+        <option value="竣工资料">竣工资料</option>
+      </select>
+      <input type="text" id="docplanName" placeholder="任务名称（可留空）" style="flex:1;min-width:160px">
+      <button class="btn" id="btnDocPlanTask">登记资料任务</button>
+    </div>
+    <div class="msg" id="docplanMsg"></div>
+    <div id="docplanList"></div>
   </div>
 </div>
 
