@@ -81,6 +81,7 @@
     <div class="tab" data-p="docgen">⑥ 方案生成</div>
     <div class="tab" data-p="platform">⑦ 平台规范库</div>
     <div class="tab" data-p="docplan">⑧ 资料生成计划</div>
+    <div class="tab" data-p="cloud">⑨ 云库</div>
   </div>
 
   <!-- ① 扫描 -->
@@ -233,6 +234,24 @@
     </div>
     <div class="msg" id="docplanMsg"></div>
     <div id="docplanList"></div>
+  </div>
+
+  <!-- ⑨ 云库（手机端对接 v0.1.14） -->
+  <div class="panel" id="p-cloud">
+    <h2>云库（多电脑合并 + 手机端现场上传）</h2>
+    <div class="msg" style="margin-bottom:8px">云库把多台电脑的解析结果合并为一个完整库，手机端配置云库地址即可户外读取；手机端上传的现场照片/语音/文字会先到云端"现场区"，点"拉取现场资料"即可自动下载并解析进本地项目库。连接配置在 app/config.py 的 CLOUD_ENDPOINT / CLOUD_API_KEY。</div>
+    <div class="row" style="margin-bottom:10px;gap:8px;flex-wrap:wrap">
+      <span class="chip" id="clConn">连接状态 —</span>
+      <span class="chip" id="clFiles">云库文件 —</span>
+      <span class="chip" id="clField">现场上传 —</span>
+      <button class="btn orange" id="btnPullField">拉取现场资料并解析</button>
+      <button class="btn ghost" id="btnClRefresh">刷新</button>
+    </div>
+    <div class="msg" id="clMsg"></div>
+    <h3 style="margin-top:12px">云端现场上传清单</h3>
+    <div id="clFieldList"></div>
+    <h3 style="margin-top:12px">云库文件清单（近 50）</h3>
+    <div id="clCloudList"></div>
   </div>
 </div>
 

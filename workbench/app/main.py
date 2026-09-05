@@ -23,7 +23,7 @@ from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.13")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.14")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -341,6 +341,96 @@ def docgen_prefill(workshop: str = "", doc_type: str = ""):
     except Exception:  # noqa: BLE001
         pass
     return {"workshop": workshop, "devices": dev_list, "references": refs}
+
+
+# ---------- ⑨ 云库（手机端对接，v0.1.14） ----------
+def _cloud_base():
+    return config.CLOUD_ENDPOINT.rstrip("/") if config.CLOUD_ENDPOINT else ""
+
+
+def _cloud_headers():
+    h = {}
+    if config.CLOUD_API_KEY:
+        h["Authorization"] = f"Bearer {config.CLOUD_API_KEY}"
+    return h
+
+
+@app.get("/api/cloud/info")
+def cloud_info():
+    """云库连接状态 + 云端统计 + 现场上传统计。"""
+    import requests
+    base = _cloud_base()
+    if not base:
+        return {"connected": False, "endpoint": "", "message": "未配置 CLOUD_ENDPOINT（app/config.py）"}
+    try:
+        st = requests.get(f"{base}/api/cloud/status", timeout=10).json()
+        fl = requests.get(f"{base}/api/cloud/field-list", timeout=10).json()
+        return {"connected": True, "endpoint": config.CLOUD_ENDPOINT,
+                "cloud_files": st.get("files", 0), "cloud_dir": st.get("dir", ""),
+                "field_uploads": fl.get("count", 0)}
+    except Exception as e:  # noqa: BLE001
+        return {"connected": False, "endpoint": config.CLOUD_ENDPOINT, "message": f"连接失败：{e}"}
+
+
+@app.get("/api/cloud/field-list")
+def cloud_field_list(project: str = "", uploader: str = ""):
+    import requests
+    base = _cloud_base()
+    if not base:
+        raise HTTPException(400, "未配置 CLOUD_ENDPOINT")
+    r = requests.get(f"{base}/api/cloud/field-list", params={"project": project, "uploader": uploader},
+                     headers=_cloud_headers(), timeout=15)
+    return r.json()
+
+
+@app.get("/api/cloud/list-proxy")
+def cloud_list_proxy(limit: int = 50):
+    """云库文件清单（工作台侧代理）。"""
+    import requests
+    base = _cloud_base()
+    if not base:
+        raise HTTPException(400, "未配置 CLOUD_ENDPOINT")
+    r = requests.get(f"{base}/api/cloud/list", params={"limit": limit}, headers=_cloud_headers(), timeout=15)
+    return r.json()
+
+
+@app.post("/api/cloud/pull-field")
+def cloud_pull_field():
+    """把云端现场上传（照片/语音/文字）全部拉取到本地并自动解析入库，手机现场资料进入项目库。"""
+    import requests
+    base = _cloud_base()
+    if not base:
+        raise HTTPException(400, "未配置 CLOUD_ENDPOINT")
+    fl = requests.get(f"{base}/api/cloud/field-list", headers=_cloud_headers(), timeout=15).json()
+    items = fl.get("items", [])
+    if not items:
+        return {"pulled": 0, "message": "云端暂无现场上传"}
+    pull_dir = os.path.join(config.DATA_DIR, "field_pull")
+    os.makedirs(pull_dir, exist_ok=True)
+    n = 0
+    errors = []
+    for it in items:
+        sha = it.get("sha256")
+        try:
+            r = requests.get(f"{base}/api/cloud/field-file/{sha}", headers=_cloud_headers(), timeout=60)
+            if r.status_code != 200:
+                errors.append(f"{it.get('file_name')}: HTTP {r.status_code}")
+                continue
+            fname = it.get("file_name") or f"field_{sha[:8]}"
+            ext = os.path.splitext(fname)[1] or ".bin"
+            target = os.path.join(pull_dir, f"{sha[:12]}{ext}")
+            with open(target, "wb") as fh:
+                fh.write(r.content)
+            n += 1
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{it.get('file_name')}: {e}")
+    # 自动解析入库（幂等去重）
+    scan_stat = {}
+    if n:
+        scan_stat = scanner.scan_folder(pull_dir)
+    return {"pulled": n, "errors": errors[:20],
+            "parsed": scan_stat.get("parsed", 0), "duplicate": scan_stat.get("duplicate", 0),
+            "failed": scan_stat.get("failed", 0)}
 
 
 @app.get("/api/docplan/status")

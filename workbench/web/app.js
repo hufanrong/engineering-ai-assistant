@@ -17,6 +17,7 @@
       if (t.dataset.p === "docgen") initDocGen();
       if (t.dataset.p === "platform") loadPlatform();
       if (t.dataset.p === "docplan") loadDocPlan();
+      if (t.dataset.p === "cloud") loadCloud();
     });
   });
 
@@ -588,6 +589,57 @@
       .then(function (r) { return r.json(); }).then(function () { $("docplanName").value = ""; loadDocPlan(); })
       .catch(function (e) { $("docplanMsg").textContent = "登记失败：" + e.message; });
   });
+
+  // ---------- ⑨ 云库（v0.1.14） ----------
+  function loadCloud() {
+    fetch("/api/cloud/info").then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.connected) {
+        $("clConn").innerHTML = "未连接";
+        $("clFiles").textContent = d.message || "未配置";
+        $("clField").textContent = "";
+        return;
+      }
+      $("clConn").innerHTML = "已连接";
+      $("clFiles").textContent = "云库文件 " + d.cloud_files;
+      $("clField").textContent = "现场上传 " + d.field_uploads;
+      loadCloudLists();
+    }).catch(function (e) {
+      $("clConn").textContent = "连接失败：" + e.message;
+    });
+  }
+  function loadCloudLists() {
+    fetch("/api/cloud/field-list").then(function (r) { return r.json(); }).then(function (d) {
+      var box = $("clFieldList");
+      var items = d.items || [];
+      if (!items.length) { box.innerHTML = '<div class="empty">暂无现场上传</div>'; return; }
+      var html = "<table><tr><th>时间</th><th>项目</th><th>上传人</th><th>类型</th><th>文件</th><th>说明</th></tr>";
+      items.slice(0, 50).forEach(function (it) {
+        html += "<tr><td>" + esc((it.ts || "").slice(0, 16).replace("T", " ")) + "</td><td>" + esc(it.project) +
+          "</td><td>" + esc(it.uploader) + "</td><td>" + esc(it.kind) + "</td><td>" + esc(it.file_name) +
+          '</td><td style="font-size:12px">' + esc(it.note || "") + "</td></tr>";
+      });
+      html += "</table>";
+      box.innerHTML = html;
+    }).catch(function () { $("clFieldList").innerHTML = '<div class="empty">拉取清单失败</div>'; });
+    fetch("/api/cloud/list-proxy").then(function (r) { return r.json(); }).then(function (d) {
+      var box = $("clCloudList");
+      var items = d.items || [];
+      if (!items.length) { box.innerHTML = '<div class="empty">云库为空</div>'; return; }
+      box.innerHTML = "<table><tr><th>时间</th><th>节点</th><th>文件</th><th>类型</th></tr>" + items.slice(0, 50).map(function (it) {
+        return "<tr><td>" + esc((it.received_at || "").slice(0, 16).replace("T", " ")) + "</td><td>" + esc(it.node_name) +
+          "</td><td>" + esc(it.file_name) + "</td><td>" + esc(it.parser) + "</td></tr>";
+      }).join("") + "</table>";
+    }).catch(function () { $("clCloudList").innerHTML = '<div class="empty">云库清单不可用</div>'; });
+  }
+  $("btnPullField").addEventListener("click", function () {
+    $("clMsg").textContent = "拉取中…（自动解析入库）";
+    fetch("/api/cloud/pull-field", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      $("clMsg").textContent = "拉取 " + d.pulled + " 个文件，解析入库 " + d.parsed + "，重复跳过 " + d.duplicate +
+        (d.errors && d.errors.length ? "，失败：" + d.errors.join("；") : "");
+      loadCloud();
+    }).catch(function (e) { $("clMsg").textContent = "拉取失败：" + e.message; });
+  });
+  $("btnClRefresh").addEventListener("click", loadCloud);
 
   // ---------- 工具 ----------
   function esc(s) {

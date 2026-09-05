@@ -1,4 +1,4 @@
-# 繁工AI 云端合并主库（v0.1.11）
+# 繁工AI 云端合并主库（v0.1.14）
 # 部署在服务器/公司主机上，接收各电脑解析节点上传的 payload（data/upload_queue 打包内容），
 # 按 SHA256 去重合并为一个完整云库；手机端/外部 Agent 可在线检索；
 # 支持把云库导出为 .fglib 供任意电脑导入；也支持直接导入工作台导出的 .fglib。
@@ -13,7 +13,7 @@ import zipfile
 import hashlib
 import datetime
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -24,10 +24,15 @@ INDEX_PATH = os.path.join(BASE_DIR, "cloud_index.json")
 PAYLOAD_DIR = os.path.join(BASE_DIR, "payloads")
 os.makedirs(PAYLOAD_DIR, exist_ok=True)
 
+# 手机端现场上传（照片/语音/文字）：field_data/{项目}/{上传人}/…，电脑端拉取后本地解析
+FIELD_DIR = os.path.join(BASE_DIR, "field_data")
+FIELD_INDEX = os.path.join(BASE_DIR, "field_index.json")
+os.makedirs(FIELD_DIR, exist_ok=True)
+
 # 与工作台 app/config.py 的 CLOUD_API_KEY 保持一致；留空则不鉴权（仅内网推荐）
 API_KEY = "fanGong_cloud_2026"
 
-app = FastAPI(title="繁工AI 云端合并主库", version="0.1.11")
+app = FastAPI(title="繁工AI 云端合并主库", version="0.1.14")
 
 
 def _load_index() -> dict:
@@ -145,6 +150,102 @@ def cloud_export():
     content = buf.getvalue()
     return StreamingResponse(io.BytesIO(content), media_type="application/zip",
                              headers={"Content-Disposition": "attachment; filename=\"fangong_cloud_library.fglib\""})
+
+
+def _load_field_index() -> dict:
+    if os.path.exists(FIELD_INDEX):
+        try:
+            with open(FIELD_INDEX, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def _save_field_index(idx: dict):
+    with open(FIELD_INDEX, "w", encoding="utf-8") as f:
+        json.dump(idx, f, ensure_ascii=False, indent=1)
+
+
+# ---------- 手机端现场上传（免登录，只需写上传人姓名；同一手机再次上传不重复确认） ----------
+@app.post("/api/cloud/field-upload")
+async def field_upload(project: str = Form("默认项目"), uploader: str = Form("未署名"),
+                       note: str = Form(""), kind: str = Form("photo"),
+                       file: UploadFile = File(None)):
+    """手机端上传现场照片/语音/文字到云库待解析区。
+    project=项目名、uploader=上传人姓名（手机端记住后不再询问）、note=文字说明、kind=photo/voice/text。"""
+    project = (project or "默认项目").strip()
+    uploader = (uploader or "未署名").strip()
+    fidx = _load_field_index()
+    if file is not None:
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(400, "空文件")
+        fname = file.filename or "现场.jpg"
+        import hashlib
+        sha = hashlib.sha256(raw).hexdigest()
+        if sha in fidx:
+            return {"ok": True, "status": "duplicate", "sha256": sha, "uploader": uploader}
+        safe_proj = "".join(c if c.isalnum() else "_" for c in project)[:40] or "默认项目"
+        safe_up = "".join(c if c.isalnum() else "_" for c in uploader)[:40] or "未署名"
+        d = os.path.join(FIELD_DIR, safe_proj, safe_up)
+        os.makedirs(d, exist_ok=True)
+        # 保留原始文件名，避免重名覆盖
+        base, ext = os.path.splitext(fname)
+        target = os.path.join(d, f"{base}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{ext[:10]}")
+        with open(target, "wb") as fh:
+            fh.write(raw)
+        fidx[sha] = {"project": project, "uploader": uploader, "kind": kind,
+                     "note": note, "file": target, "file_name": fname,
+                     "ts": datetime.datetime.now().isoformat()}
+        _save_field_index(fidx)
+        return {"ok": True, "status": "added", "sha256": sha, "uploader": uploader, "file": fname}
+    # 纯文字现场记录（如：语音转文字/手输施工记录）
+    if not note.strip():
+        raise HTTPException(400, "需要文件或文字内容")
+    d = os.path.join(FIELD_DIR, "文字记录")
+    os.makedirs(d, exist_ok=True)
+    fname = f"文字_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
+    target = os.path.join(d, fname)
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write(f"项目：{project}\n上传人：{uploader}\n时间：{datetime.datetime.now().isoformat()}\n{note}")
+    sha = "txt-" + datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+    fidx[sha] = {"project": project, "uploader": uploader, "kind": "text",
+                 "note": note, "file": target, "file_name": fname,
+                 "ts": datetime.datetime.now().isoformat()}
+    _save_field_index(fidx)
+    return {"ok": True, "status": "added", "sha256": sha, "uploader": uploader, "file": fname}
+
+
+@app.get("/api/cloud/field-list")
+def field_list(project: str = "", uploader: str = ""):
+    """电脑端拉取现场上传清单；可按项目/上传人过滤。"""
+    fidx = _load_field_index()
+    items = [dict(v, sha256=k) for k, v in fidx.items()]
+    if project:
+        items = [x for x in items if x.get("project") == project]
+    if uploader:
+        items = [x for x in items if x.get("uploader") == uploader]
+    items.sort(key=lambda x: x.get("ts", ""), reverse=True)
+    return {"count": len(items), "items": items[:1000]}
+
+
+@app.get("/api/cloud/field-file/{sha}")
+def field_file(sha: str):
+    """下载现场上传的原始文件（电脑端拉取解析用）。"""
+    fidx = _load_field_index()
+    info = fidx.get(sha)
+    if not info or not os.path.exists(info.get("file", "")):
+        raise HTTPException(404, "文件不存在或已清理")
+    with open(info["file"], "rb") as f:
+        raw = f.read()
+    fname = info.get("file_name", "现场文件")
+    from urllib.parse import quote
+    # 中文文件名：ASCII fallback + RFC 5987 filename*（避免 latin-1 编码崩溃）
+    ascii_name = "".join(ch if ord(ch) < 128 else "_" for ch in fname) or "field.bin"
+    cd = f'attachment; filename="{ascii_name}"; filename*=UTF-8''{quote(fname)}'
+    return StreamingResponse(io.BytesIO(raw), media_type="application/octet-stream",
+                             headers={"Content-Disposition": cd})
 
 
 @app.post("/api/cloud/import-fglib")
