@@ -230,6 +230,36 @@
         return '<span class="chip">' + c[0] + " <b>" + c[1] + "</b></span>";
       }).join("");
 
+      // 图纸网络 + 设备-车间映射（v0.1.13）
+      var dwgs = g.drawings || [];
+      var lay = g.layout || [];
+      var dwgHtml = "";
+      if (dwgs.length) {
+        dwgHtml = '<h3>图纸网络（多图联动）</h3><table><tr><th>图号</th><th>图名</th><th>车间</th><th>类型</th><th>设备数</th><th>跨图设备</th><th>关联图纸</th></tr>';
+        dwgs.forEach(function (d) {
+          var cross = (d.cross_drawing_devices || []).join("、");
+          var rels = (d.relations || []).map(function (r) {
+            return r.to_no + "(" + r.reasons.join("/") + ")";
+          }).join("；") || "—";
+          dwgHtml += "<tr><td>" + esc(d.no || "—") + "</td><td>" + esc(d.name || d.file) + "</td><td>" +
+            esc(d.workshop || "待确认") + "</td><td>" + esc(d.doc_type) + "</td><td>" + d.device_count + "</td><td>" +
+            esc(cross || "—") + '</td><td style="font-size:12px">' + esc(rels) + "</td></tr>";
+        });
+        dwgHtml += "</table>";
+      }
+      var layHtml = "";
+      if (lay.length) {
+        layHtml = '<h3>设备→车间映射（以设计院图纸为准）</h3><table><tr><th>位号</th><th>归属车间</th><th>证据</th><th>跨图数</th></tr>';
+        lay.forEach(function (r) {
+          var ok = r.confirmed ? '<span class="st parsed">' + esc(r.workshop) + "</span>" :
+            '<span class="st failed">' + (r.workshop ? esc(r.workshop) + "（平票）" : "待人工确认") + "</span>";
+          layHtml += "<tr><td>" + esc(r.tag) + "</td><td>" + ok + "</td><td>" +
+            (r.votes || []).map(function (v) { return v.workshop + "×" + v.weight; }).join(" ") + "</td><td>" + r.cross_drawings + "</td></tr>";
+        });
+        layHtml += "</table>";
+      }
+      $("relDwgOut").innerHTML = dwgHtml + layHtml;
+
       var sel = $("relWorkshop");
       var cur = sel.value;
       sel.innerHTML = '<option value="">— 选择车间查看详情 —</option>';

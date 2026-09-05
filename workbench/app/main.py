@@ -23,7 +23,7 @@ from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.12")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.13")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -267,6 +267,22 @@ def relations_rebuild():
     t = threading.Thread(target=_run, daemon=True)
     t.start()
     return {"ok": True, "msg": "关联图谱重建已开始（后台）"}
+
+
+@app.get("/api/relations/drawings")
+def relations_drawings():
+    """图纸网络：图号/图名/车间/覆盖设备/图纸间互引（v0.1.13）。"""
+    g = relations.load_relations()
+    return {"items": g.get("drawings", []), "count": len(g.get("drawings", []))}
+
+
+@app.get("/api/relations/layout")
+def relations_layout():
+    """设备-车间映射：以设计院图纸（cad）车间为准，台账次之；平票进人工确认（v0.1.13）。"""
+    g = relations.load_relations()
+    return {"items": g.get("layout", []), "count": len(g.get("layout", [])),
+            "confirmed": sum(1 for r in g.get("layout", []) if r.get("confirmed")),
+            "need_confirm": sum(1 for r in g.get("layout", []) if r.get("workshop") is None)}
 
 
 @app.get("/api/relations/workshop/{workshop}")

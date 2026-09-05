@@ -1,8 +1,9 @@
-# 繁工AI 本地解析工作台 - 多图纸联动关联引擎（v0.1.5）
+# 繁工AI 本地解析工作台 - 多图纸联动关联引擎（v0.1.13）
 # 输入：data/index.json（已解析文件登记）+ data/parsed_cache/*.json（含 structure 空间结构）
 # 输出：data/relations.json（关联图谱）+ 向量库追加"空间摘要"（让 AI 按车间/坐标/设备问答）
 #
 # 关联维度：
+#   0) 图纸网络（drawings）：图号/图名/车间/覆盖设备/图纸间互引（共享设备+全场图+同套图号）
 #   1) 图纸/文档 → 车间归属（文件名 + 标题栏图名 + 正文"X号车间"）
 #   2) 图纸类型分类（全场布置图 / 车间布置图 / 台账 / 文本资料）
 #   3) 全场布置图内车间区域坐标（图块/文本定位）
@@ -226,13 +227,15 @@ def build_relations(force: bool = False) -> dict:
 
         doc_type = _classify(fname, tb, text)
         eqs = _equipment_from_cache(cache)
+        sp = (cache.get("structure") or {}).get("spatial") or {}
         docs[sha] = {
             "file_name": fname, "parser": cache.get("parser"),
             "workshop": ws, "doc_type": doc_type,
             "tags": list(dict.fromkeys(e["tag"] for e in eqs)),
             "equipments": eqs,
             "title_block": tb,
-            "frame": ((cache.get("structure") or {}).get("spatial") or {}).get("frame"),
+            "frame": sp.get("frame"),
+            "dimensions": sp.get("dimensions"),
         }
 
     # ---- 全场布置图：车间区域坐标 ----
@@ -290,6 +293,82 @@ def build_relations(force: bool = False) -> dict:
             human_confirm.append({"type": "车间未确认", "tag": tag,
                                   "files": [f["file"] for f in dev["in_files"]]})
 
+    # ---- 图纸网络（v0.1.13）：图号/图名/车间/覆盖设备/图纸间互引 ----
+    drawings = []
+    site_docs_names = [d["file_name"] for d in site_docs]
+    for sha, d in docs.items():
+        if d["parser"] != "cad":
+            continue
+        tb = d["title_block"] or {}
+        # 带坐标的设备（CAD 块/标注）
+        dev_in_dwg = [{"tag": e["tag"], "x": e.get("x"), "y": e.get("y")}
+                      for e in d["equipments"] if e.get("x") is not None]
+        drawings.append({
+            "file": d["file_name"], "no": tb.get("图号", "") or "",
+            "name": tb.get("图名", "") or "", "scale": tb.get("比例", "") or "",
+            "workshop": d["workshop"], "doc_type": d["doc_type"],
+            "tags": d["tags"], "device_count": len(set(e["tag"] for e in d["equipments"])),
+            "devices": dev_in_dwg[:300],
+            "frame": d["frame"], "dimensions": d["dimensions"],
+            "is_site": d["doc_type"] == "全场布置图",
+        })
+    # 图纸互引：① 共享设备 ② 全场图↔车间图 ③ 同套图号前缀（如 A-101/A-102 同属 A 套）
+    for dwg in drawings:
+        rels = []
+        for other in drawings:
+            if other is dwg:
+                continue
+            shared = sorted(set(dwg["tags"]) & set(other["tags"]))
+            reason = []
+            if shared:
+                reason.append(f"共享设备{len(shared)}台")
+            if dwg["is_site"] and not other["is_site"]:
+                reason.append("全场图涵盖车间图")
+            if not dwg["is_site"] and other["is_site"]:
+                reason.append("车间图归属全场图")
+            same_series = (dwg["no"] and other["no"]
+                           and dwg["no"].split("-")[0] == other["no"].split("-")[0])
+            if same_series and dwg["no"] != other["no"]:
+                reason.append("同套图号")
+            if reason:
+                rels.append({"to": other["file"], "to_no": other["no"],
+                             "shared_devices": shared[:50], "reasons": reason})
+        dwg["relations"] = rels
+        dwg["cross_drawing_devices"] = sorted(set(dwg["tags"]) & {
+            t for other in drawings if other is not dwg for t in other["tags"]})
+
+    # ---- 设备-车间映射（layout，v0.1.13）：以设计院图纸（cad）车间为准，台账行车间次之 ----
+    layout = []
+    for tag, dev in sorted(device_map.items()):
+        # 车间证据按来源分级：cad 图纸（设计院）> excel 行（台账）> 文本/OCR
+        ws_votes = {}
+        for f in dev["in_files"]:
+            src_w = f.get("workshop")
+            hint_w = f.get("workshop_hint")
+            weight = 2 if f["where"] in ("cad_block", "cad_text") else 1
+            for w in [src_w, hint_w]:
+                if not w:
+                    continue
+                ws_votes.setdefault(w, 0)
+                ws_votes[w] += weight
+        if ws_votes:
+            top = max(ws_votes.values())
+            winners = sorted(w for w, v in ws_votes.items() if v == top)
+            main_ws = winners[0] if len(winners) == 1 else None  # 平票→人工确认
+        else:
+            main_ws = None
+        layout.append({"tag": tag, "workshop": main_ws,
+                       "votes": [{"workshop": w, "weight": v} for w, v in sorted(ws_votes.items(), key=lambda x: -x[1])],
+                       "files": len(dev["in_files"]),
+                       "confirmed": main_ws is not None and len(ws_votes) == 1,
+                       "cross_drawings": len({f["file"] for f in dev["in_files"] if f["where"].startswith("cad")})})
+    # 平票冲突补充进 human_confirm
+    for row in layout:
+        if row["workshop"] is None and len(row["votes"]) > 1:
+            human_confirm.append({"type": "跨车间冲突(平票)", "tag": row["tag"],
+                                  "workshops": [v["workshop"] for v in row["votes"]],
+                                  "files": [f["file"] for f in device_map[row["tag"]]["in_files"]]})
+
     # ---- 车间聚合 ----
     workshops = {}
     for d in docs.values():
@@ -311,6 +390,8 @@ def build_relations(force: bool = False) -> dict:
     distances = _compute_distances(devices_out, docs)
     graph = {
         "workshops": list(workshops.values()),
+        "drawings": drawings,
+        "layout": layout,
         "devices": devices_out,
         "distances": distances,
         "unassigned_docs": [{"file": d["file_name"], "doc_type": d["doc_type"]} for d in docs.values() if not d["workshop"]],
