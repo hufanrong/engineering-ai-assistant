@@ -79,6 +79,7 @@
     <div class="tab" data-p="queue">④ 上传队列</div>
     <div class="tab" data-p="relations">⑤ 关联图谱</div>
     <div class="tab" data-p="docgen">⑥ 方案生成</div>
+    <div class="tab" data-p="platform">⑦ 平台规范库</div>
   </div>
 
   <!-- ① 扫描 -->
@@ -141,6 +142,9 @@
     <div class="row">
       <input type="text" id="query" placeholder="输入检索内容…">
       <button class="btn" id="btnSearch">检索</button>
+      <label style="display:flex;align-items:center;gap:4px;margin:0;font-size:13px;color:var(--text)">
+        <input type="checkbox" id="chkPlatform" style="width:auto"> 同时检索平台规范库
+      </label>
     </div>
     <div id="searchOut" style="margin-top:10px"></div>
   </div>
@@ -185,6 +189,24 @@
       <button class="btn" id="btnDgGen">生成 Word 方案</button>
       <span class="msg" id="dgMsg" style="margin-left:8px"></span>
     </div>
+  </div>
+
+  <!-- ⑦ 平台规范库（多项目共享的国标/规范/通用文件） -->
+  <div class="panel" id="p-platform">
+    <h2>平台级规范库（国标/规范/通用文件，独立于子项目库）</h2>
+    <div class="msg" style="margin-bottom:8px">规范/标准在此单独建库，所有项目共享；AI 检索项目库时可同时读取平台库（引用规范正文内容而非名称）。上传时立即登记有效期，每 6 个月自动提醒核验；配置联网端点后可自动搜索最新版替换。新电脑安装时导出 .fpglib 导入即可复用。</div>
+    <div class="row" style="margin-bottom:10px">
+      <input type="file" id="platFiles" multiple style="flex:1;min-width:200px;font-size:13px">
+      <button class="btn orange" id="btnPlatUpload">上传规范文件</button>
+      <button class="btn ghost" id="btnPlatCheck">检查过期（6个月周期）</button>
+    </div>
+    <div class="msg" id="platMsg"></div>
+    <div class="row" style="margin:10px 0">
+      <button class="btn ghost" id="btnPlatExport">导出平台库 (.fpglib)</button>
+      <input type="file" id="platImportFile" accept=".fpglib" style="display:none">
+      <button class="btn ghost" id="btnPlatImport">导入平台库</button>
+    </div>
+    <div id="platList"></div>
   </div>
 </div>
 

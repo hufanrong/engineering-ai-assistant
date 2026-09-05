@@ -15,6 +15,7 @@
       if (t.dataset.p === "queue") loadQueue();
       if (t.dataset.p === "relations") loadRelations();
       if (t.dataset.p === "docgen") initDocGen();
+      if (t.dataset.p === "platform") loadPlatform();
     });
   });
 
@@ -151,12 +152,15 @@
     out.innerHTML = '<div class="msg">检索中…（首次检索会加载模型，约 10-30 秒）</div>';
     fetch("/api/search", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: q, top_k: 6 })
+      body: JSON.stringify({ query: q, top_k: 6, platform: !!$("chkPlatform").checked })
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d.results || !d.results.length) { out.innerHTML = '<div class="empty">无结果</div>'; return; }
       var html = "";
       d.results.forEach(function (it) {
-        html += '<div class="search-item"><div class="meta">' +
+        var src = it.source === "platform"
+          ? '<span class="st parsed">平台规范</span> ' + esc(it.std_no || "") + " " + esc(it.std_name || "")
+          : '<span class="st partial">项目库</span>';
+        html += '<div class="search-item"><div class="meta">' + src + " · " +
           esc(it.meta.file_name) + " · 相似度 " + (1 - it.distance).toFixed(3) + " · " + esc(it.meta.parser) + "</div>" +
           esc(it.text.slice(0, 300)) + (it.text.length > 300 ? "…" : "") + "</div>";
       });
@@ -398,6 +402,87 @@
       }).catch(function (e) { $("libMsg").textContent = "导入失败：" + e.message; });
     this.value = "";
   });
+
+  // ---------- 平台级规范库（⑦） ----------
+  function loadPlatform() {
+    fetch("/api/platform/list").then(function (r) { return r.json(); }).then(function (d) {
+      var box = $("platList");
+      if (!d.items || !d.items.length) { box.innerHTML = '<div class="empty">平台库为空，请上传规范/标准文件</div>'; return; }
+      var html = "<table><tr><th>标准号</th><th>标准名/文件名</th><th>状态</th><th>下次检查</th><th>操作</th></tr>";
+      d.items.forEach(function (it) {
+        var st = { "现行": "parsed", "待核验": "partial", "废止": "failed" }[it.status] || "skipped";
+        html += "<tr><td>" + esc(it.std_no || "—") + "</td><td>" + esc(it.std_name || it.file_name) + "</td>" +
+          '<td><span class="st ' + st + '">' + it.status + "</span>" + (it.obsolete_note ? '<br><span style="color:var(--err);font-size:12px">' + esc(it.obsolete_note) + "</span>" : "") + "</td>" +
+          "<td>" + esc(it.next_check || "—") + "</td>" +
+          '<td><select class="platStatus" data-sha="' + it.sha256 + '" style="max-width:80px;padding:3px 6px">' +
+            '<option value="现行"' + (it.status === "现行" ? " selected" : "") + ">现行</option>" +
+            '<option value="待核验"' + (it.status === "待核验" ? " selected" : "") + ">待核验</option>" +
+            '<option value="废止"' + (it.status === "废止" ? " selected" : "") + ">废止</option>" +
+          "</select> " +
+          '<button class="btn ghost platDel" data-sha="' + it.sha256 + '" style="padding:3px 10px;font-size:12px">删除</button></td></tr>';
+      });
+      html += "</table>";
+      box.innerHTML = html;
+      box.querySelectorAll(".platStatus").forEach(function (sel) {
+        sel.addEventListener("change", function () {
+          fetch("/api/platform/status", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sha256: sel.dataset.sha, status: sel.value }) })
+            .then(function (r) { return r.json(); }).then(function () { $("platMsg").textContent = "状态已更新"; })
+            .catch(function (e) { $("platMsg").textContent = "更新失败：" + e.message; });
+        });
+      });
+      box.querySelectorAll(".platDel").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          if (!confirm("删除该规范条目？")) return;
+          fetch("/api/platform/delete", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sha256: btn.dataset.sha }) })
+            .then(function (r) { return r.json(); }).then(function () { loadPlatform(); })
+            .catch(function (e) { $("platMsg").textContent = "删除失败：" + e.message; });
+        });
+      });
+    }).catch(function (e) { $("platList").innerHTML = '<div class="msg">加载失败：' + esc(e.message) + "</div>"; });
+  }
+  $("btnPlatUpload").addEventListener("click", function () {
+    var inp = $("platFiles");
+    if (!inp.files.length) { $("platMsg").textContent = "请先选择规范文件"; return; }
+    var fd = new FormData();
+    for (var i = 0; i < inp.files.length; i++) fd.append("files", inp.files[i]);
+    $("platMsg").textContent = "上传解析中…";
+    fetch("/api/platform/upload", { method: "POST", body: fd }).then(function (r) { return r.json(); }).then(function (d) {
+      var ok = d.results.filter(function (x) { return x.status === "added"; }).length;
+      var dup = d.results.filter(function (x) { return x.status === "duplicate"; }).length;
+      $("platMsg").textContent = "上传完成：新增 " + ok + " 项，重复跳过 " + dup + " 项";
+      inp.value = ""; loadPlatform();
+    }).catch(function (e) { $("platMsg").textContent = "上传失败：" + e.message; });
+  });
+  $("btnPlatCheck").addEventListener("click", function () {
+    $("platMsg").textContent = "检查中…";
+    fetch("/api/platform/check-expiry", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      var m = "检查完成：到期 " + d.checked + " 项，待核验 " + d.due.length + " 项" + (d.replaced.length ? "，联网替换 " + d.replaced.length + " 项" : "");
+      $("platMsg").textContent = m;
+      loadPlatform();
+    }).catch(function (e) { $("platMsg").textContent = "检查失败：" + e.message; });
+  });
+  $("btnPlatExport").addEventListener("click", function () {
+    fetch("/api/platform/export").then(function (r) { if (!r.ok) throw new Error("导出失败"); return r.blob(); })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a"); a.href = url; a.download = "繁工AI_平台规范库.fpglib";
+        document.body.appendChild(a); a.click(); a.remove();
+        $("platMsg").textContent = "平台库已导出（可拷到新电脑导入复用）";
+      }).catch(function (e) { $("platMsg").textContent = "导出失败：" + e.message; });
+  });
+  $("btnPlatImport").addEventListener("click", function () { $("platImportFile").click(); });
+  $("platImportFile").addEventListener("change", function () {
+    var f = this.files[0]; if (!f) return;
+    var fd = new FormData(); fd.append("file", f);
+    $("platMsg").textContent = "导入中…";
+    fetch("/api/platform/import", { method: "POST", body: fd }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.detail || "导入失败"); return d; }); })
+      .then(function (d) { $("platMsg").textContent = "导入完成：新增 " + d.stats.added + "，重复 " + d.stats.dup + " 项"; loadPlatform(); })
+      .catch(function (e) { $("platMsg").textContent = "导入失败：" + e.message; });
+    this.value = "";
+  });
+  loadPlatform();
 
   // ---------- 工具 ----------
   function esc(s) {

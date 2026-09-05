@@ -66,5 +66,12 @@ NODE_NAME = "我的电脑"
 # 上传批次大小（每批文件数）
 UPLOAD_BATCH_SIZE = 50
 
+# ============ 平台级规范库（v0.1.10）============
+# 国标/规范/通用文件独立建库，与子项目解析库分开；AI 检索项目库时可同时读取平台库。
+PLATFORM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "platform_data")
+PLATFORM_CHECK_DAYS = 180        # 规范有效期检查周期（天）= 每 6 个月
+PLATFORM_SEARCH_ENDPOINT = ""    # 联网核验/搜索最新版端点（预留：配置后 check-expiry 自动调用并替换，
+                                 # 返回 {"标准号": {"status": "现行/废止", "latest_no": "GB/T XXXXX-2026"}}）
+
 # ============ 其它 ============
 LOG_FILE = os.path.join(DATA_DIR, "workbench.log")

@@ -19,9 +19,10 @@ from . import upload_queue
 from . import relations
 from . import docgen
 from . import packager
+from . import platform_store
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.9")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.10")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -146,14 +147,31 @@ def result_detail(sha256: str):
 class SearchReq(BaseModel):
     query: str
     top_k: int = 5
+    platform: bool = False   # 同时检索平台级规范库（v0.1.10）
 
 
 @app.post("/api/search")
 def search(req: SearchReq):
     try:
         results = _store.search(req.query, top_k=req.top_k)
+        for r in results:
+            r["source"] = "project"
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"检索失败：{e}")
+    if req.platform:
+        try:
+            plat = platform_store.search(req.query, top_k=req.top_k)
+            idx = platform_store._load_index()
+            for r in plat:
+                r["source"] = "platform"
+                sha = (r.get("meta") or {}).get("sha256", "")
+                info = idx.get(sha, {})
+                r["std_no"] = info.get("std_no", "")
+                r["std_name"] = info.get("std_name", "")
+                r["status"] = info.get("status", "")
+            results = results + plat
+        except Exception as e:  # noqa: BLE001
+            results.append({"source": "platform", "error": str(e)})
     return {"query": req.query, "results": results}
 
 
@@ -334,6 +352,78 @@ async def library_import(file: UploadFile = File(...)):
     """导入 .fglib 库包：SHA256 去重合并，随后重建关联图谱。"""
     raw = await file.read()
     stats = packager.import_library(raw)
+    if stats.get("error"):
+        raise HTTPException(400, stats["error"])
+    return {"ok": True, "stats": stats}
+
+
+# ---------- 平台级规范库（v0.1.10） ----------
+@app.post("/api/platform/upload")
+async def platform_upload(files: list[UploadFile] = File(...)):
+    """上传规范/国标文件 → 独立平台库（解析→标准号提取→向量化→台账）。"""
+    results = []
+    for f in files:
+        try:
+            raw = await f.read()
+            r = platform_store.add_file(raw, f.filename or "unnamed")
+            results.append(r)
+        except Exception as e:  # noqa: BLE001
+            results.append({"file": f.filename, "status": "failed", "error": str(e)})
+    return {"ok": True, "results": results}
+
+
+@app.get("/api/platform/list")
+def platform_list():
+    return platform_store.list_items()
+
+
+class PlatformStatusReq(BaseModel):
+    sha256: str
+    status: str
+
+
+@app.post("/api/platform/status")
+def platform_status(req: PlatformStatusReq):
+    r = platform_store.mark_status(req.sha256, req.status)
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error", "操作失败"))
+    return r
+
+
+class PlatformDeleteReq(BaseModel):
+    sha256: str
+
+
+@app.post("/api/platform/delete")
+def platform_delete(req: PlatformDeleteReq):
+    r = platform_store.delete(req.sha256)
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error", "未找到"))
+    return r
+
+
+@app.post("/api/platform/check-expiry")
+def platform_check_expiry():
+    """到期核验：到 6 个月检查周期的规范标记待核验；配置了联网端点则自动核验替换。"""
+    return platform_store.check_expiry()
+
+
+@app.get("/api/platform/export")
+def platform_export():
+    """导出平台库包 .fpglib（新电脑安装时导入即可复用）。"""
+    import io
+    from urllib.parse import quote
+    content = platform_store.export_platform()
+    fname = f"繁工AI_平台规范库_{datetime_now()}.fpglib"
+    ascii_name = f"fangong_platform_{datetime_now()}.fpglib"
+    return StreamingResponse(io.BytesIO(content), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(fname)}'})
+
+
+@app.post("/api/platform/import")
+async def platform_import(file: UploadFile = File(...)):
+    raw = await file.read()
+    stats = platform_store.import_platform(raw)
     if stats.get("error"):
         raise HTTPException(400, stats["error"])
     return {"ok": True, "stats": stats}

@@ -10,11 +10,12 @@ from . import config
 
 
 class VectorStore:
-    def __init__(self):
+    def __init__(self, db_path: str = None):
         self._model = None
         self._client = None
         self._collection = None
-        self._db_path = os.path.join(config.DATA_DIR, "vectordb")
+        # 默认项目向量库；平台级规范库传入独立目录（v0.1.10）
+        self._db_path = db_path or os.path.join(config.DATA_DIR, "vectordb")
 
     # ---------- 懒加载 ----------
     def _get_model(self):
