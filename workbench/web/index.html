@@ -268,6 +268,19 @@
         <div id="aiSuggest" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"></div>
     </section>
 
+
+<div id="genModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;width:min(560px,92vw);max-height:85vh;overflow:auto;padding:16px;box-sizing:border-box;">
+    <h4 id="genModalTitle" style="margin:0 0 10px">生成资料</h4>
+    <div id="genModalFields" style="max-height:52vh;overflow:auto;"></div>
+    <div id="genModalHint" style="color:#c0392b;font-size:12px;margin-top:6px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+      <button onclick="genClose()">取消</button>
+      <button onclick="genDo()">生成并下载</button>
+    </div>
+  </div>
+</div>
+
 <script src="/web/app.js"></script>
 </body>
 </html>

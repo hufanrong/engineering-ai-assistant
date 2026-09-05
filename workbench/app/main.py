@@ -23,7 +23,7 @@ from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.17")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.18")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -345,9 +345,8 @@ def docgen_types():
     return {"types": docgen.list_types()}
 
 
-@app.post("/api/docgen/prefill")
-def docgen_prefill(workshop: str = "", doc_type: str = ""):
-    """从解析库（关联图谱）自动预填：车间设备清单 + 平台库规范引用（v0.1.12）。"""
+def _prefill_data(workshop: str = "", doc_type: str = ""):
+    """从解析库（关联图谱）自动预填：车间设备清单 + 平台库规范引用（v0.1.12/0.1.18）。"""
     g = relations.load_relations()
     devices = [d for d in g.get("devices", []) if not workshop or workshop in d.get("workshops", [])]
     dev_list = [{"tag": d["tag"], "name": "见台账", "count": 1,
@@ -360,6 +359,19 @@ def docgen_prefill(workshop: str = "", doc_type: str = ""):
     except Exception:  # noqa: BLE001
         pass
     return {"workshop": workshop, "devices": dev_list, "references": refs}
+
+
+class PrefillReq(BaseModel):
+    workshop: str = ""
+    doc_type: str = ""
+
+
+@app.post("/api/docgen/prefill")
+def docgen_prefill(req: PrefillReq = None, workshop: str = "", doc_type: str = ""):
+    """从解析库（关联图谱）自动预填：车间设备清单 + 平台库规范引用（v0.1.12/0.1.18）。支持 JSON body 或 query。"""
+    if req is not None:
+        workshop, doc_type = req.workshop, req.doc_type
+    return _prefill_data(workshop, doc_type)
 
 
 # ---------- ⑨ 云库（手机端对接，v0.1.14） ----------
@@ -487,6 +499,38 @@ def docplan_task_delete(task_id: str):
     if not docplan.delete_task(task_id):
         raise HTTPException(404, "任务不存在")
     return {"ok": True}
+
+
+class DocPlanGenReq(BaseModel):
+    doc_type: str
+    workshop: str = ""
+    fields: dict | None = None
+
+
+@app.post("/api/docplan/generate")
+def docplan_generate(req: DocPlanGenReq):
+    """计划页一键生成：解析库预填（车间设备+规范引用）+ 用户补充字段 → 生成 Word 下载（v0.1.18）。"""
+    if req.doc_type not in docgen.TYPES:
+        raise HTTPException(400, f"未知方案类型：{req.doc_type}")
+    pf = _prefill_data(req.workshop, req.doc_type)
+    data = {
+        "项目名称": "", "施工单位": "", "编制人": "",
+        "_devices": [{"tag": d["tag"], "name": d.get("name", "见台账"), "count": 1} for d in pf["devices"][:60]],
+    }
+    if req.workshop:
+        data["车间"] = req.workshop
+    if req.fields:
+        data.update({k: v for k, v in req.fields.items() if str(v or "").strip()})
+    try:
+        content, missing = docgen.fill_template(req.doc_type, data)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"生成失败：{e}")
+    import io
+    from urllib.parse import quote
+    fname = f"繁工AI_{req.doc_type}_{datetime_now()}.docx"
+    ascii_name = f"fanGongAI_doc_{datetime_now()}.docx"
+    return StreamingResponse(io.BytesIO(content), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                             headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
 
 
 @app.post("/api/docgen/generate")

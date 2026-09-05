@@ -529,7 +529,7 @@
       d.plans.forEach(function (p) {
         var st = { ready: "parsed", partial: "partial", missing: "failed" }[p.state];
         var lacks = p.missing.length ? '<div style="color:var(--err);font-size:12px">缺：' + p.missing.join("、") + "</div>" : "";
-        var act = p.state === "ready"
+        var act = (p.state === "ready" || p.state === "partial")
           ? '<button class="btn ghost docplanGen" data-t="' + p.doc_type + '" style="padding:3px 10px;font-size:12px">去生成</button>'
           : "";
         html += '<div class="search-item"><div class="meta"><span class="st ' + st + '">' +
@@ -540,18 +540,7 @@
       box.innerHTML = html;
       box.querySelectorAll(".docplanGen").forEach(function (b) {
         b.addEventListener("click", function () {
-          var t = b.dataset.t;
-          var sel = $("docplanType");
-          if (t && t !== "施工方案") {
-            var opt = Array.prototype.find.call(sel.options, function (o) { return o.value === t; });
-            if (opt) sel.value = t;
-          }
-          // 跳转⑥页并带入类型
-          document.querySelectorAll(".tab").forEach(function (x) { x.classList.remove("on"); });
-          document.querySelectorAll(".panel").forEach(function (x) { x.classList.remove("on"); });
-          document.querySelector(".tab[data-p=\"docgen\"]").classList.add("on");
-          $("p-docgen").classList.add("on");
-          if (window.initDocGen) initDocGen();
+          genOpen(b.dataset.t, "");
         });
       });
     }).catch(function (e) { $("docplanList").innerHTML = '<div class="msg">加载失败：' + esc(e.message) + "</div>"; });
@@ -712,3 +701,69 @@ function aiSend() {
         return "<button onclick=\"document.getElementById('aiInput').value='" + t + "';aiSend();\">" + t + "</button>";
     }).join("");
 })();
+// ---------- ⑧ 计划页一键生成（v0.1.18） ----------
+var genState = { doc_type: "", fields: {}, required: [] };
+function genOpen(docType, workshop) {
+    genState.doc_type = docType;
+    genState.fields = {};
+    var box = document.getElementById("genModalFields");
+    box.innerHTML = '<div class="msg">加载预填数据…</div>';
+    document.getElementById("genModalTitle").textContent = "生成：" + docType;
+    document.getElementById("genModal").style.display = "flex";
+    fetch("/api/docgen/prefill", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workshop: workshop || "", doc_type: docType }) })
+    .then(function (r) { return r.json(); })
+    .then(function (pf) {
+        var html = "";
+        // 必填字段（来自模板）
+        fetch("/api/docgen/types").then(function (r) { return r.json(); }).then(function (types) {
+            var t = (types || []).filter(function (x) { return x.key === docType; })[0] || {};
+            genState.required = t.required || [];
+            var reqs = (t.required || []).concat(t.optional || []);
+            var defaultVals = { "项目名称": "", "车间": pf.workshop || "", "编制单位": "", "编制人": "", "编制日期": "", "吊装日期": "" };
+            reqs.forEach(function (k) {
+                var pre = (pf.devices && pf.devices.length) ? "" : "";
+                html += '<div style="margin:6px 0"><label style="font-size:12px;color:#555">' + esc(k) +
+                    (((t.required || []).indexOf(k) >= 0) ? ' <span style="color:#c0392b">*必填</span>' : "") + "</label><br>" +
+                    '<input id="genF_' + k + '" style="width:100%;box-sizing:border-box;padding:6px;border:1px solid #c0c9d6;border-radius:6px;" value="' + esc(defaultVals[k] || "") + '"></div>';
+            });
+            if (pf.devices && pf.devices.length) {
+                html += '<div style="margin:6px 0"><label style="font-size:12px;color:#555">自动带出设备 ' + pf.devices.length + ' 台：' + esc(pf.devices.map(function (d) { return d.tag; }).join("、")) + "</label></div>";
+            }
+            if (pf.references && pf.references.length) {
+                html += '<div style="margin:6px 0;font-size:12px;color:#555">编制依据自动引用：' + esc(pf.references.map(function (r) { return r.std_no; }).join("、")) + "</div>";
+            }
+            var box2 = document.getElementById("genModalFields");
+            box2.innerHTML = html || '<div class="msg">该类型无补充字段，可直接生成</div>';
+        });
+    })
+    .catch(function (e) { document.getElementById("genModalFields").innerHTML = '<div class="msg">预填失败：' + esc(e.message) + "</div>"; });
+}
+function genClose() { document.getElementById("genModal").style.display = "none"; }
+function genDo() {
+    var data = {};
+    genState.required.forEach(function (k) {
+        var el = document.getElementById("genF_" + k);
+        if (el) data[k] = el.value.trim();
+    });
+    // 收集全部已填输入
+    var inputs = document.querySelectorAll("#genModalFields input");
+    inputs.forEach(function (el) {
+        var k = el.id.replace("genF_", "");
+        data[k] = el.value.trim();
+    });
+    fetch("/api/docplan/generate", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doc_type: genState.doc_type, workshop: genState.fields.workshop || "", fields: data }) })
+    .then(function (r) {
+        if (!r.ok) { return r.json().then(function (e) { throw new Error(e.detail || "生成失败"); }); }
+        return r.blob();
+    })
+    .then(function (blob) {
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "fanGongAI_" + genState.doc_type + "_" + new Date().toISOString().slice(0, 16).replace(/[T:]/g, "_") + ".docx";
+        a.click();
+        genClose();
+    })
+    .catch(function (e) { document.getElementById("genModalHint").textContent = "生成失败：" + e.message; });
+}
