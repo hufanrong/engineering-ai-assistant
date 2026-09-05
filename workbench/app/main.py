@@ -23,7 +23,7 @@ from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.14")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.15")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}

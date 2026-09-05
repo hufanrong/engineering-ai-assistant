@@ -1,4 +1,4 @@
-# 繁工AI 本地解析工作台 - 平台级规范库（v0.1.10）
+# 繁工AI 本地解析工作台 - 平台级规范库（v0.1.15）
 # 国标/规范/通用文件独立建库，与子项目解析库分开（多项目共享）；
 # 上传时立即检查有效期，每 PLATFORM_CHECK_DAYS（默认180天=6个月）再次核验；
 # 配置 PLATFORM_SEARCH_ENDPOINT 后可联网自动核验/搜索最新版替换；
@@ -123,6 +123,22 @@ def add_file(raw: bytes, filename: str) -> dict:
         "error": res.error,
         "vectorized": False,
     }
+    # v0.1.15：首次上传即核验是否过期（有标准号才核验；无法联网→保持待核验人工处理）
+    if std_no and config.STD_VERIFY_ON_UPLOAD:
+        try:
+            from . import std_verify
+            v = std_verify.verify_std(std_no)
+            if v.get("status") == STATUS_CURRENT:
+                idx[sha]["status"] = STATUS_CURRENT
+                idx[sha]["verified_at"] = now.isoformat()
+            elif v.get("status") == STATUS_OBSOLETE:
+                idx[sha]["status"] = STATUS_OBSOLETE
+                idx[sha]["obsolete_note"] = f"已废止，最新版：{v.get('latest_no') or '待查'}（请上传最新版替换）"
+            else:
+                # 无法核验（unknown）→ 待核验，人工确认后再定（不默认当现行）
+                idx[sha]["status"] = STATUS_PENDING
+        except Exception:  # noqa: BLE001（核验失败不阻断入库）
+            pass
     try:
         store = VectorStore(db_path=VECTOR_DB)
         n = store.index_file(res)
@@ -194,29 +210,25 @@ def check_expiry() -> dict:
                 info["status"] = STATUS_PENDING
             due.append({"sha256": sha, "std_no": info.get("std_no"),
                         "file_name": info.get("file_name")})
-    if config.PLATFORM_SEARCH_ENDPOINT and due:
-        try:
-            import requests
-            r = requests.post(config.PLATFORM_SEARCH_ENDPOINT.rstrip("/") + "/api/platform/verify",
-                              json={"std_nos": [d["std_no"] for d in due if d["std_no"]]},
-                              timeout=60)
-            if r.status_code == 200:
-                verdicts = r.json().get("verdicts", {})
-                for sha, info in idx.items():
-                    v = verdicts.get(info.get("std_no", ""))
-                    if not v:
-                        continue
-                    if v.get("status") == STATUS_OBSOLETE:
-                        info["status"] = STATUS_OBSOLETE
-                        info["obsolete_note"] = f"已废止，最新版：{v.get('latest_no', '待查')}"
-                        replaced.append({"std_no": info["std_no"],
-                                         "latest_no": v.get("latest_no", ""),
-                                         "sha256": sha})
-                    elif v.get("status") == STATUS_CURRENT:
-                        info["status"] = STATUS_CURRENT
-                        info["verified_at"] = now.isoformat()
-        except Exception as e:  # noqa: BLE001
-            replaced.append({"error": f"联网核验失败：{e}"})
+    if due:
+        from . import std_verify
+        for d in due:
+            std_no = d.get("std_no")
+            if not std_no:
+                continue
+            v = std_verify.verify_std(std_no)
+            info = idx.get(d["sha256"])
+            if not info:
+                continue
+            if v.get("status") == STATUS_OBSOLETE:
+                info["status"] = STATUS_OBSOLETE
+                info["obsolete_note"] = f"已废止，最新版：{v.get('latest_no') or '待查'}（请上传最新版替换）"
+                replaced.append({"std_no": std_no, "latest_no": v.get("latest_no") or "",
+                                 "sha256": d["sha256"]})
+            elif v.get("status") == STATUS_CURRENT:
+                info["status"] = STATUS_CURRENT
+                info["verified_at"] = now.isoformat()
+            # unknown → 保持待核验，人工处理
     _save_index(idx)
     return {"checked": checked, "due": due, "replaced": replaced,
             "search_endpoint": config.PLATFORM_SEARCH_ENDPOINT or "(未配置，需人工核验)"}

@@ -71,6 +71,8 @@ UPLOAD_BATCH_SIZE = 50
 PLATFORM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "platform_data")
 PLATFORM_CHECK_DAYS = 180        # 规范有效期检查周期（天）= 每 6 个月
 PLATFORM_SEARCH_ENDPOINT = ""
+STD_VERIFY_OPENSTD = True        # 是否允许访问全国标准信息公共服务平台核验（尽力而为）
+STD_VERIFY_ON_UPLOAD = True      # 首次上传规范时立即核验是否过期（废止立即标注最新版）
 # v0.1.12：联网优化资料模板端点（预留）。配置后 docgen 生成时自动请求
 # POST {"doc_type":..., "keywords":[...]} → {"template_hints":["..."]} 用于优化模板章节；
 # 未配置时仅用本地解析库内容预填（设备清单/平台规范引用），不影响生成。
