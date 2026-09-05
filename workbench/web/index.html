@@ -78,6 +78,7 @@
     <div class="tab" data-p="search">③ AI 检索</div>
     <div class="tab" data-p="queue">④ 上传队列</div>
     <div class="tab" data-p="relations">⑤ 关联图谱</div>
+    <div class="tab" data-p="docgen">⑥ 方案生成</div>
   </div>
 
   <!-- ① 扫描 -->
@@ -157,6 +158,23 @@
       <option value="">— 选择车间查看详情 —</option>
     </select>
     <div id="relOut"></div>
+  </div>
+  <!-- ⑥ 方案生成（工程资料 Word） -->
+  <div class="panel" id="p-docgen">
+    <h2>工程资料生成（施工方案 / 吊装方案 / 交底 / 验收记录）</h2>
+    <div class="msg" style="margin-bottom:8px">选择方案类型 → 自动从解析库预填车间设备 → 填写关键数据（缺项会提示）→ 生成 Word 下载，人工打印签字。规范依据内置，可人工补充。</div>
+    <div class="row" style="margin-bottom:10px">
+      <select id="dgType" style="max-width:200px"></select>
+      <select id="dgWorkshop" style="max-width:200px">
+        <option value="">— 全项目设备 —</option>
+      </select>
+      <button class="btn ghost" id="btnDgPrefill">从库预填设备</button>
+    </div>
+    <div id="dgForm" style="max-width:720px"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnDgGen">生成 Word 方案</button>
+      <span class="msg" id="dgMsg" style="margin-left:8px"></span>
+    </div>
   </div>
 </div>
 

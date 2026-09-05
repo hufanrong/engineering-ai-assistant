@@ -14,6 +14,7 @@
       if (t.dataset.p === "results") loadResults();
       if (t.dataset.p === "queue") loadQueue();
       if (t.dataset.p === "relations") loadRelations();
+      if (t.dataset.p === "docgen") initDocGen();
     });
   });
 
@@ -296,6 +297,76 @@
   $("relWorkshop").addEventListener("change", function () {
     var v = this.value;
     if (v) showWorkshop(v); else $("relOut").innerHTML = "";
+  });
+
+  // ---------- 方案生成 ----------
+  var dgTypes = [];
+  function initDocGen() {
+    if (!dgTypes.length) loadDocGenTypes();
+  }
+  function loadDocGenTypes() {
+    fetch("/api/docgen/types").then(function (r) { return r.json(); }).then(function (d) {
+      dgTypes = d.types || [];
+      var sel = $("dgType");
+      sel.innerHTML = dgTypes.map(function (t) { return '<option value="' + esc(t.key) + '">' + esc(t.label) + "</option>"; }).join("");
+      renderDocForm();
+      // 车间下拉
+      fetch("/api/relations").then(function (r) { return r.json(); }).then(function (g) {
+        var wsel = $("dgWorkshop");
+        wsel.innerHTML = '<option value="">— 全项目设备 —</option>' +
+          (g.workshops || []).map(function (w) { return '<option value="' + esc(w.workshop) + '">' + esc(w.workshop) + "</option>"; }).join("");
+      }).catch(function () {});
+    }).catch(function (e) { $("dgForm").innerHTML = '<span class="msg">加载失败：' + esc(e.message) + "</span>"; });
+  }
+  function renderDocForm() {
+    var t = dgTypes.find(function (x) { return x.key === $("dgType").value; });
+    if (!t) { $("dgForm").innerHTML = ""; return; }
+    var html = "<b>必填字段（缺失将标红提示）</b><div style='margin-top:6px'>";
+    (t.required || []).forEach(function (k) {
+      html += '<div style="margin-bottom:6px"><label>' + esc(k) + '</label><input id="dg_' + esc(k) + '" class="dg-in" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;box-sizing:border-box;font-size:14px"></div>';
+    });
+    html += "</div><b style='display:block;margin-top:8px'>可选字段（可留空）</b><div style='margin-top:6px'>";
+    (t.optional || []).forEach(function (k) {
+      html += '<div style="margin-bottom:6px"><label>' + esc(k) + '</label><input id="dg_' + esc(k) + '" class="dg-in" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;box-sizing:border-box;font-size:14px"></div>';
+    });
+    html += "</div>";
+    $("dgForm").innerHTML = html;
+    $("dgMsg").textContent = "";
+  }
+  $("dgType").addEventListener("change", renderDocForm);
+  $("btnDgPrefill").addEventListener("click", function () {
+    var ws = $("dgWorkshop").value;
+    fetch("/api/docgen/prefill?workshop=" + encodeURIComponent(ws), { method: "POST" })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        if (d.devices && d.devices.length) {
+          $("dgMsg").textContent = "已预填 " + d.devices.length + " 台设备（" + (ws || "全项目") + "）：" + d.devices.slice(0, 12).map(function (v) { return v.tag; }).join("、") + (d.devices.length > 12 ? "…" : "");
+          if ($("dg_车间")) $("dg_车间").value = ws;
+        } else {
+          $("dgMsg").textContent = "该车间暂无设备，请先扫描解析并重建图谱";
+        }
+      }).catch(function (e) { $("dgMsg").textContent = "预填失败：" + e.message; });
+  });
+  $("btnDgGen").addEventListener("click", function () {
+    var t = dgTypes.find(function (x) { return x.key === $("dgType").value; });
+    if (!t) return;
+    var data = {};
+    document.querySelectorAll(".dg-in").forEach(function (inp) {
+      if (inp.value.trim()) data[inp.id.replace("dg_", "")] = inp.value.trim();
+    });
+    $("dgMsg").textContent = "生成中…";
+    fetch("/api/docgen/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_type: t.key, data: data })
+    }).then(function (r) {
+      if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || "生成失败"); });
+      return r.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = "繁工AI_" + t.label + "_" + new Date().toISOString().slice(0, 16).replace(/[T:]/g, "_") + ".docx";
+      document.body.appendChild(a); a.click(); a.remove();
+      $("dgMsg").textContent = "已生成下载。缺失必填字段在 Word 中以红字『待补充』标注。";
+    }).catch(function (e) { $("dgMsg").textContent = "生成失败：" + e.message; });
   });
 
   // ---------- 工具 ----------

@@ -8,7 +8,7 @@ import threading
 from typing import Union, List
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -17,9 +17,10 @@ from . import scanner
 from .vector_store import VectorStore
 from . import upload_queue
 from . import relations
+from . import docgen
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.6")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.7")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -268,6 +269,50 @@ def relations_distances(workshop: str = ""):
     if workshop:
         dists = [r for r in dists if r.get("workshop") == workshop]
     return {"count": len(dists), "distances": dists}
+
+
+# ---------- 工程资料生成（v0.1.7） ----------
+class DocGenReq(BaseModel):
+    doc_type: str
+    data: dict = {}
+
+
+@app.get("/api/docgen/types")
+def docgen_types():
+    """方案类型 + 必填/可选字段清单。"""
+    return {"types": docgen.list_types()}
+
+
+@app.post("/api/docgen/prefill")
+def docgen_prefill(workshop: str = "", doc_type: str = ""):
+    """从解析库（关联图谱）自动预填：车间设备清单等。"""
+    g = relations.load_relations()
+    devices = [d for d in g.get("devices", []) if not workshop or workshop in d.get("workshops", [])]
+    dev_list = [{"tag": d["tag"], "name": "见台账", "count": 1,
+                 "files": d.get("files", [])[:3]} for d in devices[:100]]
+    return {"workshop": workshop, "devices": dev_list}
+
+
+@app.post("/api/docgen/generate")
+def docgen_generate(req: DocGenReq):
+    """按模板生成 Word。返回 docx 文件下载；缺失必填字段以『待补充』占位并红色标注。"""
+    if req.doc_type not in docgen.TYPES:
+        raise HTTPException(400, f"未知方案类型：{req.doc_type}")
+    try:
+        content, missing = docgen.fill_template(req.doc_type, req.data or {})
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"生成失败：{e}")
+    import io
+    from urllib.parse import quote
+    fname = f"繁工AI_{req.doc_type}_{datetime_now()}.docx"
+    ascii_name = f"fanGongAI_doc_{datetime_now()}.docx"
+    return StreamingResponse(io.BytesIO(content), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                             headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"})
+
+
+def datetime_now() -> str:
+    import datetime
+    return datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
 
 # 静态资源（前端 js/css）
