@@ -3,6 +3,7 @@
 # 优先 Word（python-docx）；后续可扩展 PDF/Excel。签字由人工下载打印完成。
 
 import datetime
+import json
 import os
 
 # 方案类型注册：名称 / 说明 / 必填字段（缺失时前端提示）/ 可选字段
@@ -106,6 +107,44 @@ def list_types() -> list:
              "optional": v["optional"]} for k, v in TYPES.items()]
 
 
+def std_citations(doc_type: str, limit: int = 3) -> list:
+    """从平台规范库检索与当前资料类型相关的规范正文（非仅名称），供『编制依据』引用。v0.1.17"""
+    try:
+        from . import platform_store
+        idx = platform_store.list_items().get("items", [])
+        hits = [it for it in idx if it.get("std_no") and it.get("status") in ("现行", "待核验")]
+        if not hits:
+            return []
+        # 用模板名关键词粗筛（检索不到就取前几条现行规范）
+        kw = (doc_type or "").replace("记录", "").replace("资料", "")
+        scored = []
+        for it in hits:
+            name = str(it.get("std_name", ""))
+            score = 0
+            for ch in kw:
+                if ch and ch in name:
+                    score += 1
+            scored.append((score, it))
+        scored.sort(key=lambda x: -x[0])
+        out = []
+        for score, it in scored[:limit]:
+            text = ""
+            try:
+                cache = os.path.join(platform_store.CACHE_DIR, f"{it['sha256']}.json")
+                if os.path.exists(cache):
+                    with open(cache, encoding="utf-8") as f:
+                        text = str(json.load(f).get("text", ""))[:600].strip()
+            except Exception:  # noqa: BLE001
+                text = ""
+            if not text:
+                text = "（正文已入库，可在平台库页检索全文）"
+            out.append({"std_no": it["std_no"], "std_name": it.get("std_name", ""),
+                        "status": it.get("status", ""), "snippet": text[:300]})
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -183,7 +222,18 @@ def fill_template(doc_type: str, data: dict) -> bytes:
     section_no = 2 if (devices or doc_type in ("吊装方案", "开箱验收记录", "隐蔽工程验收记录")) else 2
     if "编制依据" in t["default_text"]:
         add_h(f"{'三' if section_no == 2 else '二'}、编制依据")
-        doc.add_paragraph(t["default_text"]["编制依据"])
+        cites = data.get("_std_citations") or std_citations(doc_type)
+        if cites:
+            doc.add_paragraph(t["default_text"]["编制依据"])
+            doc.add_paragraph("本资料编制所引用的现行规范条款如下：")
+            for ci in cites:
+                p = doc.add_paragraph()
+                r = p.add_run(f"▶ {ci['std_no']}《{ci['std_name']}》（{ci['status']}）：{ci['snippet']}")
+                r.font.size = Pt(11)
+        else:
+            doc.add_paragraph(t["default_text"]["编制依据"])
+            p = doc.add_paragraph("（平台库尚未收录相关现行规范正文，请人工补充编制依据）")
+            p.runs[0].font.color.rgb = __import__("docx.shared", fromlist=["RGBColor"]).RGBColor(0xC0, 0x39, 0x2B)
     for k, default in t["default_text"].items():
         if k == "编制依据":
             continue
