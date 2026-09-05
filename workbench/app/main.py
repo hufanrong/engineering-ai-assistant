@@ -18,7 +18,7 @@ from .vector_store import VectorStore
 from . import upload_queue
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.3")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.4")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -39,13 +39,14 @@ def status():
     idx = scanner._load_index() if scanner.INDEX_FILE or True else {}
     return {
         "app": "fangong-workbench",
-        "version": "0.1.2",
+        "version": app.version,
         "node_name": config.NODE_NAME,
         "scan_running": SCAN_STATUS.get("running", False),
         "parse_switches": {
             "pdf": config.PARSE_PDF, "word": config.PARSE_WORD,
             "excel": config.PARSE_EXCEL, "text": config.PARSE_TEXT,
-            "ocr": config.PARSE_IMAGE, "cad": config.PARSE_CAD,
+            "ocr": config.OPTIONAL_READY.get("ocr", False) and (config.AUTO_DETECT_OPTIONAL or config.PARSE_IMAGE),
+            "cad": config.OPTIONAL_READY.get("cad", False) and (config.AUTO_DETECT_OPTIONAL or config.PARSE_CAD),
             "project": config.PARSE_PROJECT,
         },
         "vector_count": _store.stats().get("count", 0),

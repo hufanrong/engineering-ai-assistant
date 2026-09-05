@@ -58,14 +58,22 @@ def extract_entities(text: str, limit: int = 200) -> list:
 
 
 # ============ 解析器注册表（优先级：Project → 表格台账 → 图片OCR → CAD → PDF/Word/Text） ============
+def _effective(switch: bool, dep: str) -> bool:
+    """有效开关：自动探测开启且依赖已装 → 直接启用（全套部署免配置）；
+    否则按 config 里的开关。"""
+    if config.AUTO_DETECT_OPTIONAL and config.OPTIONAL_READY.get(dep, False):
+        return True
+    return switch
+
+
 def _pick_parser(ext: str):
     if ext in config.EXT_PROJECT and config.PARSE_PROJECT:
         return parse_project
     if ext in config.EXT_EXCEL and config.PARSE_EXCEL:
         return parse_excel
-    if ext in config.EXT_IMAGE and config.PARSE_IMAGE:
+    if ext in config.EXT_IMAGE and _effective(config.PARSE_IMAGE, "ocr"):
         return parse_image
-    if ext in config.EXT_CAD and config.PARSE_CAD:
+    if ext in config.EXT_CAD and _effective(config.PARSE_CAD, "cad"):
         return parse_cad
     if ext in config.EXT_PDF and config.PARSE_PDF:
         return parse_pdf
@@ -270,13 +278,14 @@ def parse_image(res: ParseResult):
     res.structure = {"blocks": blocks, "line_count": len(lines)}
 
 
-# ============ CAD（可选，需 ezdxf；DWG 需 ODA 转 DXF） ============
+# ============ CAD（可选，需 ezdxf；DWG 需 ODA 转 DXF）
+# 深度解析 v2（v0.1.4）：图框检测 + 标题栏键值提取 + 尺寸标注 + 设备块属性 + 图层统计 + 空间结构
+# ============
 def parse_cad(res: ParseResult):
     import ezdxf
     res.parser = "cad"
     path = res.file_path
     if path.lower().endswith(".dwg"):
-        # 尝试调用 ODA File Converter（用户在 PATH 或指定目录安装）
         converted = _dwg_to_dxf(path)
         if not converted:
             res.status = "failed"
@@ -285,30 +294,159 @@ def parse_cad(res: ParseResult):
         path = converted
     doc = ezdxf.readfile(path)
     msp = doc.modelspace()
-    texts = []
-    tags = []
-    labels = []      # 文本+坐标（为空间结构库打底）
+
+    texts, labels, tags, dims, layers, lines_p = [], [], [], [], {}, []
     for e in msp:
         t = e.dxftype()
         if t == "TEXT":
             texts.append(e.dxf.text)
-            labels.append({"text": e.dxf.text, "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2)})
+            labels.append({"text": e.dxf.text, "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2), "layer": e.dxf.layer})
         elif t == "MTEXT":
             texts.append(e.plain_text())
-            labels.append({"text": e.plain_text(), "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2)})
+            labels.append({"text": e.plain_text(), "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2), "layer": e.dxf.layer})
         elif t == "INSERT":
-            tags.append({"block": e.dxf.name, "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2)})
-    # 图框/标题栏粗识别：取右下角区域（常见标题栏位置）的文本作为图纸标题候选
-    if labels:
-        labels.sort(key=lambda p: (p["x"], -p["y"]))
+            attrs = []
+            try:
+                for a in e.attribs:
+                    attrs.append({"tag": a.dxf.tag, "value": a.dxf.text})
+            except Exception:  # noqa: BLE001
+                pass
+            tags.append({
+                "block": e.dxf.name,
+                "x": round(e.dxf.insert.x, 2),
+                "y": round(e.dxf.insert.y, 2),
+                "layer": e.dxf.layer,
+                "attrs": attrs[:50],
+                "scale": round(e.dxf.xscale or 1, 3),
+            })
+        elif t == "DIMENSION":
+            try:
+                m = e.get_measurement()
+            except Exception:  # noqa: BLE001
+                m = None
+            dims.append({
+                "text": (e.dxf.text or "").strip(),
+                "measurement": round(m, 3) if m is not None else None,
+                "x": round(e.dxf.defpoint.x, 2), "y": round(e.dxf.defpoint.y, 2),
+                "layer": e.dxf.layer,
+            })
+        elif t == "LINE":
+            lines_p.append((round(e.dxf.start.x, 2), round(e.dxf.start.y, 2), round(e.dxf.end.x, 2), round(e.dxf.end.y, 2)))
+        layers[e.dxf.layer] = layers.get(e.dxf.layer, 0) + 1
+
+    # —— 图框检测：取几何范围（若有闭合矩形 LWPOLYLINE 则用其范围）——
+    frame = _detect_frame(msp, lines_p)
+    # —— 标题栏：图框/图面右下角区域的键值字段提取 ——
+    title_fields = _extract_title_block(labels, frame)
+
     res.text = "\n".join(texts)
     res.structure = {
+        "spatial": {
+            "frame": frame,                       # 图框边界 [xmin, ymin, xmax, ymax]
+            "title_block": title_fields,          # 图号/图名/比例/设计/日期等
+            "blocks": tags[:800],                 # 设备/图块 + 坐标 + 属性（空间库打底）
+            "dimensions": dims[:800],             # 尺寸标注 + 测量值
+        },
         "text_labels": labels[:500],
-        "block_inserts": tags[:500],
         "version": doc.dxfversion,
-        "entity_counts": {dt: sum(1 for _ in msp.query(dt)) for dt in ("TEXT", "MTEXT", "INSERT", "LINE")},
+        "layers": [{"layer": k, "count": v} for k, v in sorted(layers.items(), key=lambda x: -x[1])][:100],
+        "entity_counts": {
+            "TEXT": len([1 for e in msp.query("TEXT")]),
+            "MTEXT": len([1 for e in msp.query("MTEXT")]),
+            "INSERT": len([1 for e in msp.query("INSERT")]),
+            "LINE": len([1 for e in msp.query("LINE")]),
+            "DIMENSION": len([1 for e in msp.query("DIMENSION")]),
+        },
     }
-    res.entities = extract_entities("\n".join(texts))
+    res.entities = extract_entities("\n".join(texts + [a.get("value", "") for t in tags for a in t.get("attrs", [])]))
+
+
+def _detect_frame(msp, lines_p):
+    """图框检测：优先找面积最大的闭合 LWPOLYLINE 矩形；否则退回全图几何范围。"""
+    best = None
+    for e in msp.query("LWPOLYLINE"):
+        try:
+            pts = list(e.get_points("xy"))
+            if len(pts) >= 4 and pts[0] == pts[-1]:
+                xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+                w, h = max(xs) - min(xs), max(ys) - min(ys)
+                if w > 0 and h > 0:
+                    area = w * h
+                    if best is None or area > best[0]:
+                        best = (area, [round(min(xs), 2), round(min(ys), 2), round(max(xs), 2), round(max(ys), 2)])
+        except Exception:  # noqa: BLE001
+            continue
+    if best:
+        return best[1]
+    if lines_p:
+        xs = [c for p in lines_p for c in (p[0], p[2])]
+        ys = [c for p in lines_p for c in (p[1], p[3])]
+        return [round(min(xs), 2), round(min(ys), 2), round(max(xs), 2), round(max(ys), 2)]
+    return None
+
+
+_TITLE_KEYS = [
+    ("图号", ["图号", "图纸编号", "编号", "drawing no", "drw no"]),
+    ("图名", ["图名", "图纸名称", "名称", "title"]),
+    ("工程名", ["工程名称", "项目名称", "project"]),
+    ("车间", ["车间", "workshop", "unit"]),
+    ("专业", ["专业", "discipline"]),
+    ("比例", ["比例", "scale"]),
+    ("设计", ["设计", "design"]),
+    ("制图", ["制图", "drawn", "drawing by"]),
+    ("审核", ["审核", "checked", "check"]),
+    ("批准", ["批准", "approved"]),
+    ("日期", ["日期", "date"]),
+    ("版本", ["版本", "rev", "version"]),
+    ("图幅", ["图幅", "a0", "a1", "a2", "a3", "a4"]),
+]
+
+
+def _extract_title_block(labels, frame):
+    """标题栏键值提取：取图框右下 40% 区域（含右下 20% 高的横条）内的文本，按常见键词解析。"""
+    if not frame:
+        return {}
+    xmin, ymin, xmax, ymax = frame
+    w, h = xmax - xmin, ymax - ymin
+    if w <= 0 or h <= 0:
+        return {}
+    # 标题栏常见位置：右下角（也有部分图纸在左下）；取右下 45% 宽 × 40% 高区域 + 底边条
+    rx0 = round(xmin + w * 0.55, 2)
+    ry0 = round(ymin, 2)
+    ymax_limit = round(ymin + h * 0.45, 2)
+    zone = [lb for lb in labels
+            if lb["x"] >= rx0 and lb["y"] >= ry0
+            and lb["x"] <= xmax and lb["y"] <= ymax_limit]
+    if not zone:
+        return {}
+    # 同一行按 y 聚拢，按 x 排序拼成行文本
+    rows = {}
+    for lb in zone:
+        key = round(lb["y"], 1)
+        rows.setdefault(key, []).append(lb)
+    row_texts = []
+    for key in sorted(rows.keys(), reverse=True):   # 从高到低（标题栏顶部行优先）
+        row_texts.append(" ".join(lb["text"] for lb in sorted(rows[key], key=lambda z: z["x"])))
+
+    out = {}
+    joined = "\n".join(row_texts)
+    for field, keys in _TITLE_KEYS:
+        if field in out:
+            continue
+        for k in keys:
+            # 独立键匹配："键 值" 或 "键:值"，键前必须是行首或分隔符（避免命中“1号车间”里的“车间”）
+            m = re.search(r"(?:^|[\s:：])({})[\s:：]*(.+)$".format(re.escape(k)), joined, re.M)
+            if not m:
+                continue
+            rest = m.group(2).strip()
+            if rest:
+                out[field] = rest
+                break
+    # 若整区无键词，取最大字体/首行作为图名候选
+    if not out and zone:
+        zone_sorted = sorted(zone, key=lambda z: -z["y"])
+        out["图名(候选)"] = zone_sorted[0]["text"]
+    return out
 
 
 def _dwg_to_dxf(dwg_path: str) -> Optional[str]:

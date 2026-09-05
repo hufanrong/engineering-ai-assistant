@@ -14,6 +14,10 @@ MAX_FILE_MB = 500           # 单个文件大小上限（MB），超过跳过并
 
 # ============ 深度解析 ============
 # 解析开关：False 时对应类型文件仅登记、不解析（标记 skipped）
+# AUTO_DETECT_OPTIONAL=True 时：OCR/CAD 依赖一旦安装即自动启用（全套部署免改配置）；
+# 依赖未装时按下方 PARSE_* 开关决定。想强制关闭某能力，把 AUTO_DETECT_OPTIONAL 设为 False 并保持开关 False。
+AUTO_DETECT_OPTIONAL = True
+
 PARSE_PDF = True            # PDF 文本/表格提取
 PARSE_WORD = True           # Word (.docx) 文本+表格提取
 PARSE_EXCEL = True          # Excel (.xlsx) 表格结构化（台账核心）
@@ -33,6 +37,18 @@ EXT_PROJECT = [".xml"]      # Project 另存为的 XML（主计划文件）；�
 
 # 设备位号正则（用于从文本/表格/图纸中识别设备，浅层实体提取）
 EQUIPMENT_TAG_RE = r"(?<![A-Za-z0-9])([A-Z]{1,3}-\d{1,6}(?:[/-][A-Z]{0,3}\d{0,4})?)(?![A-Za-z0-9])"
+
+# ============ 可选依赖自动探测 ============
+def _detect_optional():
+    """探测 OCR / CAD 依赖是否已安装（全套部署后自动启用对应解析）。"""
+    import importlib.util
+    return {
+        "ocr": importlib.util.find_spec("paddleocr") is not None,
+        "cad": importlib.util.find_spec("ezdxf") is not None,
+    }
+
+
+OPTIONAL_READY = _detect_optional()
 
 # ============ 向量化 ============
 EMBED_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"  # 中文通用，约470MB，首次运行自动下载
