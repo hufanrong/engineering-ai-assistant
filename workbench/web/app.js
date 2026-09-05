@@ -13,6 +13,7 @@
       $("p-" + t.dataset.p).classList.add("on");
       if (t.dataset.p === "results") loadResults();
       if (t.dataset.p === "queue") loadQueue();
+      if (t.dataset.p === "relations") loadRelations();
     });
   });
 
@@ -208,6 +209,84 @@
         refreshStatus();
       })
       .catch(function (e) { m.textContent = "上传失败：" + e.message; });
+  });
+
+  // ---------- 关联图谱 ----------
+  function loadRelations() {
+    fetch("/api/relations").then(function (r) { return r.json(); }).then(function (g) {
+      var st = g.stats || {};
+      var chips = [
+        ["已解析文件", st.docs || 0], ["车间", st.workshops || 0],
+        ["关联设备", st.devices || 0], ["关联关系", st.relations || 0],
+        ["未归属文档", st.unassigned_docs || 0], ["待人工确认", st.human_confirm || 0]
+      ];
+      $("relStats").innerHTML = chips.map(function (c) {
+        return '<span class="chip">' + c[0] + " <b>" + c[1] + "</b></span>";
+      }).join("");
+
+      var sel = $("relWorkshop");
+      var cur = sel.value;
+      sel.innerHTML = '<option value="">— 选择车间查看详情 —</option>';
+      (g.workshops || []).forEach(function (w) {
+        sel.innerHTML += '<option value="' + esc(w.workshop) + '">' + esc(w.workshop) +
+          "（图纸 " + w.doc_count + " · 设备 " + w.device_count + "）</option>";
+      });
+      sel.value = cur;
+      if (cur) showWorkshop(cur); else $("relOut").innerHTML = "";
+
+      // 待人工确认列表
+      var hc = g.human_confirm || [];
+      var html = "";
+      if (hc.length) {
+        html += '<div style="margin-top:8px"><b style="color:#B45309">待人工确认（' + hc.length + ' 条）</b>';
+        html += '<div style="max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:4px;font-size:13px">';
+        hc.forEach(function (h) {
+          html += "<div>[" + esc(h.type) + "] " + esc(h.tag) + " → " + esc((h.workshops || []).join("、")) +
+            "（涉及：" + esc((h.files || []).join("、")) + "）</div>";
+        });
+        html += "</div></div>";
+      }
+      if (!html && !hc.length && $("relWorkshop").options.length <= 1) {
+        html = '<div class="empty">尚未生成图谱：先在"① 扫描解析"完成扫描，再点"重建图谱"</div>';
+      }
+      $("relOut").insertAdjacentHTML("beforeend", "");
+    }).catch(function (e) {
+      $("relStats").innerHTML = '<span class="msg">图谱加载失败：' + esc(e.message) + "</span>";
+    });
+  }
+
+  function showWorkshop(w) {
+    fetch("/api/relations/workshop/" + encodeURIComponent(w)).then(function (r) { return r.json(); }).then(function (d) {
+      var ws = d.workshop;
+      var html = '<div style="margin-top:8px">';
+      if (ws.zone) html += '<div class="msg">全场图位置：(' + ws.zone.x + ", " + ws.zone.y + ")（来自 " + esc(ws.zone.from) + "）</div>";
+      html += "<b>图纸/资料（" + (ws.docs || []).length + "）</b><table><tr><th>文件</th><th>类型</th><th>解析器</th></tr>";
+      (ws.docs || []).forEach(function (doc) {
+        html += "<tr><td>" + esc(doc.file) + "</td><td>" + esc(doc.doc_type) + "</td><td>" + esc(doc.parser) + "</td></tr>";
+      });
+      html += "</table>";
+      html += "<b style='display:block;margin-top:10px'>设备（" + (d.devices || []).length + "）</b><table><tr><th>位号</th><th>来源</th><th>坐标</th></tr>";
+      (d.devices || []).forEach(function (dev) {
+        var pos = (dev.cad_positions || []).map(function (p) { return "(" + p.x + "," + p.y + ")@" + p.file; }).join("、") || "—";
+        html += "<tr><td><b>" + esc(dev.tag) + "</b></td><td>" + (dev.files || []).length + " 份</td><td>" + esc(pos) + "</td></tr>";
+      });
+      html += "</table></div>";
+      $("relOut").innerHTML = html;
+    }).catch(function (e) { $("relOut").innerHTML = '<span class="msg">加载失败：' + esc(e.message) + "</span>"; });
+  }
+
+  $("btnRebuildRel").addEventListener("click", function () {
+    var b = $("btnRebuildRel");
+    b.disabled = true; b.textContent = "重建中…";
+    fetch("/api/relations/rebuild", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      b.textContent = "重建图谱";
+      setTimeout(function () { b.disabled = false; loadRelations(); }, 2500);
+    }).catch(function (e) { b.textContent = "重建图谱"; b.disabled = false; alert("重建失败：" + e.message); });
+  });
+  $("btnRelRefresh").addEventListener("click", loadRelations);
+  $("relWorkshop").addEventListener("change", function () {
+    var v = this.value;
+    if (v) showWorkshop(v); else $("relOut").innerHTML = "";
   });
 
   // ---------- 工具 ----------

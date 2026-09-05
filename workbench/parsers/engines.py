@@ -403,19 +403,28 @@ _TITLE_KEYS = [
 
 
 def _extract_title_block(labels, frame):
-    """标题栏键值提取：取图框右下 40% 区域（含右下 20% 高的横条）内的文本，按常见键词解析。"""
-    if not frame:
+    """标题栏键值提取：取图框右下 40% 区域（含右下 20% 高的横条）内的文本，按常见键词解析。
+    无图框时用全图文本边界兜底（部分简图/示意图没有图框线）。"""
+    if not labels:
         return {}
-    xmin, ymin, xmax, ymax = frame
-    w, h = xmax - xmin, ymax - ymin
-    if w <= 0 or h <= 0:
-        return {}
-    # 标题栏常见位置：右下角（也有部分图纸在左下）；取右下 45% 宽 × 40% 高区域 + 底边条
-    rx0 = round(xmin + w * 0.55, 2)
-    ry0 = round(ymin, 2)
-    ymax_limit = round(ymin + h * 0.45, 2)
+    if frame is None:
+        # 兜底：以文本范围为边界，取右下 50%×50% 区域
+        xs = [lb["x"] for lb in labels]
+        ys = [lb["y"] for lb in labels]
+        frame = [min(xs), min(ys), max(xs), max(ys)]
+        xmin, ymin, xmax, ymax = frame
+        w, h = xmax - xmin, ymax - ymin
+        rx0 = round(xmin + w * 0.5, 2)
+        ymax_limit = round(ymin + h * 0.5, 2)
+    else:
+        xmin, ymin, xmax, ymax = frame
+        w, h = xmax - xmin, ymax - ymin
+        if w <= 0 or h <= 0:
+            return {}
+        rx0 = round(xmin + w * 0.55, 2)
+        ymax_limit = round(ymin + h * 0.45, 2)
     zone = [lb for lb in labels
-            if lb["x"] >= rx0 and lb["y"] >= ry0
+            if lb["x"] >= rx0 and lb["y"] >= ymin
             and lb["x"] <= xmax and lb["y"] <= ymax_limit]
     if not zone:
         return {}

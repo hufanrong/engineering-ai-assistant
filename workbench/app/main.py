@@ -16,9 +16,10 @@ from . import config
 from . import scanner
 from .vector_store import VectorStore
 from . import upload_queue
+from . import relations
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.4")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.5")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -223,6 +224,39 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
         except Exception as e:  # noqa: BLE001
             results.append({"file": f.filename or "unnamed", "status": "failed", "error": str(e)})
     return {"ok": True, "results": results}
+
+
+# ---------- 关联图谱（多图纸联动） ----------
+@app.get("/api/relations")
+def relations_overview():
+    """关联图谱总览：车间/图纸/设备统计 + 待人工确认列表。"""
+    return relations.load_relations()
+
+
+@app.post("/api/relations/rebuild")
+def relations_rebuild():
+    """扫描/上传完成后，重建跨文件关联图谱（后台执行）。"""
+    if SCAN_STATUS.get("running"):
+        raise HTTPException(409, "扫描进行中，请稍后再重建")
+    def _run():
+        try:
+            relations.build_relations(force=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[relations] rebuild error: {e}")
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return {"ok": True, "msg": "关联图谱重建已开始（后台）"}
+
+
+@app.get("/api/relations/workshop/{workshop}")
+def relations_workshop(workshop: str):
+    """单个车间详情：图纸列表 + 设备列表 + 全场图位置。"""
+    g = relations.load_relations()
+    ws = next((w for w in g.get("workshops", []) if w["workshop"] == workshop), None)
+    if not ws:
+        raise HTTPException(404, f"未找到车间：{workshop}")
+    devs = [d for d in g.get("devices", []) if workshop in d.get("workshops", [])]
+    return {"workshop": ws, "devices": devs}
 
 
 # 静态资源（前端 js/css）

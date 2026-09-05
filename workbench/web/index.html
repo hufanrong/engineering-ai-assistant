@@ -77,6 +77,7 @@
     <div class="tab" data-p="results">② 结果库</div>
     <div class="tab" data-p="search">③ AI 检索</div>
     <div class="tab" data-p="queue">④ 上传队列</div>
+    <div class="tab" data-p="relations">⑤ 关联图谱</div>
   </div>
 
   <!-- ① 扫描 -->
@@ -141,6 +142,21 @@
     <button class="btn ghost" id="btnQueueRefresh">刷新队列</button>
     <div class="msg" id="uploadMsg" style="margin-top:8px"></div>
     <div id="queueList" style="margin-top:8px"></div>
+  </div>
+
+  <!-- ⑤ 关联图谱（多图纸联动） -->
+  <div class="panel" id="p-relations">
+    <h2>多图纸联动图谱（全场布置图 ↔ 车间图 ↔ 设备台账）</h2>
+    <div class="msg" style="margin-bottom:8px">扫描/上传完成后点"重建图谱"：自动归组车间、分类图纸、按设备位号跨图纸/台账关联，并把空间摘要写入向量库（AI 可回答"P-101 在哪、在哪个车间"）。无法确认的冲突进入"待人工确认"。</div>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn" id="btnRebuildRel">重建图谱</button>
+      <button class="btn ghost" id="btnRelRefresh">刷新</button>
+    </div>
+    <div class="row" id="relStats" style="margin-bottom:10px;gap:6px"></div>
+    <select id="relWorkshop" style="max-width:260px;margin-bottom:8px">
+      <option value="">— 选择车间查看详情 —</option>
+    </select>
+    <div id="relOut"></div>
   </div>
 </div>
 
