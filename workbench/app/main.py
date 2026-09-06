@@ -28,9 +28,10 @@ from . import voice_transcribe
 from . import workshop_assign
 from . import device_workshop
 from . import tag_alias
+from . import version_manager
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.31")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.32")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -804,6 +805,35 @@ def tag_alias_reject(req: TagAliasReq):
         raise HTTPException(400, "需要 primary 与 alias")
     ok = tag_alias.reject(req.primary, req.alias)
     return {"ok": ok}
+
+
+class VersionSetLatestReq(BaseModel):
+    file_name: str
+    sha256: str
+
+
+@app.get("/api/versions/list")
+def versions_list():
+    """文件版本对照表（v0.1.32）：多版本文件列表+最新版+冲突标记。"""
+    return {"multi_version": version_manager.list_multi_version(),
+            "conflicts": version_manager.list_conflicts(),
+            "stats": version_manager.stats()}
+
+
+@app.get("/api/versions/conflicts")
+def versions_conflicts():
+    """待人工确认的版本冲突列表。"""
+    return {"conflicts": version_manager.list_conflicts(),
+            "stats": version_manager.stats()}
+
+
+@app.post("/api/versions/set-latest")
+def versions_set_latest(req: VersionSetLatestReq):
+    """人工指定某版本为最新版（清除冲突标记）。"""
+    if not req.file_name.strip() or not req.sha256.strip():
+        raise HTTPException(400, "需要 file_name 与 sha256")
+    ok = version_manager.set_latest(req.file_name, req.sha256)
+    return {"ok": ok, "file_name": req.file_name, "latest_sha256": req.sha256}
 
 
 @app.get("/api/archive/status")

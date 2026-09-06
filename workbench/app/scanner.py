@@ -108,6 +108,16 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                                                     res.structure or {})
                 except Exception:  # noqa: BLE001
                     pass
+                # v0.1.32：登记文件版本（多版本对照+最新版判断）
+                try:
+                    from . import version_manager
+                    import os as _os
+                    _fsize = _os.path.getsize(path) if _os.path.exists(path) else 0
+                    version_manager.record_version(res.file_name, res.sha256,
+                                                    ts=datetime.datetime.now().isoformat(),
+                                                    size=_fsize, status=res.status)
+                except Exception:  # noqa: BLE001
+                    pass
             else:
                 stats["skipped" if res.status == "skipped" else "failed"] += 1
 

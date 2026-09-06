@@ -130,6 +130,16 @@
       <div id="wsList"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2>文件版本对照与冲突合并（v0.1.32）</h2>
+      <div class="msg" style="margin-bottom:8px">多电脑并库时，同名不同内容文件自动建立版本对照表，按时间戳以最新版为准；时间戳相同或缺失进待人工确认。同 SHA256 文件自动去重。</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" id="btnVerRefresh">刷新版本</button>
+        <span style="font-size:12px;color:var(--text2)" id="verSummary"></span>
+      </div>
+      <div id="verConflicts" style="margin-bottom:8px"></div>
+      <div id="verList"></div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
       <h2>文件夹批量上传（v0.1.22）</h2>
       <label>选择多个文件夹，或把文件夹直接拖到下面区域。自动分批次后台上传（每批 20 个），切换页面不断；关掉页面后已传完的文件已入库，重开后重新选择文件夹会自动跳过已传的。</label>
       <div id="dropZone" style="border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--text2);margin-top:8px;cursor:pointer">

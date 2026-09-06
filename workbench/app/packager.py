@@ -62,6 +62,17 @@ def import_library(raw: bytes) -> dict:
                 idx = json.load(f)
         incoming_idx = json.loads(zf.read("index.json").decode("utf-8"))
         for sha, info in incoming_idx.items():
+            # v0.1.32：登记版本（同名不同 sha → 多版本对照，按时间戳最新版为准）
+            try:
+                from . import version_manager
+                version_manager.record_version(
+                    info.get("file_name", ""), sha,
+                    ts=info.get("ts", "") or datetime.datetime.now().isoformat(),
+                    source_node=manifest.get("node", "imported"),
+                    size=info.get("size", 0),
+                    status=info.get("status", "parsed"))
+            except Exception:  # noqa: BLE001
+                pass
             if sha in idx:
                 stats["index_dup"] += 1
                 # 升级：包内解析更完整（parsed/partial）则覆盖本地记录（同一 sha=同一文件）

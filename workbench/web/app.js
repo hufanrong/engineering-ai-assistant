@@ -1389,3 +1389,58 @@ function genDo() {
   }
   $("btnAliasRefresh").addEventListener("click", loadTagAlias);
   loadTagAlias();
+
+  // ---------- 文件版本对照与冲突合并（v0.1.32） ----------
+  function loadVersions() {
+    fetch("/api/versions/list").then(function (r) { return r.json(); }).then(function (d) {
+      var st = d.stats || {};
+      $("verSummary").textContent = "总文件 " + (st.total_files || 0) + " · 多版本文件 " +
+        (st.multi_version_files || 0) + " · 待确认冲突 " + (st.conflicts || 0);
+      // 冲突
+      var conflicts = d.conflicts || [];
+      if (!conflicts.length) {
+        $("verConflicts").innerHTML = "";
+      } else {
+        var html = '<b style="color:#C0392B">待人工确认（指定最新版后清除冲突）</b><table><tr><th>文件名</th><th>版本</th><th>SHA256</th><th>时间</th><th>来源</th><th>操作</th></tr>';
+        conflicts.forEach(function (c) {
+          (c.versions || []).forEach(function (v, i) {
+            var isLatest = v.is_latest ? '<span class="st parsed">最新</span>' : "";
+            html += "<tr><td>" + (i === 0 ? esc(c.file_name) : "") + "</td><td>v" + (i + 1) + " " + isLatest + "</td>" +
+              "<td style='font-size:11px;font-family:monospace'>" + esc(v.sha256.slice(0, 16)) + "…</td>" +
+              "<td style='font-size:12px'>" + esc(v.ts || "—") + "</td>" +
+              "<td style='font-size:12px'>" + esc(v.source_node || "—") + "</td>" +
+              '<td><button class="btn small verSetLatest" data-f="' + esc(c.file_name) + '" data-s="' + esc(v.sha256) +
+              '" style="background:#1E5AA8;color:#fff">设为最新版</button></td></tr>';
+          });
+        });
+        html += "</table>";
+        $("verConflicts").innerHTML = html;
+        Array.prototype.forEach.call(document.querySelectorAll(".verSetLatest"), function (b) {
+          b.addEventListener("click", function () {
+            fetch("/api/versions/set-latest", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ file_name: b.getAttribute("data-f"), sha256: b.getAttribute("data-s") }) })
+              .then(function (r) { return r.json(); }).then(function (d) {
+                if (d.ok) { loadVersions(); } else { alert("操作失败"); }
+              }).catch(function (e) { alert("失败：" + e.message); });
+          });
+        });
+      }
+      // 多版本列表（非冲突）
+      var multi = (d.multi_version || []).filter(function (m) { return !m.conflict; });
+      if (!multi.length) {
+        $("verList").innerHTML = conflicts.length ? "" : '<div class="empty">暂无多版本文件</div>';
+      } else {
+        var html2 = '<b>多版本文件（已自动按时间戳取最新版）</b><table><tr><th>文件名</th><th>版本数</th><th>最新版 SHA</th><th>最新时间</th><th>最新来源</th></tr>';
+        multi.forEach(function (m) {
+          html2 += "<tr><td>" + esc(m.file_name) + "</td><td>" + m.version_count + "</td>" +
+            "<td style='font-size:11px;font-family:monospace'>" + esc(m.latest_sha256.slice(0, 16)) + "…</td>" +
+            "<td style='font-size:12px'>" + esc(m.latest_ts || "—") + "</td>" +
+            "<td style='font-size:12px'>" + esc(m.latest_source || "—") + "</td></tr>";
+        });
+        html2 += "</table>";
+        $("verList").innerHTML = html2;
+      }
+    }).catch(function (e) { $("verList").innerHTML = '<div style="color:#C0392B">加载失败：' + esc(e.message) + "</div>"; });
+  }
+  $("btnVerRefresh").addEventListener("click", loadVersions);
+  loadVersions();
