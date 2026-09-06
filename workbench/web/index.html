@@ -514,6 +514,21 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.61：设备位置按标高分层可视化 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备位置按标高分层可视化（v0.1.61）</h3>
+  <div class="msg" style="margin-bottom:6px">按标高z坐标分层展示设备位置，支持切换不同标高层、分层堆叠视图。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="elevationSelect" style="padding:4px 8px;font-size:12px">
+      <option value="">全部标高</option>
+    </select>
+    <button class="btn" id="btnElevationLayer">查看该层</button>
+    <button class="btn" id="btnElevationStack" style="background:#FF7A00">分层堆叠视图</button>
+    <button class="btn" id="btnElevationList">刷新标高列表</button>
+  </div>
+  <div id="elevationSvgContainer" style="max-width:100%;overflow-x:auto;display:none"></div>
+</div>
+
 <!-- v0.1.59：多电脑并库竣工资料合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库竣工资料合并（v0.1.59）</h3>

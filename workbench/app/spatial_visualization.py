@@ -10,6 +10,21 @@ import json
 from typing import Optional
 
 
+
+# v0.1.61：设备类型颜色映射（模块级常量）
+DEVICE_TYPE_COLORS = {
+    "泵": "#3498db",
+    "压缩机": "#e74c3c",
+    "塔器": "#9b59b6",
+    "换热器": "#2ecc71",
+    "容器": "#f39c12",
+    "风机": "#1abc9c",
+    "电机": "#34495e",
+    "阀门": "#95a5a6",
+    "储罐": "#e67e22",
+    "其他": "#7f8c8d",
+}
+
 def _load_spatial_data():
     """加载空间模型和管线网络数据。"""
     try:
@@ -307,13 +322,147 @@ def get_stats() -> dict:
                    if c.get("from_device") in {d["tag"] for d in devices}
                    and c.get("to_device") in {d["tag"] for d in devices}]
     has_coord = sum(1 for d in devices if d.get("x") is not None and d.get("y") is not None)
+    has_elevation = sum(1 for d in devices if d.get("z") is not None)
+    elevations = sorted(set(round(d["z"], 2) for d in devices if d.get("z") is not None))
     return {
         "total_devices": len(devices),
         "devices_with_coords": has_coord,
         "devices_without_coords": len(devices) - has_coord,
+        "devices_with_elevation": has_elevation,
         "workshops": len(workshops),
         "device_types": len(types),
         "piping_connections": len(connections),
         "workshop_list": workshops,
         "type_list": types,
+        "elevation_list": elevations,
     }
+
+
+def list_elevations() -> list:
+    """v0.1.61：列出所有标高层。"""
+    devices, _ = _load_spatial_data()
+    elevations = set()
+    for d in devices:
+        if d.get("z") is not None:
+            elevations.add(round(d["z"], 2))
+    return sorted(list(elevations))
+
+
+def _group_devices_by_elevation(devices: list) -> tuple:
+    """v0.1.61：按标高分组设备。"""
+    groups = {}
+    no_elevation = []
+    for d in devices:
+        if d.get("z") is not None:
+            key = round(d["z"], 2)
+            if key not in groups:
+                groups[key] = []
+            groups[key].append(d)
+        else:
+            no_elevation.append(d)
+    return groups, no_elevation
+
+
+def generate_elevation_layer_svg(elevation=None, workshop=None, device_type=None) -> str:
+    """v0.1.61：生成指定标高层的设备位置SVG。"""
+    devices, network = _load_spatial_data()
+    filtered = []
+    for d in devices:
+        if workshop and d.get("workshop") != workshop:
+            continue
+        if device_type and d.get("type") != device_type:
+            continue
+        if elevation is None:
+            if d.get("z") is not None:
+                continue
+        else:
+            if d.get("z") is None or abs(d["z"] - elevation) > 0.1:
+                continue
+        filtered.append(d)
+    coords = _normalize_coordinates(filtered)
+    width, height = 1000, 700
+    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" style="background:#f8f9fa;font-family:Arial,sans-serif">']
+    title = f"设备位置分布图 - 标高 {elevation}m" if elevation is not None else "设备位置分布图 - 无标高设备"
+    svg.append(f'<text x="{width//2}" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#1E5AA8">{title}</text>')
+    svg.append(f'<line x1="80" y1="{height-80}" x2="{width-40}" y2="{height-80}" stroke="#333" stroke-width="2"/>')
+    svg.append(f'<line x1="80" y1="60" x2="80" y2="{height-80}" stroke="#333" stroke-width="2"/>')
+    for i in range(1, 10):
+        x = 80 + (width - 120) * i / 10
+        y = 60 + (height - 140) * i / 10
+        svg.append(f'<line x1="{x}" y1="60" x2="{x}" y2="{height-80}" stroke="#e0e0e0" stroke-width="0.5"/>')
+        svg.append(f'<line x1="80" y1="{y}" x2="{width-40}" y2="{y}" stroke="#e0e0e0" stroke-width="0.5"/>')
+    for d in filtered:
+        tag = d["tag"]
+        pos = coords.get(tag, {"x": width//2, "y": height//2})
+        x, y = pos["x"], pos["y"]
+        dev_type = d.get("type", "其他")
+        color = DEVICE_TYPE_COLORS.get(dev_type, "#95a5a6")
+        svg.append(f'<circle cx="{x}" cy="{y}" r="12" fill="{color}" stroke="#fff" stroke-width="2"/>')
+        svg.append(f'<text x="{x+18}" y="{y+4}" font-size="11" fill="#333">{tag}</text>')
+        if d.get("workshop"):
+            svg.append(f'<text x="{x+18}" y="{y+18}" font-size="9" fill="#888">{d["workshop"]}</text>')
+    legend_x = width - 180
+    legend_y = 60
+    svg.append(f'<rect x="{legend_x}" y="{legend_y}" width="170" height="200" fill="white" stroke="#ddd" rx="5"/>')
+    svg.append(f'<text x="{legend_x+10}" y="{legend_y+20}" font-size="12" font-weight="bold" fill="#333">设备类型图例</text>')
+    for i, (dtype, color) in enumerate(DEVICE_TYPE_COLORS.items()):
+        ly = legend_y + 40 + i * 18
+        svg.append(f'<circle cx="{legend_x+20}" cy="{ly}" r="6" fill="{color}"/>')
+        svg.append(f'<text x="{legend_x+35}" y="{ly+4}" font-size="10" fill="#555">{dtype}</text>')
+    svg.append(f'<text x="90" y="{height-30}" font-size="11" fill="#666">设备总数: {len(filtered)} | 标高: {elevation if elevation is not None else "无"}</text>')
+    svg.append('</svg>')
+    return "\n".join(svg)
+
+
+def generate_elevation_stack_svg(workshop=None, device_type=None) -> str:
+    """v0.1.61：生成分层堆叠视图（所有标高层同时展示）。"""
+    devices, _ = _load_spatial_data()
+    filtered = []
+    for d in devices:
+        if workshop and d.get("workshop") != workshop:
+            continue
+        if device_type and d.get("type") != device_type:
+            continue
+        filtered.append(d)
+    groups, no_elevation = _group_devices_by_elevation(filtered)
+    elevations = sorted(groups.keys())
+    layer_height = 180
+    width = 1000
+    total_layers = len(elevations) + (1 if no_elevation else 0)
+    height = 60 + total_layers * layer_height + 40
+    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" style="background:#f8f9fa;font-family:Arial,sans-serif">']
+    svg.append(f'<text x="{width//2}" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#1E5AA8">设备位置分层堆叠视图（按标高）</text>')
+    all_layers = [(e, groups[e]) for e in elevations]
+    if no_elevation:
+        all_layers.append((None, no_elevation))
+    for layer_idx, (elev, layer_devices) in enumerate(all_layers):
+        layer_y = 60 + layer_idx * layer_height
+        bg_color = "#ffffff" if layer_idx % 2 == 0 else "#f0f4f8"
+        svg.append(f'<rect x="60" y="{layer_y}" width="{width-100}" height="{layer_height-10}" fill="{bg_color}" stroke="#ddd" rx="5"/>')
+        title = f"标高 {elev}m" if elev is not None else "无标高设备"
+        svg.append(f'<text x="80" y="{layer_y+25}" font-size="14" font-weight="bold" fill="#1E5AA8">{title}（{len(layer_devices)}台）</text>')
+        cols = min(8, max(1, len(layer_devices)))
+        rows = (len(layer_devices) + cols - 1) // cols
+        cell_w = (width - 200) / cols
+        cell_h = (layer_height - 60) / max(1, rows)
+        for i, d in enumerate(layer_devices):
+            col = i % cols
+            row = i // cols
+            x = 100 + col * cell_w + cell_w / 2
+            y = layer_y + 50 + row * cell_h + cell_h / 2
+            dev_type = d.get("type", "其他")
+            color = DEVICE_TYPE_COLORS.get(dev_type, "#95a5a6")
+            svg.append(f'<circle cx="{x}" cy="{y}" r="10" fill="{color}" stroke="#fff" stroke-width="2"/>')
+            svg.append(f'<text x="{x}" y="{y+25}" text-anchor="middle" font-size="10" fill="#333">{d["tag"]}</text>')
+            if d.get("workshop"):
+                svg.append(f'<text x="{x}" y="{y+38}" text-anchor="middle" font-size="8" fill="#888">{d["workshop"]}</text>')
+    legend_x = width - 160
+    legend_y = 60
+    svg.append(f'<rect x="{legend_x}" y="{legend_y}" width="150" height="180" fill="white" stroke="#ddd" rx="5"/>')
+    svg.append(f'<text x="{legend_x+10}" y="{legend_y+20}" font-size="11" font-weight="bold" fill="#333">设备类型</text>')
+    for i, (dtype, color) in enumerate(DEVICE_TYPE_COLORS.items()):
+        ly = legend_y + 38 + i * 16
+        svg.append(f'<circle cx="{legend_x+18}" cy="{ly}" r="5" fill="{color}"/>')
+        svg.append(f'<text x="{legend_x+30}" y="{ly+3}" font-size="9" fill="#555">{dtype}</text>')
+    svg.append('</svg>')
+    return "\n".join(svg)

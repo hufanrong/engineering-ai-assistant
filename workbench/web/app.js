@@ -2288,3 +2288,50 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnMergeStats");
   if (b3) b3.addEventListener("click", function() { mergeLoadStats(); mergeLoadPending(); mergeLoadLog(); });
 });
+
+// v0.1.61：设备位置按标高分层可视化
+function elevationLoadList() {
+  fetch("/api/spatial-visualization/elevation/list").then(function(r){return r.json();}).then(function(d){
+    var sel = document.getElementById("elevationSelect");
+    if (!sel) return;
+    sel.innerHTML = '<option value="">全部标高</option>';
+    (d.elevations || []).forEach(function(e) {
+      var opt = document.createElement("option");
+      opt.value = e;
+      opt.textContent = "标高 " + e + "m";
+      sel.appendChild(opt);
+    });
+    // 无标高选项
+    var optNone = document.createElement("option");
+    optNone.value = "none";
+    optNone.textContent = "无标高设备";
+    sel.appendChild(optNone);
+  }).catch(function(){});
+}
+function elevationShowLayer() {
+  var elev = document.getElementById("elevationSelect").value;
+  var url = "/api/spatial-visualization/elevation/layer";
+  if (elev === "none") url += "?elevation=";
+  else if (elev) url += "?elevation=" + elev;
+  fetch(url).then(function(r){return r.text();}).then(function(svg){
+    var el = document.getElementById("elevationSvgContainer");
+    el.style.display = "block";
+    el.innerHTML = svg;
+  }).catch(function(e){ alert("加载失败：" + e.message); });
+}
+function elevationShowStack() {
+  fetch("/api/spatial-visualization/elevation/stack").then(function(r){return r.text();}).then(function(svg){
+    var el = document.getElementById("elevationSvgContainer");
+    el.style.display = "block";
+    el.innerHTML = svg;
+  }).catch(function(e){ alert("加载失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnElevationLayer");
+  if (b1) b1.addEventListener("click", elevationShowLayer);
+  var b2 = document.getElementById("btnElevationStack");
+  if (b2) b2.addEventListener("click", elevationShowStack);
+  var b3 = document.getElementById("btnElevationList");
+  if (b3) b3.addEventListener("click", elevationLoadList);
+  elevationLoadList();
+});

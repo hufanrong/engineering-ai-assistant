@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.60")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.61")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1396,6 +1396,32 @@ def spatial_visualization_html(workshop: str = None, eq_type: str = None):
     html = _sv.generate_spatial_html(workshop, eq_type)
     return Response(content=html, media_type="text/html")
 
+
+
+@app.get("/api/spatial-visualization/elevation/list")
+def spatial_visualization_elevation_list():
+    """v0.1.61：列出所有标高层。"""
+    from . import spatial_visualization as _sv
+    return {"ok": True, "elevations": _sv.list_elevations()}
+
+
+@app.get("/api/spatial-visualization/elevation/layer")
+def spatial_visualization_elevation_layer(elevation: float = None,
+                                            workshop: str = None,
+                                            device_type: str = None):
+    """v0.1.61：生成指定标高层的设备位置SVG。"""
+    from . import spatial_visualization as _sv
+    svg = _sv.generate_elevation_layer_svg(elevation=elevation, workshop=workshop, device_type=device_type)
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.get("/api/spatial-visualization/elevation/stack")
+def spatial_visualization_elevation_stack(workshop: str = None,
+                                           device_type: str = None):
+    """v0.1.61：生成分层堆叠视图。"""
+    from . import spatial_visualization as _sv
+    svg = _sv.generate_elevation_stack_svg(workshop=workshop, device_type=device_type)
+    return Response(content=svg, media_type="image/svg+xml")
 
 @app.get("/api/spatial-visualization/stats")
 def spatial_visualization_stats():
