@@ -999,3 +999,32 @@ function genDo() {
         });
     })(0);
   });
+
+  // ---------- 竣工资料自动组卷（v0.1.24） ----------
+  function loadArchive() {
+    fetch("/api/archive/status").then(function (r) { return r.json(); }).then(function (d) {
+      $("archiveSummary").textContent = "已归档资料 " + d.generated_total + " 份 · 卷宗齐全 " + d.ready_volumes + "/" + d.total_volumes +
+        " · 资料类型 " + d.have_types + "/" + d.need_types;
+      var html = "";
+      d.volumes.forEach(function (v) {
+        var st = v.ready ? '<span class="st parsed">齐全</span>' : '<span class="st failed">缺 ' + v.missing.join("、") + "</span>";
+        html += '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">' +
+          "<b>" + v.no + " " + esc(v.name) + "</b> " + st + "</div>";
+        if (v.items.length) {
+          html += '<div style="font-size:12px;color:var(--text2);margin-top:4px">' +
+            v.items.map(function (it) { return esc(it.doc_type) + "×" + it.count + "（最新 " + esc(it.latest) + " " + esc(it.ts) + "）"; }).join("；") + "</div>";
+        }
+        html += "</div>";
+      });
+      $("archiveList").innerHTML = html;
+    }).catch(function (e) { $("archiveList").innerHTML = '<div style="color:#C0392B">组卷状态读取失败：' + esc(e.message) + "</div>"; });
+  }
+  $("btnArchiveRefresh").addEventListener("click", loadArchive);
+  $("btnArchiveExport").addEventListener("click", function () {
+    var a = document.createElement("a");
+    a.href = "/api/archive/export";
+    a.download = "";
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  loadArchive();

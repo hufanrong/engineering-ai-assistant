@@ -259,6 +259,16 @@
     </div>
     <div class="msg" id="docplanMsg"></div>
     <div id="docplanList"></div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2>竣工资料自动组卷（v0.1.24）</h2>
+      <div class="msg" style="margin-bottom:8px">生成的资料自动存档归档；按竣工归档卷宗归卷，缺失项列出待补，补齐后可整卷导出（zip 含卷内目录.xlsx）。</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" id="btnArchiveRefresh">刷新组卷状态</button>
+        <button class="btn orange" id="btnArchiveExport">导出归档包（zip）</button>
+        <span style="font-size:12px;color:var(--text2)" id="archiveSummary"></span>
+      </div>
+      <div id="archiveList"></div>
+    </div>
   </div>
 
   <!-- ⑨ 云库（手机端对接 v0.1.14） -->

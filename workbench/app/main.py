@@ -23,9 +23,10 @@ from . import ai_chat, docgen
 from . import packager
 from . import platform_store
 from . import docplan
+from . import archive
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.23")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.24")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -611,6 +612,7 @@ def docplan_generate(req: DocPlanGenReq):
         content, missing = docgen.fill_template(req.doc_type, data)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"生成失败：{e}")
+    archive._save_generated(req.doc_type, content)  # v0.1.24 生成即存档（组卷来源）
     import io
     from urllib.parse import quote
     fname = f"繁工AI_{req.doc_type}_{datetime_now()}.docx"
@@ -628,6 +630,7 @@ def docgen_generate(req: DocGenReq):
         content, missing = docgen.fill_template(req.doc_type, req.data or {})
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"生成失败：{e}")
+    archive._save_generated(req.doc_type, content)  # v0.1.24 生成即存档（组卷来源）
     import io
     from urllib.parse import quote
     fname = f"繁工AI_{req.doc_type}_{datetime_now()}.docx"
@@ -665,6 +668,25 @@ async def library_import(file: UploadFile = File(...)):
 
 
 # ---------- 平台级规范库（v0.1.10） ----------
+
+@app.get("/api/archive/status")
+def archive_status():
+    """竣工资料组卷状态：每卷已有/缺失、齐全度（v0.1.24）。"""
+    return archive.archive_status()
+
+
+@app.post("/api/archive/export")
+def archive_export():
+    """按竣工归档卷宗导出 zip（卷目录 + 卷内目录.xlsx + 资料文件）。"""
+    import io
+    from urllib.parse import quote
+    content = archive.export_archive()
+    fname = f"繁工AI_竣工资料归档包_{datetime_now()}.zip"
+    ascii_name = f"fangong_archive_{datetime_now()}.zip"
+    return StreamingResponse(io.BytesIO(content), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(fname)}'})
+
+
 @app.post("/api/platform/upload")
 async def platform_upload(files: list[UploadFile] = File(...)):
     """上传规范/国标文件 → 独立平台库（解析→标准号提取→向量化→台账）。"""
