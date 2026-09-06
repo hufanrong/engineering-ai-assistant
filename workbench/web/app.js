@@ -2066,3 +2066,83 @@ document.addEventListener("DOMContentLoaded", function () {
   var b2 = document.getElementById("btnPipingRefresh");
   if (b2) b2.addEventListener("click", pipingLoad);
 });
+
+// v0.1.48：竣工资料自动组卷增强
+function archiveEnhancedLoad() {
+  fetch("/api/archive/status-enhanced").then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.ok) return;
+    var el = document.getElementById("archiveEnhancedStats");
+    if (el) el.textContent = d.ready_volumes + "/" + d.total_volumes + "卷就绪 | " + d.total_files + "份文件 | 齐全度" + d.completeness + "%";
+    var box = document.getElementById("archiveEnhancedVolumes");
+    var html = "";
+    (d.volumes || []).forEach(function (v) {
+      var readyBadge = v.ready ? '<span style="background:#52C41A;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px">齐全</span>' : '<span style="background:#C0392B;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px">缺' + v.missing.length + '</span>';
+      html += '<div style="padding:5px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:4px;background:#fff">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">';
+      html += '<span><strong style="color:var(--accent)">' + v.no + ' ' + esc(v.name) + '</strong> ' + readyBadge + ' <span style="font-size:11px;color:var(--text2)">(' + v.file_count + '份)</span></span>';
+      html += '</div>';
+      // 专业分类
+      var profs = Object.keys(v.professions || {});
+      if (profs.length) {
+        html += '<div style="margin-top:4px;padding-left:8px;font-size:11px">';
+        profs.forEach(function (prof) {
+          var workshops = Object.keys(v.professions[prof] || {});
+          html += '<div style="margin-bottom:2px"><strong>' + esc(prof) + '</strong>：' + workshops.map(function (ws) {
+            var devs = Object.keys(v.professions[prof][ws] || {});
+            return esc(ws) + '(' + devs.length + '类)';
+          }).join("、") + '</div>';
+        });
+        html += '</div>';
+      }
+      if (v.missing && v.missing.length) {
+        html += '<div style="margin-top:3px;font-size:11px;color:#C0392B">缺失：' + v.missing.map(esc).join("、") + '</div>';
+      }
+      html += '</div>';
+    });
+    box.innerHTML = html || '<div class="empty">暂无归档资料</div>';
+  }).catch(function () {});
+}
+function archiveCompletenessCheck() {
+  fetch("/api/archive/completeness").then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.ok) return;
+    document.getElementById("archiveCompletenessReport").style.display = "block";
+    var html = "";
+    html += '<div style="margin-bottom:4px">整体齐全度：<strong>' + d.overall_completeness + '%</strong> | 就绪卷：' + d.ready_volumes + '/' + d.total_volumes + ' | 设备完整：' + (d.total_devices - d.devices_with_missing) + '/' + d.total_devices + '</div>';
+    var missing = d.missing_by_volume || {};
+    var missingKeys = Object.keys(missing);
+    if (missingKeys.length) {
+      html += '<div style="margin-bottom:4px"><strong>卷级缺失：</strong></div>';
+      missingKeys.forEach(function (volNo) {
+        var v = missing[volNo];
+        html += '<div style="padding-left:8px;color:#C0392B">' + volNo + ' ' + esc(v.name) + '：缺' + v.missing_docs.map(esc).join("、") + '</div>';
+      });
+    }
+    var devComp = d.device_completeness || {};
+    var incompleteDevs = Object.keys(devComp).filter(function (tag) { return !devComp[tag].complete; });
+    if (incompleteDevs.length) {
+      html += '<div style="margin-top:4px"><strong>设备级缺失（前10台）：</strong></div>';
+      incompleteDevs.slice(0, 10).forEach(function (tag) {
+        html += '<div style="padding-left:8px;color:#FAAD14">' + esc(tag) + '：缺' + devComp[tag].missing.map(esc).join("、") + '</div>';
+      });
+      if (incompleteDevs.length > 10) html += '<div style="padding-left:8px;color:var(--text2)">...共' + incompleteDevs.length + '台设备有缺失</div>';
+    }
+    document.getElementById("completenessContent").innerHTML = html;
+  }).catch(function () {});
+}
+function archiveExportEnhanced() {
+  fetch("/api/archive/export-enhanced").then(function (r) { return r.blob(); }).then(function (blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "繁工AI_竣工资料归档包_增强版.zip";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }).catch(function (e) { alert("导出失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnArchiveEnhanced");
+  if (b1) b1.addEventListener("click", archiveEnhancedLoad);
+  var b2 = document.getElementById("btnArchiveCompleteness");
+  if (b2) b2.addEventListener("click", archiveCompletenessCheck);
+  var b3 = document.getElementById("btnArchiveExportEnhanced");
+  if (b3) b3.addEventListener("click", archiveExportEnhanced);
+});

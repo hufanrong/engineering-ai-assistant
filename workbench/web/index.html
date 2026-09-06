@@ -483,6 +483,23 @@
   </div>
 </div>
 
+<!-- v0.1.48：竣工资料自动组卷增强 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">竣工资料自动组卷（增强版 v0.1.48）</h3>
+  <div class="msg" style="margin-bottom:6px">多级分类组卷（卷→专业→车间→设备），自动检查完整性，生成详细卷内目录，导出多级文件夹结构归档包。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnArchiveEnhanced">刷新增强状态</button>
+    <button class="btn" id="btnArchiveCompleteness">完整性检查</button>
+    <button class="btn" id="btnArchiveExportEnhanced" style="background:#52C41A">导出增强归档包</button>
+    <span id="archiveEnhancedStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="archiveEnhancedVolumes" style="font-size:12px;max-height:250px;overflow-y:auto"></div>
+  <div id="archiveCompletenessReport" style="margin-top:8px;display:none">
+    <h4 style="margin:0 0 4px;font-size:13px">完整性检查报告</h4>
+    <div id="completenessContent" style="font-size:11px"></div>
+  </div>
+</div>
+
 <!-- v0.1.41：设备位置人工确认弹窗 -->
 <div id="spatialEditModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:12px;width:min(420px,92vw);padding:16px;box-sizing:border-box;">

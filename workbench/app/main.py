@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.47")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.48")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1337,6 +1337,40 @@ def piping_pipe_info(pipe_no: str):
         return {"ok": False, "error": "管线不存在"}
     return {"ok": True, **info}
 
+
+
+@app.get("/api/archive/status-enhanced")
+def archive_status_enhanced_api():
+    """v0.1.48：增强版归档状态（多级分类：卷→专业→车间→设备）。"""
+    from . import archive as _arch
+    return {"ok": True, **_arch.archive_status_enhanced()}
+
+
+@app.get("/api/archive/catalog")
+def archive_catalog(volume_no: str = None):
+    """v0.1.48：生成卷内详细目录。"""
+    from . import archive as _arch
+    rows = _arch.generate_volume_catalog(volume_no)
+    return {"ok": True, "rows": rows, "count": len(rows) - 1}
+
+
+@app.get("/api/archive/completeness")
+def archive_completeness_check():
+    """v0.1.48：归档完整性检查（与completeness_check联动）。"""
+    from . import archive as _arch
+    return {"ok": True, **_arch.check_archive_completeness()}
+
+
+@app.get("/api/archive/export-enhanced")
+def archive_export_enhanced():
+    """v0.1.48：增强版归档导出（多级文件夹结构）。"""
+    from . import archive as _arch
+    from urllib.parse import quote
+    content = _arch.export_archive_enhanced()
+    fname = "繁工AI_竣工资料归档包_增强版.zip"
+    disp = "attachment; filename=\"archive_enhanced.zip\"; filename*=UTF-8''" + quote(fname)
+    return Response(content=content, media_type="application/zip",
+                    headers={"Content-Disposition": disp})
 
 @app.get("/api/piping/stats")
 def piping_stats():

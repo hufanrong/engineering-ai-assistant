@@ -149,3 +149,266 @@ def _make_xlsx(rows: list) -> bytes:
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
+
+
+# ==================== v0.1.48 竣工资料自动组卷增强 ====================
+
+# 专业分类映射（资料类型 → 专业）
+PROFESSION_MAP = {
+    "施工方案": "工艺设备",
+    "吊装方案": "工艺设备",
+    "技术交底": "综合",
+    "开箱验收记录": "工艺设备",
+    "隐蔽工程验收记录": "工艺设备",
+    "施工计划": "综合",
+    "施工日志": "综合",
+    "设计变更": "综合",
+    "货损报告": "综合",
+    "竣工资料": "综合",
+    "安全交底": "安全",
+    "质量验收记录": "质量",
+    "压力试验记录": "工艺管道",
+    "管道焊接记录": "工艺管道",
+    "电气调试记录": "电气",
+    "仪表调试记录": "仪表",
+    "设备试运转记录": "工艺设备",
+}
+
+# 组卷规则：卷 → 专业 → 车间 → 设备
+def _get_profession(doc_type: str) -> str:
+    """获取资料所属专业。"""
+    return PROFESSION_MAP.get(doc_type, "其他")
+
+
+def _get_doc_workshop(file_path: str) -> str:
+    """从资料关联中获取车间（v0.1.39 doc_relations）。"""
+    try:
+        from . import doc_relations as _dr
+        rels = _dr.list_relations()
+        fname = os.path.basename(file_path)
+        for r in rels:
+            if r.get("file_name") == fname or r.get("doc_id", "").endswith(fname):
+                ws = r.get("workshops") or []
+                if ws:
+                    return ws[0]
+    except Exception:  # noqa: BLE001
+        pass
+    return "未分类"
+
+
+def _get_doc_devices(file_path: str) -> list:
+    """从资料关联中获取设备列表。"""
+    try:
+        from . import doc_relations as _dr
+        rels = _dr.list_relations()
+        fname = os.path.basename(file_path)
+        for r in rels:
+            if r.get("file_name") == fname or r.get("doc_id", "").endswith(fname):
+                return r.get("devices") or []
+    except Exception:  # noqa: BLE001
+        pass
+    return []
+
+
+def archive_status_enhanced() -> dict:
+    """v0.1.48：增强版归档状态（多级分类：卷→专业→车间→设备）。"""
+    gen = _list_generated()
+    volumes = []
+    total_files = 0
+
+    for v in VOLUMES:
+        volume_data = {
+            "no": v["no"], "name": v["name"],
+            "professions": {},  # 专业 → {车间 → {设备 → [文件]}}
+            "items": [], "missing": [],
+            "file_count": 0,
+        }
+        for t in v["docs"]:
+            files = gen.get(t, [])
+            if files:
+                profession = _get_profession(t)
+                if profession not in volume_data["professions"]:
+                    volume_data["professions"][profession] = {}
+                for p in files:
+                    workshop = _get_doc_workshop(p)
+                    devices = _get_doc_devices(p)
+                    if workshop not in volume_data["professions"][profession]:
+                        volume_data["professions"][profession][workshop] = {}
+                    dev_key = ",".join(devices) if devices else "通用"
+                    if dev_key not in volume_data["professions"][profession][workshop]:
+                        volume_data["professions"][profession][workshop][dev_key] = []
+                    volume_data["professions"][profession][workshop][dev_key].append({
+                        "file": os.path.basename(p),
+                        "path": p,
+                        "doc_type": t,
+                        "ts": datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M"),
+                        "devices": devices,
+                        "workshop": workshop,
+                    })
+                    volume_data["file_count"] += 1
+                    total_files += 1
+                volume_data["items"].append({"doc_type": t, "count": len(files)})
+            else:
+                volume_data["missing"].append(t)
+        volume_data["ready"] = not volume_data["missing"]
+        volumes.append(volume_data)
+
+    return {
+        "volumes": volumes,
+        "total_files": total_files,
+        "ready_volumes": sum(1 for v in volumes if v["ready"]),
+        "total_volumes": len(VOLUMES),
+        "completeness": round(total_files / max(1, sum(len(v["docs"]) for v in VOLUMES)) * 100, 1),
+    }
+
+
+def generate_volume_catalog(volume_no: str = None) -> list:
+    """v0.1.48：生成卷内详细目录（含多级分类）。"""
+    status = archive_status_enhanced()
+    rows = [["卷号", "卷名", "专业", "车间", "设备", "资料类型", "文件名", "生成时间", "状态"]]
+    for v in status["volumes"]:
+        if volume_no and v["no"] != volume_no:
+            continue
+        for profession, workshops in v["professions"].items():
+            for workshop, devices in workshops.items():
+                for dev_key, files in devices.items():
+                    for f in files:
+                        rows.append([v["no"], v["name"], profession, workshop,
+                                     dev_key, f["doc_type"], f["file"], f["ts"], "已归档"])
+        # 缺失项
+        for t in v["missing"]:
+            rows.append([v["no"], v["name"], _get_profession(t), "—", "—", t, "—", "—", "缺失（待生成）"])
+    return rows
+
+
+def check_archive_completeness() -> dict:
+    """v0.1.48：归档完整性检查（与v0.1.36 completeness_check联动）。"""
+    status = archive_status_enhanced()
+    # 检查每卷的缺失项
+    missing_by_volume = {}
+    for v in status["volumes"]:
+        if v["missing"]:
+            missing_by_volume[v["no"]] = {
+                "name": v["name"],
+                "missing_docs": v["missing"],
+                "existing_count": v["file_count"],
+            }
+    # 检查设备级资料完整性（每台设备应有开箱+安装+验收记录）
+    device_completeness = {}
+    try:
+        from . import relations as _rel
+        g = _rel.load_relations()
+        for dev in g.get("devices", []):
+            tag = dev["tag"]
+            has_openbox = False
+            has_install = False
+            has_acceptance = False
+            for v in status["volumes"]:
+                for profession, workshops in v["professions"].items():
+                    for workshop, devices in workshops.items():
+                        for dev_key, files in devices.items():
+                            if tag in dev_key:
+                                for f in files:
+                                    if "开箱" in f["doc_type"]:
+                                        has_openbox = True
+                                    elif "隐蔽" in f["doc_type"]:
+                                        has_install = True
+                                    elif "竣工" in f["doc_type"] or "验收" in f["doc_type"]:
+                                        has_acceptance = True
+            missing = []
+            if not has_openbox:
+                missing.append("开箱验收记录")
+            if not has_install:
+                missing.append("隐蔽工程验收记录")
+            if not has_acceptance:
+                missing.append("竣工验收记录")
+            if missing:
+                device_completeness[tag] = {"missing": missing, "complete": False}
+            else:
+                device_completeness[tag] = {"missing": [], "complete": True}
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "overall_completeness": status["completeness"],
+        "ready_volumes": status["ready_volumes"],
+        "total_volumes": status["total_volumes"],
+        "missing_by_volume": missing_by_volume,
+        "device_completeness": device_completeness,
+        "devices_with_missing": sum(1 for v in device_completeness.values() if not v["complete"]),
+        "total_devices": len(device_completeness),
+    }
+
+
+def export_archive_enhanced() -> bytes:
+    """v0.1.48：增强版归档导出（多级文件夹结构：卷/专业/车间/设备/文件）。"""
+    status = archive_status_enhanced()
+    buf = io.BytesIO()
+
+    # 卷内详细目录
+    catalog_rows = generate_volume_catalog()
+    xlsx = _make_xlsx_enhanced(catalog_rows)
+
+    # 完整性检查报告
+    completeness = check_archive_completeness()
+
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("00_卷内详细目录.xlsx", xlsx)
+        zf.writestr("01_归档完整性检查报告.json",
+                     json.dumps(completeness, ensure_ascii=False, indent=2))
+        zf.writestr("README.txt",
+                    "繁工AI 竣工资料归档包（增强版 v0.1.48）\n"
+                    "导出时间：%s\n"
+                    "整体齐全度：%.1f%%\n"
+                    "已就绪卷：%d/%d\n"
+                    "目录结构：卷号_卷名/专业/车间/设备/文件\n"
+                    "缺失项见 00_卷内详细目录.xlsx 和 01_归档完整性检查报告.json\n"
+                    "签字由人工下载打印完成。\n"
+                    % (datetime.datetime.now().isoformat(),
+                       completeness["overall_completeness"],
+                       completeness["ready_volumes"],
+                       completeness["total_volumes"]))
+
+        # 按多级结构组织文件
+        for v in status["volumes"]:
+            for profession, workshops in v["professions"].items():
+                for workshop, devices in workshops.items():
+                    for dev_key, files in devices.items():
+                        for f in files:
+                            # 路径：卷号_卷名/专业/车间/设备/文件名
+                            safe_dev = dev_key.replace("/", "_").replace("\\", "_")[:50]
+                            arc = "%s_%s/%s/%s/%s/%s" % (
+                                v["no"], v["name"], profession, workshop, safe_dev, f["file"])
+                            zf.write(f["path"], arc)
+
+    return buf.getvalue()
+
+
+def _make_xlsx_enhanced(rows: list) -> bytes:
+    """增强版Excel生成（9列）。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "卷内详细目录"
+    header_fill = PatternFill(start_color="1E5AA8", end_color="1E5AA8", fill_type="solid")
+    header_font = Font(name="微软雅黑", size=10, bold=True, color="FFFFFF")
+    missing_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+
+    for i, row in enumerate(rows, start=1):
+        for j, val in enumerate(row, start=1):
+            c = ws.cell(row=i, column=j, value=val)
+            c.font = header_font if i == 1 else Font(name="微软雅黑", size=10)
+            c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            if i == 1:
+                c.fill = header_fill
+            elif len(row) > 8 and row[8] and "缺失" in str(row[8]):
+                c.fill = missing_fill
+
+    for col, w in zip("ABCDEFGHI", [8, 20, 12, 12, 20, 18, 35, 18, 14]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = "A1:I%d" % len(rows)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
