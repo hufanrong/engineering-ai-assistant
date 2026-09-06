@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.66")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.67")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1676,6 +1676,54 @@ def spatial_merge_stats():
     from . import spatial_merge as _sm
     return {"ok": True, **_sm.merge_stats()}
 
+
+
+@app.get("/api/completion-archive/device")
+def completion_archive_device(tag: str):
+    """v0.1.67：生成单台设备的竣工资料清单。"""
+    from . import completion_archive as _ca
+    return {"ok": True, **_ca.generate_device_archive_list(tag)}
+
+
+@app.post("/api/completion-archive/all")
+def completion_archive_all():
+    """v0.1.67：生成所有设备的竣工资料清单。"""
+    from . import completion_archive as _ca
+    return {"ok": True, **_ca.generate_all_devices_archive()}
+
+
+@app.get("/api/completion-archive/stats")
+def completion_archive_stats():
+    """v0.1.67：获取竣工资料归档统计。"""
+    from . import completion_archive as _ca
+    return {"ok": True, **_ca.get_archive_stats()}
+
+
+@app.get("/api/completion-archive/missing")
+def completion_archive_missing():
+    """v0.1.67：列出所有缺失的资料。"""
+    from . import completion_archive as _ca
+    return {"ok": True, "missing": _ca.list_missing_docs()}
+
+
+@app.post("/api/completion-archive/update-doc")
+def completion_archive_update_doc(body: dict):
+    """v0.1.67：更新设备资料状态。"""
+    from . import completion_archive as _ca
+    tag = body.get("tag", "")
+    doc_type = body.get("doc_type", "")
+    status = body.get("status", "")
+    file_name = body.get("file_name")
+    if not tag or not doc_type or not status:
+        raise HTTPException(status_code=400, detail="缺少tag/doc_type/status")
+    return {"ok": True, **_ca.update_device_doc_status(tag, doc_type, status, file_name)}
+
+
+@app.get("/api/completion-archive/requirements")
+def completion_archive_requirements(type: str = ""):
+    """v0.1.67：获取设备类型需要的竣工资料清单。"""
+    from . import completion_archive as _ca
+    return {"ok": True, "requirements": _ca.get_device_requirements(type)}
 
 @app.get("/api/spatial-merge/integrity")
 def spatial_merge_integrity():

@@ -2672,3 +2672,92 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnSpatialMergeIntegrity");
   if (b3) b3.addEventListener("click", spatialMergeCheckIntegrity);
 });
+
+// v0.1.67：设备安装位置与竣工资料联动
+function archiveLoadDevice() {
+  var tag = document.getElementById("archiveDeviceTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  fetch("/api/completion-archive/device?tag=" + encodeURIComponent(tag)).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("加载失败：" + d.error); return; }
+    var el = document.getElementById("archiveDeviceDetail");
+    el.style.display = "block";
+    var html = '<strong>设备竣工资料 - ' + esc(d.tag) + ' ' + esc(d.name || '') + '</strong><br>';
+    html += '类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配') + ' | 标高: ' + (d.elevation != null ? d.elevation + 'm' : '未知') + ' | 施工状态: ' + esc(d.construction_status || 'pending') + '<br>';
+    html += '完整度: <strong>' + d.completeness_percent + '%</strong>（' + d.completed_count + '/' + d.total_requirements + '项）<br>';
+    if (d.missing_required && d.missing_required.length > 0) {
+      html += '<span style="color:#e74c3c"><strong>缺失必选资料：</strong>' + d.missing_required.map(esc).join(', ') + '</span><br>';
+    }
+    if (d.missing_optional && d.missing_optional.length > 0) {
+      html += '<span style="color:#f39c12"><strong>缺失可选资料：</strong>' + d.missing_optional.map(esc).join(', ') + '</span><br>';
+    }
+    html += '<hr style="margin:6px 0"><strong>资料清单：</strong><br>';
+    (d.requirements || []).forEach(function(req) {
+      var statusColor = req.status === 'completed' ? '#27ae60' : '#e74c3c';
+      var statusText = req.status === 'completed' ? '✓ 已完成' : '✗ 缺失';
+      html += '<span style="color:' + statusColor + '">' + (req.required ? '[必选]' : '[可选]') + ' ' + esc(req.type) + ' - ' + statusText;
+      if (req.existing_file) html += ' (' + esc(req.existing_file) + ')';
+      html += '</span><br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("加载失败：" + e.message); });
+}
+function archiveLoadAll() {
+  fetch("/api/completion-archive/all", {method:"POST"}).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveStats");
+    el.style.display = "block";
+    var html = '<strong>竣工资料汇总：</strong>总设备' + d.total_devices + '台 | 完整' + d.complete_devices + '台 | 不完整' + d.incomplete_devices + '台 | 平均完整度' + d.avg_completeness_percent + '%<br>';
+    if (d.by_workshop) {
+      html += '<strong>按车间：</strong>';
+      for (var ws in d.by_workshop) { html += esc(ws) + ':' + d.by_workshop[ws] + '台 '; }
+      html += '<br>';
+    }
+    if (d.missing_summary) {
+      html += '<strong>缺失资料汇总：</strong><br>';
+      for (var dt in d.missing_summary) {
+        html += '- ' + esc(dt) + ': ' + d.missing_summary[dt] + '台设备缺失<br>';
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(e){ alert("加载失败：" + e.message); });
+}
+function archiveLoadStats() {
+  fetch("/api/completion-archive/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveStats");
+    el.style.display = "block";
+    if (d.total_devices === 0) { el.innerHTML = '<span style="color:#888">' + (d.message || '暂无数据') + '</span>'; return; }
+    var html = '<strong>归档统计：</strong>总设备' + d.total_devices + '台 | 完整' + d.complete_devices + '台 | 不完整' + d.incomplete_devices + '台 | 平均完整度' + d.avg_completeness_percent + '%';
+    if (d.by_workshop) {
+      html += '<br><strong>按车间：</strong>';
+      for (var ws in d.by_workshop) {
+        var s = d.by_workshop[ws];
+        html += esc(ws) + '(' + s.complete + '/' + s.total + ') ';
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function archiveLoadMissing() {
+  fetch("/api/completion-archive/missing").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveMissing");
+    var missing = d.missing || [];
+    if (missing.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#27ae60">所有资料齐全！</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>缺失资料清单（' + missing.length + '项）：</strong><br>';
+    missing.slice(0, 30).forEach(function(m) {
+      var color = m.required ? '#e74c3c' : '#f39c12';
+      html += '<span style="color:' + color + '">' + (m.required ? '[必选]' : '[可选]') + ' ' + esc(m.tag) + ' ' + esc(m.name || '') + ' (' + esc(m.workshop || '') + ') - ' + esc(m.doc_type) + '</span><br>';
+    });
+    if (missing.length > 30) html += '... 还有 ' + (missing.length - 30) + ' 项';
+    el.innerHTML = html;
+  }).catch(function(e){ alert("加载失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnArchiveDevice");
+  if (b1) b1.addEventListener("click", archiveLoadDevice);
+  var b2 = document.getElementById("btnArchiveAll");
+  if (b2) b2.addEventListener("click", archiveLoadAll);
+  var b3 = document.getElementById("btnArchiveStats");
+  if (b3) b3.addEventListener("click", archiveLoadStats);
+  var b4 = document.getElementById("btnArchiveMissing");
+  if (b4) b4.addEventListener("click", archiveLoadMissing);
+});

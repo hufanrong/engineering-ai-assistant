@@ -514,6 +514,22 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.67：设备安装位置与竣工资料联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与竣工资料联动（v0.1.67）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成竣工资料清单，完整性检查，资料缺失提醒。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="archiveDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnArchiveDevice">单台设备清单</button>
+    <button class="btn" id="btnArchiveAll" style="background:#52C41A">全部设备清单</button>
+    <button class="btn" id="btnArchiveStats">统计</button>
+    <button class="btn" id="btnArchiveMissing">缺失资料</button>
+  </div>
+  <div id="archiveStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="archiveDeviceDetail" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="archiveMissing" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.66：多电脑并库空间模型合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库空间模型合并（v0.1.66）</h3>
