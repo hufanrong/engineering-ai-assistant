@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.43）
+# 繁工AI · 本地解析工作台（MVP v0.1.44）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.44**：**CAD图纸自动提取坐标增强**（CAD文字标注TEXT/MTEXT中的位号自动关联坐标x,y（之前cad_text无坐标）；图块无位号属性时自动查找附近300mm范围内的文字标注关联位号（cad_block_nearby，置信度0.6）；从CAD图纸自动提取标高标注EL+xxx/±0.000/+5.500，关联到500mm范围内的设备（elevation_hint）；坐标来源分级置信度：cad_block=0.9/cad_block_nearby=0.6/cad_text=0.4；多图纸同一设备坐标合并（cad_positions含confidence+elevation）；空间模型z坐标回退使用CAD附近标高标注（z_source=cad_nearby，置信度0.5）；relations._equipment_from_cache CAD分支全面增强）
 - **v0.1.43**：**群聊天文件关联设备人工确认**（群聊提及但不在设备图谱中的位号进入候选列表；前端⑤页群聊关联区显示候选设备+提及证据+话题；支持人工确认（指定车间后加入正式设备图谱并重建关系）和拒绝（不再提示，持久化到rejected_candidates.json）；重建图谱时自动跳过已拒绝的候选；新增/api/chat/{candidates,candidate/{tag}/confirm,candidate/{tag}/reject,rejected}端点；relations新增list_chat_candidates/confirm_chat_candidate/reject_chat_candidate/list_rejected_candidates函数）
 - **v0.1.42**：**施工方案/吊装方案模板优化**（根据设备类型自动选择施工方案内容：泵/压缩机/换热器/塔器/容器/反应器/工业炉/输送设备/电动机等10类设备各有专属施工步骤；位号前缀识别（P=泵/C=压缩机/E=换热器/T=塔器/V=容器等HG/T 20519标准）+设备名称关键词识别；吊装方案根据设备重量自动选择吊装方法和吊车型号（≤2t手动葫芦/≤5t 8t汽车吊/≤25t 25t汽车吊/≤50t 50t汽车吊/≤100t 100t汽车吊或履带吊/≤200t 150t履带吊/>200t 300t以上履带吊）；根据重量自动选择吊索具规格；施工方案生成含施工步骤+质量控制章节；新模块app/equipment_types.py）
 - **v0.1.41**：**设备位置人工确认界面**（位置待确认的设备可手动指定x/y/z坐标、车间归属、标高；修改后自动重新计算相邻设备和统计；coord_status从'位置待确认'变为'人工确认'；支持车间变更（从旧车间移除+加入新车间）；新增/api/spatial/device/{tag}/update、/api/spatial/device/{tag}/confirm、/api/spatial/pending端点；⑤页空间结构区位置待确认设备显示编辑按钮+弹出表单；spatial_model新增update_device_location/confirm_device/_update_stats函数）

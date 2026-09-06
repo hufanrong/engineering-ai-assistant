@@ -90,6 +90,24 @@ def build_spatial_model(relations_graph: dict, elevation_map: dict = None) -> di
             "neighbors": [],  # 稍后计算
         }
 
+    # v0.1.44：CAD 标高提示回退（当 elevation_map 无值时，从 cad_positions 的 elevation 字段提取）
+    for tag, dev in device_index.items():
+        if dev.get("z") is None:
+            for cp in dev.get("cad_positions", []):
+                elev_raw = cp.get("elevation")
+                if elev_raw:
+                    try:
+                        from . import elevation as _elev_mod
+                        parsed = _elev_mod.parse_elevation(elev_raw)
+                        if parsed.get("elevation_m") is not None:
+                            dev["z"] = parsed["elevation_m"]
+                            dev["z_source"] = "cad_nearby"
+                            dev["z_confidence"] = 0.5
+                            dev["z_note"] = f"CAD图纸附近标高标注: {elev_raw}"
+                            break
+                    except Exception:  # noqa: BLE001
+                        pass
+
     # 计算相邻设备（同车间内，基于 CAD 坐标）
     _compute_neighbors(device_index)
 

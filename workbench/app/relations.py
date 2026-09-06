@@ -205,12 +205,65 @@ def _equipment_from_cache(cache: dict) -> list:
     if parser == "cad":
         sp = structure.get("spatial") or {}
         title_no = (sp.get("title_block") or {}).get("图号", "") or ""
+        text_labels = structure.get("text_labels", []) or []
+        # v0.1.44：构建位号→坐标映射（从 TEXT/MTEXT 标注）
+        label_tag_coords = {}
+        for lbl in text_labels[:1000]:
+            lbl_text = lbl.get("text", "") or ""
+            for m in _TAG_RE.finditer(lbl_text):
+                t = m.group(1)
+                if t == title_no:
+                    continue
+                if t not in label_tag_coords:
+                    label_tag_coords[t] = []
+                label_tag_coords[t].append({"x": lbl.get("x"), "y": lbl.get("y"),
+                                            "layer": lbl.get("layer", "")})
+        # v0.1.44：从 CAD 文本中提取标高标注
+        elevations = []
+        for lbl in text_labels[:500]:
+            lbl_text = lbl.get("text", "") or ""
+            import re as _re2
+            # EL+100.000, EL5.5, ±0.000, +5.500
+            for em in _re2.finditer(r"EL\.?\s*[+-]?\d+\.?\d*", lbl_text, _re2.I):
+                elevations.append({"raw": em.group(0), "x": lbl.get("x"), "y": lbl.get("y")})
+            for em in _re2.finditer(r"[±+-]\s*\d+\.\d{3}", lbl_text):
+                elevations.append({"raw": em.group(0), "x": lbl.get("x"), "y": lbl.get("y")})
         for b in sp.get("blocks", [])[:2000]:
             attrs = {a.get("tag", ""): a.get("value", "") for a in b.get("attrs", [])}
             tag = attrs.get("位号") or attrs.get("设备位号") or attrs.get("TAG")
+            bx, by = b.get("x"), b.get("y")
             if tag:
-                out.append({"tag": tag, "where": "cad_block", "x": b.get("x"), "y": b.get("y"),
-                            "block": b.get("block")})
+                entry = {"tag": tag, "where": "cad_block", "x": bx, "y": by,
+                         "block": b.get("block"), "coord_confidence": 0.9}
+                # v0.1.44：查找图块附近的标高标注（500mm 范围内）
+                if bx is not None and by is not None:
+                    nearest_elev = None
+                    nearest_dist = float("inf")
+                    for e in elevations:
+                        if e["x"] is not None and e["y"] is not None:
+                            dist = ((e["x"] - bx) ** 2 + (e["y"] - by) ** 2) ** 0.5
+                            if dist < 500 and dist < nearest_dist:
+                                nearest_dist = dist
+                                nearest_elev = e["raw"]
+                    if nearest_elev:
+                        entry["elevation_hint"] = nearest_elev
+                out.append(entry)
+            else:
+                # v0.1.44：图块无位号属性 → 查找附近文字标注（300mm 范围内）
+                if bx is not None and by is not None:
+                    nearest_tag = None
+                    nearest_dist = float("inf")
+                    for t, coords in label_tag_coords.items():
+                        for c in coords:
+                            if c["x"] is not None and c["y"] is not None:
+                                dist = ((c["x"] - bx) ** 2 + (c["y"] - by) ** 2) ** 0.5
+                                if dist < 300 and dist < nearest_dist:
+                                    nearest_dist = dist
+                                    nearest_tag = t
+                    if nearest_tag:
+                        out.append({"tag": nearest_tag, "where": "cad_block_nearby",
+                                    "x": bx, "y": by, "block": b.get("block"),
+                                    "coord_confidence": 0.6})
             # v0.1.31：CAD 块同时有位号+厂家编号 → 提取映射对
             try:
                 from . import tag_alias
@@ -221,11 +274,18 @@ def _equipment_from_cache(cache: dict) -> list:
                                 "_alias": pair["alias"], "_alias_source": "cad_block"})
             except Exception:  # noqa: BLE001
                 pass
-        # 图纸文本中的位号（标注/说明）；排除标题栏图号避免把图号当设备
-        for m in _TAG_RE.finditer(text):
-            if m.group(1) == title_no:
+        # v0.1.44：图纸文本中的位号（标注/说明）→ 带坐标
+        for t, coords in label_tag_coords.items():
+            for c in coords[:3]:  # 每个位号最多取3个坐标
+                out.append({"tag": t, "where": "cad_text", "x": c["x"], "y": c["y"],
+                            "layer": c.get("layer", ""), "coord_confidence": 0.4})
+        # 兜底：纯文本中的位号（无坐标）
+        text_tags = set(_TAG_RE.findall(text))
+        labeled_tags = set(label_tag_coords.keys())
+        for t in text_tags - labeled_tags:
+            if t == title_no:
                 continue
-            out.append({"tag": m.group(1), "where": "cad_text"})
+            out.append({"tag": t, "where": "cad_text"})
     elif parser in ("text", "ocr"):
         # 文本/OCR（现场照片铭牌识别）中的位号
         for m in _TAG_RE.finditer(text):
@@ -425,6 +485,8 @@ def build_relations(force: bool = False) -> dict:
                 "file": d["file_name"], "workshop": d["workshop"],
                 "where": e["where"], "x": e.get("x"), "y": e.get("y"),
                 "workshop_hint": e.get("workshop_hint"),
+                "elevation_hint": e.get("elevation_hint"),
+                "coord_confidence": e.get("coord_confidence"),
             }
             if not any(f["file"] == entry["file"] and f["where"] == entry["where"] for f in dev["in_files"]):
                 dev["in_files"].append(entry)
@@ -626,7 +688,9 @@ def build_relations(force: bool = False) -> dict:
 
     devices_out = [{"tag": t, "workshops": list(set(d["workshops"])), "files": [f["file"] for f in d["in_files"]],
                     "sources": d["sources"],
-                    "cad_positions": [{"x": f["x"], "y": f["y"], "file": f["file"]} for f in d["in_files"] if f["x"] is not None]}
+                    "cad_positions": [{"x": f["x"], "y": f["y"], "file": f["file"],
+                                       "elevation": f.get("elevation_hint"),
+                                       "confidence": f.get("coord_confidence")} for f in d["in_files"] if f["x"] is not None]}
                    for t, d in sorted(device_map.items())]
     distances = _compute_distances(devices_out, docs)
     graph = {
