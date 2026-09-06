@@ -28,7 +28,7 @@ from . import voice_transcribe
 from . import workshop_assign
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.27")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.28")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -797,6 +797,16 @@ def platform_delete(req: PlatformDeleteReq):
     if not r.get("ok"):
         raise HTTPException(400, r.get("error", "未找到"))
     return r
+
+
+class PlatformVerifyReq(BaseModel):
+    sha256: str
+
+
+@app.post("/api/platform/verify")
+def platform_verify_one(req: PlatformVerifyReq):
+    """立即核验单条规范（v0.1.28）：不等到期，直接多源核验并更新状态。"""
+    return platform_store.verify_one(req.sha256)
 
 
 @app.post("/api/platform/check-expiry")

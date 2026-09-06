@@ -105,3 +105,139 @@ def verify_std(std_no: str) -> dict:
                 "latest_no": r.get("latest_no"), "source": "openstd"}
     # 3) 不可用
     return {"std_no": no, "status": "unknown", "latest_no": None, "source": "unavailable"}
+
+
+# ==================== v0.1.28 多检索源聚合 ====================
+# 额外公开标准检索源（尽力而为，任一返回即采用；全部失败→待核验人工兜底）
+# 注意：这些站点可能有反爬/JS 渲染，失败不阻断，仅作为 openstd 之外的补充通道。
+
+_CSRES_BASE = "https://www.csres.com"
+_BZFXW_BASE = "https://www.bzfxw.com"
+_BAIDU_SEARCH = "https://www.baidu.com/s"
+
+
+def _query_csres(std_no: str):
+    """工标网检索（尽力而为）。返回 {status, latest_no} 或 None。"""
+    no = _normalize_no(std_no)
+    try:
+        url = f"{_CSRES_BASE}/search?q={requests.utils.quote(no)}"
+        r = requests.get(url, timeout=_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        text = r.text
+        if no.split("-")[0].replace(" ", "") not in text:
+            return None
+        hay = text[:8000]
+        status = "未知"
+        if "废止" in hay or "作废" in hay or "代替" in hay:
+            status = "废止"
+        elif "现行" in hay or "有效" in hay or "实施" in hay:
+            status = "现行"
+        latest = None
+        m = re.search(r"(?:代替|替代|最新版)[:：]?\s*([A-Za-z0-9/ .\-—]+?\d{4})", hay)
+        if m:
+            latest = m.group(1).strip()
+        return {"status": status, "latest_no": latest}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _query_bzfxw(std_no: str):
+    """标准分享网检索（尽力而为）。"""
+    no = _normalize_no(std_no)
+    try:
+        url = f"{_BZFXW_BASE}/search/{requests.utils.quote(no)}.html"
+        r = requests.get(url, timeout=_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        text = r.text
+        if no.split("-")[0].replace(" ", "") not in text:
+            return None
+        hay = text[:8000]
+        status = "未知"
+        if "废止" in hay or "作废" in hay:
+            status = "废止"
+        elif "现行" in hay or "有效" in hay:
+            status = "现行"
+        return {"status": status, "latest_no": None}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _query_baidu(std_no: str):
+    """百度搜索摘要（尽力而为）：从搜索结果摘要推断现行/废止。"""
+    no = _normalize_no(std_no)
+    try:
+        url = f"{_BAIDU_SEARCH}?wd={requests.utils.quote(no + ' 现行 废止')}"
+        r = requests.get(url, timeout=_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        hay = r.text[:12000]
+        if no.split("-")[0].replace(" ", "") not in hay:
+            return None
+        # 摘要中"废止"出现频次 > "现行" → 倾向废止
+        cnt_obsolete = hay.count("废止") + hay.count("作废")
+        cnt_current = hay.count("现行") + hay.count("有效")
+        if cnt_obsolete > cnt_current and cnt_obsolete >= 2:
+            return {"status": "废止", "latest_no": None}
+        if cnt_current > cnt_obsolete and cnt_current >= 2:
+            return {"status": "现行", "latest_no": None}
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def verify_std_multi(std_no: str) -> dict:
+    """v0.1.28：多源聚合核验。依次尝试 endpoint → openstd → csres → bzfxw → baidu，
+    收集所有源结果，多数票决状态，返回 sources 列表与置信度。"""
+    no = _normalize_no(std_no)
+    results = []
+
+    # 1) 自定义端点（最高优先，直接采用）
+    ep = (config.PLATFORM_SEARCH_ENDPOINT or "").strip().rstrip("/")
+    if ep:
+        try:
+            r = requests.post(ep, json={"std_no": no}, timeout=_TIMEOUT)
+            if r.status_code == 200:
+                d = r.json()
+                st = d.get("status", "未知")
+                if st in ("现行", "废止"):
+                    return {"std_no": no, "status": st, "latest_no": d.get("latest_no"),
+                            "source": "endpoint", "sources": [{"source": "endpoint", "status": st}],
+                            "confidence": 0.95}
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 2) 多公开源并行收集
+    for name, fn in [("openstd", _query_openstd), ("csres", _query_csres),
+                      ("bzfxw", _query_bzfxw), ("baidu", _query_baidu)]:
+        try:
+            r = fn(no)
+            if r and r.get("status") in ("现行", "废止"):
+                results.append({"source": name, "status": r["status"],
+                                "latest_no": r.get("latest_no")})
+        except Exception:  # noqa: BLE001
+            continue
+
+    if not results:
+        return {"std_no": no, "status": "unknown", "latest_no": None,
+                "source": "unavailable", "sources": [], "confidence": 0.0}
+
+    # 多数票决
+    votes = {}
+    for r in results:
+        votes[r["status"]] = votes.get(r["status"], 0) + 1
+    winner = max(votes, key=votes.get)
+    latest = next((r["latest_no"] for r in results if r.get("latest_no")), None)
+    confidence = round(votes[winner] / len(results), 2)
+    # 单源结果置信度降低
+    if len(results) == 1:
+        confidence = 0.5
+    return {"std_no": no, "status": winner, "latest_no": latest,
+            "source": results[0]["source"], "sources": results, "confidence": confidence}
+
+
+# 兼容旧调用：verify_std 现在走多源聚合
+def verify_std(std_no: str) -> dict:
+    """核验单个标准（v0.1.28 多源聚合）。返回 {std_no, status, latest_no, source, sources, confidence}。"""
+    return verify_std_multi(std_no)

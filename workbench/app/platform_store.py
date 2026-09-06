@@ -128,6 +128,9 @@ def add_file(raw: bytes, filename: str) -> dict:
         try:
             from . import std_verify
             v = std_verify.verify_std(std_no)
+            idx[sha]["verify_source"] = v.get("source", "")
+            idx[sha]["verify_confidence"] = v.get("confidence", 0)
+            idx[sha]["verify_sources"] = v.get("sources", [])
             if v.get("status") == STATUS_CURRENT:
                 idx[sha]["status"] = STATUS_CURRENT
                 idx[sha]["verified_at"] = now.isoformat()
@@ -192,6 +195,36 @@ def mark_status(sha: str, status: str) -> dict:
     return {"ok": True, "sha256": sha, "status": status}
 
 
+def verify_one(sha256: str) -> dict:
+    """v0.1.28：立即核验单条规范（不等到期），多源聚合核验并更新状态。"""
+    idx = _load_index()
+    info = idx.get(sha256)
+    if not info:
+        return {"ok": False, "error": "未找到该条目"}
+    std_no = info.get("std_no")
+    if not std_no:
+        return {"ok": False, "error": "该条目无标准号"}
+    from . import std_verify
+    now = datetime.datetime.now()
+    v = std_verify.verify_std(std_no)
+    info["verify_source"] = v.get("source", "")
+    info["verify_confidence"] = v.get("confidence", 0)
+    info["verify_sources"] = v.get("sources", [])
+    info["last_check"] = now.isoformat()
+    info["next_check"] = (now + datetime.timedelta(days=config.PLATFORM_CHECK_DAYS)).strftime("%Y-%m-%d")
+    if v.get("status") == STATUS_OBSOLETE:
+        info["status"] = STATUS_OBSOLETE
+        info["obsolete_note"] = f"已废止，最新版：{v.get('latest_no') or '待查'}（请上传最新版替换）"
+    elif v.get("status") == STATUS_CURRENT:
+        info["status"] = STATUS_CURRENT
+        info["verified_at"] = now.isoformat()
+    else:
+        info["status"] = STATUS_PENDING
+    _save_index(idx)
+    return {"ok": True, "status": info["status"], "source": info.get("verify_source"),
+            "confidence": info.get("verify_confidence"), "latest_no": v.get("latest_no")}
+
+
 def check_expiry() -> dict:
     """到期核验：next_check 已到 → 标记待核验（或配置联网端点则自动核验替换）。"""
     idx = _load_index()
@@ -220,6 +253,9 @@ def check_expiry() -> dict:
             info = idx.get(d["sha256"])
             if not info:
                 continue
+            info["verify_source"] = v.get("source", "")
+            info["verify_confidence"] = v.get("confidence", 0)
+            info["verify_sources"] = v.get("sources", [])
             if v.get("status") == STATUS_OBSOLETE:
                 info["status"] = STATUS_OBSOLETE
                 info["obsolete_note"] = f"已废止，最新版：{v.get('latest_no') or '待查'}（请上传最新版替换）"

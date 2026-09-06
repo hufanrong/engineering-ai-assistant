@@ -528,17 +528,26 @@
     fetch("/api/platform/list").then(function (r) { return r.json(); }).then(function (d) {
       var box = $("platList");
       if (!d.items || !d.items.length) { box.innerHTML = '<div class="empty">平台库为空，请上传规范/标准文件</div>'; return; }
-      var html = "<table><tr><th>标准号</th><th>标准名/文件名</th><th>状态</th><th>下次检查</th><th>操作</th></tr>";
+      var html = "<table><tr><th>标准号</th><th>标准名/文件名</th><th>状态/核验</th><th>下次检查</th><th>操作</th></tr>";
       d.items.forEach(function (it) {
         var st = { "现行": "parsed", "待核验": "partial", "废止": "failed" }[it.status] || "skipped";
+        var srcLabel = it.verify_source ? '<br><span style="font-size:11px;color:var(--text2)">来源：' + esc(it.verify_source) +
+          (it.verify_confidence ? " · 置信 " + Math.round((it.verify_confidence || 0) * 100) + "%" : "") + "</span>" : "";
+        var searchBtn = (it.status === "废止" || it.status === "待核验")
+          ? '<br><a href="https://openstd.samr.gov.cn/bzgk/gb/std_list?p.p2=' + encodeURIComponent(it.std_no || "") +
+            '" target="_blank" style="font-size:11px;color:var(--accent)">搜索最新版 ↗</a>' : "";
         html += "<tr><td>" + esc(it.std_no || "—") + "</td><td>" + esc(it.std_name || it.file_name) + "</td>" +
-          '<td><span class="st ' + st + '">' + it.status + "</span>" + (it.obsolete_note ? '<br><span style="color:var(--err);font-size:12px">' + esc(it.obsolete_note) + "</span>" : "") + "</td>" +
+          '<td><span class="st ' + st + '">' + it.status + "</span>" +
+          (it.obsolete_note ? '<br><span style="color:var(--err);font-size:12px">' + esc(it.obsolete_note) + "</span>" : "") +
+          srcLabel + searchBtn + "</td>" +
           "<td>" + esc(it.next_check || "—") + "</td>" +
           '<td><select class="platStatus" data-sha="' + it.sha256 + '" style="max-width:80px;padding:3px 6px">' +
             '<option value="现行"' + (it.status === "现行" ? " selected" : "") + ">现行</option>" +
             '<option value="待核验"' + (it.status === "待核验" ? " selected" : "") + ">待核验</option>" +
             '<option value="废止"' + (it.status === "废止" ? " selected" : "") + ">废止</option>" +
           "</select> " +
+          '<button class="btn ghost platVerify" data-sha="' + it.sha256 + '" data-std="' + esc(it.std_no || "") +
+          '" style="padding:3px 10px;font-size:12px">核验</button>' +
           '<button class="btn ghost platDel" data-sha="' + it.sha256 + '" style="padding:3px 10px;font-size:12px">删除</button></td></tr>';
       });
       html += "</table>";
@@ -549,6 +558,22 @@
             body: JSON.stringify({ sha256: sel.dataset.sha, status: sel.value }) })
             .then(function (r) { return r.json(); }).then(function () { $("platMsg").textContent = "状态已更新"; })
             .catch(function (e) { $("platMsg").textContent = "更新失败：" + e.message; });
+        });
+      });
+      box.querySelectorAll(".platVerify").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var std = btn.getAttribute("data-std");
+          if (!std) { alert("该条目无标准号，无法核验"); return; }
+          btn.textContent = "核验中…";
+          fetch("/api/platform/verify", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sha256: btn.getAttribute("data-sha") }) })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              btn.textContent = "核验";
+              if (d.ok) { alert("核验完成：" + d.status + (d.source ? "（来源：" + d.source + "）" : "")); }
+              else { alert("核验失败：" + (d.error || "")); }
+              loadPlatform();
+            }).catch(function (e) { btn.textContent = "核验"; alert("核验失败：" + e.message); });
         });
       });
       box.querySelectorAll(".platDel").forEach(function (btn) {
