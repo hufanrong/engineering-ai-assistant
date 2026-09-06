@@ -1566,7 +1566,8 @@ function genDo() {
     fetch("/api/spatial/structure").then(function (r) { return r.json(); }).then(function (d) {
       if (!d.ok) { $("spatialTree").innerHTML = '<div class="msg" style="color:#C0392B">' + esc(d.message || "加载失败") + "</div>"; return; }
       var st = d.stats || {};
-      $("spatialStats").textContent = "共 " + st.workshops + " 车间 / " + st.total_devices + " 设备（图纸标注 " + st.cad_annotated + " / 台账未标注 " + st.excel_only + " / 待确认 " + st.pending_location + "）";
+      var elevInfo = st.with_elevation ? " / 已提取标高 " + st.with_elevation + " 台" : "";
+      $("spatialStats").textContent = "共 " + st.workshops + " 车间 / " + st.total_devices + " 设备（图纸标注 " + st.cad_annotated + " / 台账未标注 " + st.excel_only + " / 待确认 " + st.pending_location + elevInfo + "）";
       var html = "";
       for (var wsName in d.workshops) {
         if (!d.workshops.hasOwnProperty(wsName)) continue;
@@ -1578,11 +1579,18 @@ function genDo() {
         ws.devices.forEach(function (dev) {
           var statusColor = dev.coord_status === "图纸标注" ? "#52C41A" : (dev.coord_status === "台账记录（图纸未标注）" ? "#FAAD14" : "#C0392B");
           var coord = dev.x != null ? ("x=" + dev.x + " y=" + dev.y) : "无坐标";
+          // v0.1.38：标高 z 坐标
+          var elevStr = "";
+          if (dev.z != null) {
+            var zColor = dev.z_confidence >= 0.8 ? "#52C41A" : (dev.z_confidence >= 0.5 ? "#FAAD14" : "#C0392B");
+            elevStr = ' <span style="color:' + zColor + '">z=' + dev.z + 'm</span>';
+            if (dev.z_note) elevStr += ' <span style="color:var(--text2);font-size:11px">(' + esc(dev.z_note) + ')</span>';
+          }
           var nb = (dev.neighbors || []).length ? (" 相邻:" + (dev.neighbors || []).map(function (n) { return n.tag + "(" + n.distance_m + "m)"; }).join("、")) : "";
           html += '<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line2)">' +
             '<span style="font-weight:600">' + esc(dev.tag) + '</span> ' +
             '<span style="color:' + statusColor + '">[' + esc(dev.coord_status) + ']</span> ' +
-            '<span style="color:var(--text2)">' + coord + nb + '</span></div>';
+            '<span style="color:var(--text2)">' + coord + elevStr + nb + '</span></div>';
         });
         html += '</div></div>';
       }

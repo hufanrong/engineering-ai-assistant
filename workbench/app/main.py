@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.37")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.38")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1010,6 +1010,17 @@ def spatial_workshop(workshop: str):
     if not spatial:
         raise HTTPException(404, "空间模型未构建")
     return spatial_model.get_workshop_layout(spatial, workshop)
+
+
+@app.get("/api/elevation/map")
+def elevation_map():
+    """v0.1.38：设备标高映射（从台账/CAD/OCR提取的 z 坐标）。"""
+    try:
+        from . import spatial_model as _sm
+        emap = _sm._load_elevation_from_cache()
+        return {"ok": True, "count": len(emap), "devices": emap}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "message": str(e)}
 
 
 @app.get("/api/spatial/ai-summary")

@@ -9,6 +9,10 @@
 #   - 将有关联的数据联系起来，建立一个类似3d效果的数据库，Ai可以读取
 
 import math
+import os
+import json
+from . import config
+from . import elevation as _elev
 import json
 import os
 
@@ -19,12 +23,16 @@ from . import config
 NEIGHBOR_RADIUS_METERS = 15.0
 
 
-def build_spatial_model(relations_graph: dict) -> dict:
-    """从 relations 图谱构建设备空间结构模型。
+def build_spatial_model(relations_graph: dict, elevation_map: dict = None) -> dict:
+    """从 relations 图谱构建设备空间结构模型（v0.1.38：含标高 z 坐标）。
     返回 {workshops: {ws: {devices: [...]}}, device_index: {tag: {...}}, stats: {...}}。"""
     devices = relations_graph.get("devices", [])
     layout = relations_graph.get("layout", [])
     workshops_graph = relations_graph.get("workshops", [])
+
+    # v0.1.38：加载设备标高映射（从台账/CAD/OCR 提取）
+    if elevation_map is None:
+        elevation_map = _load_elevation_from_cache()
 
     # layout 映射：tag → 确认的车间
     layout_map = {}
@@ -69,7 +77,10 @@ def build_spatial_model(relations_graph: dict) -> dict:
             "workshop": workshop,
             "x": primary_pos.get("x") if primary_pos else None,
             "y": primary_pos.get("y") if primary_pos else None,
-            "z": None,  # 标高/楼层，待台账或图纸标注补充
+            "z": elevation_map.get(tag, {}).get("elevation_m"),
+            "z_source": elevation_map.get(tag, {}).get("source_type") if elevation_map.get(tag) else None,
+            "z_confidence": elevation_map.get(tag, {}).get("confidence", 0) if elevation_map.get(tag) else 0,
+            "z_note": elevation_map.get(tag, {}).get("note", "") if elevation_map.get(tag) else "",
             "has_cad_coords": has_cad_coords,
             "coord_status": coord_status,
             "sources": source_types,
@@ -110,6 +121,8 @@ def build_spatial_model(relations_graph: dict) -> dict:
         "cad_annotated": sum(1 for d in device_index.values() if d["has_cad_coords"]),
         "excel_only": sum(1 for d in device_index.values() if d["coord_status"] == "台账记录（图纸未标注）"),
         "pending_location": sum(1 for d in device_index.values() if d["coord_status"] == "位置待确认"),
+        "with_elevation": sum(1 for d in device_index.values() if d.get("z") is not None),
+        "elevation_sources": _count_elevation_sources(device_index),
         "neighbor_radius_meters": NEIGHBOR_RADIUS_METERS,
     }
 
@@ -148,6 +161,33 @@ def _compute_neighbors(device_index: dict):
         dev["neighbors"].sort(key=lambda n: n["distance_m"])
 
 
+def _load_elevation_from_cache() -> dict:
+    """从 parsed_cache 加载所有已解析文档，构建设备标高映射。"""
+    cache_dir = os.path.join(config.DATA_DIR, "parsed_cache")
+    docs = {}
+    if os.path.exists(cache_dir):
+        for fn in os.listdir(cache_dir):
+            if not fn.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(cache_dir, fn), encoding="utf-8") as f:
+                    d = json.load(f)
+                docs[fn[:-5]] = d
+            except Exception:  # noqa: BLE001
+                pass
+    return _elev.build_elevation_map(docs)
+
+
+def _count_elevation_sources(device_index: dict) -> dict:
+    """统计标高来源分布。"""
+    counts = {}
+    for d in device_index.values():
+        src = d.get("z_source")
+        if src:
+            counts[src] = counts.get(src, 0) + 1
+    return counts
+
+
 def find_neighbors(spatial: dict, tag: str, radius_meters: float = None) -> list:
     """查找指定设备的相邻设备。"""
     dev = spatial["device_index"].get(tag)
@@ -167,7 +207,8 @@ def get_workshop_layout(spatial: dict, workshop: str) -> dict:
         d = spatial["device_index"][tag]
         devices.append({
             "tag": tag,
-            "x": d["x"], "y": d["y"],
+            "x": d["x"], "y": d["y"], "z": d.get("z"),
+            "z_source": d.get("z_source"), "z_confidence": d.get("z_confidence", 0),
             "coord_status": d["coord_status"],
             "sources": d["sources"],
             "neighbor_count": len(d["neighbors"]),
@@ -191,6 +232,10 @@ def generate_ai_summary(spatial: dict) -> str:
     lines.append(f"共 {stats['workshops']} 个车间，{stats['total_devices']} 台设备。")
     lines.append(f"其中图纸标注坐标 {stats['cad_annotated']} 台，台账记录（图纸未标注）{stats['excel_only']} 台，位置待确认 {stats['pending_location']} 台。")
     lines.append(f"相邻设备判定半径：{stats['neighbor_radius_meters']} 米。")
+    if stats.get("with_elevation", 0) > 0:
+        elev_src = stats.get("elevation_sources", {})
+        src_str = "、".join(f"{k}:{v}台" for k, v in elev_src.items())
+        lines.append(f"已提取标高 {stats['with_elevation']} 台（来源：{src_str}）。")
     lines.append("")
 
     for ws_name, ws in sorted(spatial["workshops"].items()):
@@ -205,7 +250,12 @@ def generate_ai_summary(spatial: dict) -> str:
                 d = spatial["device_index"][tag]
                 neighbor_tags = [n["tag"] for n in d["neighbors"][:5]]
                 nb_str = f"，相邻设备：{', '.join(neighbor_tags)}" if neighbor_tags else ""
-                lines.append(f"    - {tag}（坐标 x={d['x']}, y={d['y']}{nb_str}）")
+                elev_str = ""
+                if d.get("z") is not None:
+                    elev_str = f", 标高 z={d['z']}m"
+                    if d.get("z_note"):
+                        elev_str += f"（{d['z_note']}）"
+                lines.append(f"    - {tag}（坐标 x={d['x']}, y={d['y']}{elev_str}{nb_str}）")
             if len(cad_devices) > 30:
                 lines.append(f"    ... 另有 {len(cad_devices) - 30} 台")
 
