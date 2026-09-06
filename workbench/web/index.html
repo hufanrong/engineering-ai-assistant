@@ -427,6 +427,41 @@
   </div>
 </div>
 
+<!-- v0.1.46：施工日志自动生成 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">施工日志自动生成（v0.1.46）</h3>
+  <div class="msg" style="margin-bottom:6px">从现场记录（手机端照片/语音/文字）按日期汇总，自动提取施工内容、设备、人员、材料、机械、质量安全，生成Word施工日志。缺失字段提示补充，支持人工修改后导出。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnLogAggregate">汇总现场记录</button>
+    <button class="btn ghost" id="btnLogRefresh">刷新日志列表</button>
+    <span id="logStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="logList" style="font-size:12px;max-height:250px;overflow-y:auto;margin-bottom:8px"></div>
+  <div id="logEditor" style="display:none;border-top:1px solid var(--line);padding-top:8px">
+    <h4 style="margin:0 0 6px;font-size:13px">施工日志编辑 <span id="logEditDate" style="color:var(--accent)"></span></h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <div><label style="font-size:11px;color:var(--text2)">项目名称</label><input id="logProject" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">车间</label><input id="logWorkshop" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">记录人</label><input id="logRecorder" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">天气</label><input id="logWeather" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+    </div>
+    <div style="margin-bottom:6px"><label style="font-size:11px;color:var(--text2)">当日工作内容</label><textarea id="logContent" rows="2" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px;box-sizing:border-box"></textarea></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <div><label style="font-size:11px;color:var(--text2)">到场人员</label><input id="logPersonnel" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">进场材料</label><input id="logMaterials" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">机械使用</label><input id="logMachinery" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">温度</label><input id="logTemp" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+    </div>
+    <div style="margin-bottom:6px"><label style="font-size:11px;color:var(--text2)">安全质量情况</label><textarea id="logQuality" rows="2" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px;box-sizing:border-box"></textarea></div>
+    <div style="margin-bottom:8px"><label style="font-size:11px;color:var(--text2)">问题及处理</label><textarea id="logIssues" rows="2" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px;box-sizing:border-box"></textarea></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn" id="btnLogSave">保存修改</button>
+      <button class="btn" id="btnLogExport" style="background:#52C41A">导出Word</button>
+      <button class="btn ghost" id="btnLogClose">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- v0.1.41：设备位置人工确认弹窗 -->
 <div id="spatialEditModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:12px;width:min(420px,92vw);padding:16px;box-sizing:border-box;">

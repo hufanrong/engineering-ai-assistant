@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.45")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.46")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1228,6 +1228,65 @@ def equipment_merge_resolve_conflict(payload: dict = Body(...)):
     result = _em.resolve_conflict(canonical_tag, field, choose)
     return result
 
+
+
+@app.post("/api/construction-log/aggregate")
+def construction_log_aggregate():
+    """v0.1.46：按日期汇总现场记录，生成施工日志摘要。"""
+    from . import construction_log as _cl
+    result = _cl.aggregate_by_date()
+    return {"ok": True, "days": len(result), "dates": sorted(result.keys(), reverse=True)}
+
+
+@app.get("/api/construction-log/list")
+def construction_log_list():
+    """v0.1.46：列出所有施工日志日期。"""
+    from . import construction_log as _cl
+    return {"ok": True, "items": _cl.list_logs()}
+
+
+@app.get("/api/construction-log/{date}")
+def construction_log_get(date: str):
+    """v0.1.46：获取指定日期的施工日志数据。"""
+    from . import construction_log as _cl
+    result = _cl.generate_log_data(date)
+    return {"ok": True, "date": date, **result}
+
+
+@app.post("/api/construction-log/{date}/save")
+def construction_log_save(date: str, payload: dict = Body(...)):
+    """v0.1.46：保存人工修改后的施工日志数据。"""
+    from . import construction_log as _cl
+    _cl.save_log(date, payload.get("data", {}))
+    return {"ok": True, "date": date}
+
+
+@app.post("/api/construction-log/{date}/generate")
+def construction_log_generate(date: str, payload: dict = Body(default={})):
+    """v0.1.46：生成指定日期的施工日志Word文件。"""
+    from . import construction_log as _cl
+    from . import docgen as _dg
+    result = _cl.generate_log_data(date,
+                                    project_name=payload.get("project_name", ""),
+                                    workshop=payload.get("workshop", ""),
+                                    extra_data=payload.get("extra_data"))
+    data = result["data"]
+    saved = _cl.get_log(date)
+    if saved.get("status") == "edited":
+        data.update(saved.get("data", {}))
+    content, missing = _dg.fill_template("施工日志", data)
+    fname = "施工日志_" + date + ".docx"
+    from urllib.parse import quote as _q
+    disp = "attachment; filename=\"construction_log.docx\"; filename*=UTF-8''" + _q(fname)
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": disp})
+
+
+@app.get("/api/construction-log/stats")
+def construction_log_stats():
+    """v0.1.46：施工日志统计。"""
+    from . import construction_log as _cl
+    return {"ok": True, **_cl.stats()}
 
 @app.get("/api/equipment-merge/stats")
 def equipment_merge_stats():

@@ -1900,3 +1900,114 @@ document.addEventListener("DOMContentLoaded", function () {
   var b2 = document.getElementById("btnEqMergeRefresh");
   if (b2) b2.addEventListener("click", eqMergeLoad);
 });
+
+// v0.1.46：施工日志自动生成
+var currentLogDate = null;
+function logAggregate() {
+  fetch("/api/construction-log/aggregate", { method: "POST" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ok) { alert("汇总完成：" + d.days + "天有现场记录"); logLoad(); }
+      else { alert("汇总失败"); }
+    }).catch(function (e) { alert("汇总失败：" + e.message); });
+}
+function logLoad() {
+  fetch("/api/construction-log/stats").then(function (r) { return r.json(); }).then(function (d) {
+    var el = document.getElementById("logStats");
+    if (el) el.textContent = d.days_with_records + "天有记录 | 共" + d.total_field_records + "条现场记录 | 已编辑" + d.edited_logs + "天";
+  }).catch(function () {});
+  fetch("/api/construction-log/list").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("logList");
+    var items = d.items || [];
+    if (!items.length) { box.innerHTML = '<div class="empty">暂无施工日志，请先汇总现场记录</div>'; return; }
+    var html = "";
+    items.forEach(function (item) {
+      var badge = item.status === "edited" ? '<span style="background:#52C41A;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px">已编辑</span>' : '<span style="background:#999;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px">自动生成</span>';
+      var content = (item.施工内容 || []).join("、") || "—";
+      html += '<div style="padding:5px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:3px;background:#fff;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;cursor:pointer" class="log-item" data-date="' + item.date + '">';
+      html += '<div><strong style="color:var(--accent)">' + item.date + '</strong> ' + badge + ' <span style="font-size:11px;color:var(--text2)">(' + item.record_count + '条记录)</span></div>';
+      html += '<div style="font-size:11px;color:var(--text2);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(content) + '</div>';
+      html += '</div>';
+    });
+    box.innerHTML = html;
+    box.querySelectorAll(".log-item").forEach(function (el) {
+      el.addEventListener("click", function () { logOpen(this.getAttribute("data-date")); });
+    });
+  }).catch(function () { document.getElementById("logList").innerHTML = '<div class="empty">加载失败</div>'; });
+}
+function logOpen(date) {
+  currentLogDate = date;
+  fetch("/api/construction-log/" + date).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.ok) { alert("加载失败"); return; }
+    var data = d.data || {};
+    document.getElementById("logEditDate").textContent = date;
+    document.getElementById("logProject").value = data["项目名称"] || "";
+    document.getElementById("logWorkshop").value = data["车间"] || "";
+    document.getElementById("logRecorder").value = data["记录人"] || "";
+    document.getElementById("logWeather").value = data["天气"] || "";
+    document.getElementById("logContent").value = data["当日工作内容"] || "";
+    document.getElementById("logPersonnel").value = data["到场人员"] || "";
+    document.getElementById("logMaterials").value = data["进场材料"] || "";
+    document.getElementById("logMachinery").value = data["机械使用"] || "";
+    document.getElementById("logTemp").value = data["温度"] || "";
+    document.getElementById("logQuality").value = data["安全质量情况"] || "";
+    document.getElementById("logIssues").value = data["问题及处理"] || "";
+    document.getElementById("logEditor").style.display = "block";
+    if (d.missing && d.missing.length) {
+      alert("以下字段待补充：" + d.missing.join("、"));
+    }
+  }).catch(function (e) { alert("加载失败：" + e.message); });
+}
+function logSave() {
+  if (!currentLogDate) return;
+  var data = {
+    "项目名称": document.getElementById("logProject").value,
+    "车间": document.getElementById("logWorkshop").value,
+    "记录人": document.getElementById("logRecorder").value,
+    "记录日期": currentLogDate,
+    "天气": document.getElementById("logWeather").value,
+    "当日工作内容": document.getElementById("logContent").value,
+    "到场人员": document.getElementById("logPersonnel").value,
+    "进场材料": document.getElementById("logMaterials").value,
+    "机械使用": document.getElementById("logMachinery").value,
+    "温度": document.getElementById("logTemp").value,
+    "安全质量情况": document.getElementById("logQuality").value,
+    "问题及处理": document.getElementById("logIssues").value,
+  };
+  fetch("/api/construction-log/" + currentLogDate + "/save", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: data })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.ok) { alert("保存成功"); logLoad(); }
+    else { alert("保存失败"); }
+  }).catch(function (e) { alert("保存失败：" + e.message); });
+}
+function logExport() {
+  if (!currentLogDate) return;
+  var data = {
+    project_name: document.getElementById("logProject").value,
+    workshop: document.getElementById("logWorkshop").value,
+  };
+  fetch("/api/construction-log/" + currentLogDate + "/generate", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  }).then(function (r) { return r.blob(); }).then(function (blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "施工日志_" + currentLogDate + ".docx";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }).catch(function (e) { alert("导出失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnLogAggregate");
+  if (b1) b1.addEventListener("click", logAggregate);
+  var b2 = document.getElementById("btnLogRefresh");
+  if (b2) b2.addEventListener("click", logLoad);
+  var b3 = document.getElementById("btnLogSave");
+  if (b3) b3.addEventListener("click", logSave);
+  var b4 = document.getElementById("btnLogExport");
+  if (b4) b4.addEventListener("click", logExport);
+  var b5 = document.getElementById("btnLogClose");
+  if (b5) b5.addEventListener("click", function () { document.getElementById("logEditor").style.display = "none"; });
+});
