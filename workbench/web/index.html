@@ -210,6 +210,15 @@
   <!-- ⑤ 关联图谱（多图纸联动） -->
   <div class="panel" id="p-relations">
     <h2>多图纸联动图谱（全场布置图 ↔ 车间图 ↔ 设备台账）</h2>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 style="margin:0 0 6px;font-size:15px">群聊文件关联（v0.1.34）</h3>
+      <div class="msg" style="margin-bottom:6px">上传微信群/QQ群聊天记录导出文件（TXT/HTML/CSV），自动解析每条消息，提取涉及的设备位号、车间、事项，关联到项目图谱。群聊提及但不在台账中的设备进入人工确认。</div>
+      <div class="row">
+        <button class="btn" id="btnChatList">刷新群聊列表</button>
+        <span id="chatCount" style="font-size:13px;color:var(--text2)"></span>
+      </div>
+      <div id="chatList" style="margin-top:8px"></div>
+    </div>
     <div class="msg" style="margin-bottom:8px">扫描/上传完成后点"重建图谱"：自动归组车间、分类图纸、按设备位号跨图纸/台账关联，并把空间摘要写入向量库（AI 可回答"P-101 在哪、在哪个车间"）。无法确认的冲突进入"待人工确认"。</div>
     <div class="row" style="margin-bottom:10px">
       <button class="btn" id="btnRebuildRel">重建图谱</button>

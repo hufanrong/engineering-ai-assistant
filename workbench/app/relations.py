@@ -209,6 +209,9 @@ def _equipment_from_cache(cache: dict) -> list:
                                     "_alias_source": "excel_row"})
                 except Exception:  # noqa: BLE001
                     pass
+    elif parser == "chat":
+        # 群聊文件：位号仅通过 chat structure 进入人工确认，不进主 device_map
+        pass
     else:
         for m in _TAG_RE.finditer(text):
             out.append({"tag": m.group(1), "where": "text"})
@@ -417,6 +420,31 @@ def build_relations(force: bool = False) -> dict:
             "workshop_hint": [f.get("workshop_hint") for f in dev["in_files"] if f.get("workshop_hint")][:3],
         })
 
+    # ---- v0.1.34：群聊文件提及设备/车间关联 ----
+    chat_by_tag = {}
+    chat_workshops = {}
+    chat_topics_by_tag = {}
+    for _sha, d in docs.items():
+        _ch = (d.get("structure") or {}).get("chat") or {}
+        for _t in _ch.get("tags", []):
+            chat_by_tag.setdefault(_t, []).append(d["file_name"])
+            for _tp in _ch.get("topics", []):
+                chat_topics_by_tag.setdefault(_t, set()).add(_tp)
+        for _ws in _ch.get("workshops", []):
+            chat_workshops.setdefault(_ws, []).append(d["file_name"])
+    # 群聊提及但不在设备图谱中的位号 → 人工确认（群聊提及候选设备）
+    for _tag, _files in sorted(chat_by_tag.items()):
+        if _tag in device_map or _tag in confirmed_map or _tag in _seen_conflict:
+            continue
+        # 避免与铭牌候选重复
+        if any(hc.get("tag") == _tag for hc in human_confirm):
+            continue
+        human_confirm.append({
+            "type": "群聊提及设备（候选）", "tag": _tag,
+            "evidence": _files[:8],
+            "topics": sorted(chat_topics_by_tag.get(_tag, [])),
+            "workshop_hint": [],
+        })
     # ---- 图纸网络（v0.1.13）：图号/图名/车间/覆盖设备/图纸间互引 ----
     drawings = []
     site_docs_names = [d["file_name"] for d in site_docs]
@@ -524,8 +552,13 @@ def build_relations(force: bool = False) -> dict:
         ws = workshops.setdefault(w, {"workshop": w, "zone": workshop_zones.get(w), "docs": [], "tags": set()})
         ws["docs"].append({"file": d["file_name"], "doc_type": d["doc_type"], "parser": d["parser"]})
         ws["tags"].update(d["tags"])
+    # v0.1.34：群聊提及的车间补充到车间列表（source=chat）
+    for _ws in chat_workshops:
+        if _ws not in workshops:
+            workshops[_ws] = {"workshop": _ws, "zone": workshop_zones.get(_ws), "docs": [],
+                               "tags": set(), "source": "chat", "doc_count": 0, "device_count": 0}
     for w in workshops:
-        workshops[w]["tags"] = sorted(workshops[w]["tags"])
+        workshops[w]["tags"] = sorted(workshops[w]["tags"]) if isinstance(workshops[w]["tags"], set) else workshops[w]["tags"]
         workshops[w]["doc_count"] = len(workshops[w]["docs"])
         workshops[w]["device_count"] = len(workshops[w]["tags"])
 

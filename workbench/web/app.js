@@ -1518,3 +1518,31 @@ function genDo() {
       })
       .catch(function (e) { $("btnFrGen").textContent = "生成 Word 记录"; alert("生成失败：" + e.message); });
   });
+
+  // ---------- 群聊文件关联（v0.1.34） ----------
+  function loadChatList() {
+    fetch("/api/chat/list").then(function (r) { return r.json(); }).then(function (d) {
+      var items = d.items || [];
+      $("chatCount").textContent = "已解析群聊 " + items.length + " 个";
+      if (!items.length) { $("chatList").innerHTML = '<div class="msg">暂无群聊文件。在①页上传群聊导出文件（TXT/HTML/CSV）后自动解析。</div>'; return; }
+      var html = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>' +
+        '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">文件</th>' +
+        '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">消息数</th>' +
+        '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">提及设备</th>' +
+        '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">车间</th>' +
+        '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)">事项</th></tr></thead><tbody>';
+      items.forEach(function (it) {
+        html += '<tr>' +
+          '<td style="padding:4px 6px;border-bottom:1px solid var(--line2)">' + esc(it.file_name || "") + '</td>' +
+          '<td style="padding:4px 6px;border-bottom:1px solid var(--line2)">' + (it.message_count || 0) + '</td>' +
+          '<td style="padding:4px 6px;border-bottom:1px solid var(--line2)">' + ((it.tags || []).slice(0, 5).join("、") || "-") + ((it.tags || []).length > 5 ? "…" : "") + '</td>' +
+          '<td style="padding:4px 6px;border-bottom:1px solid var(--line2)">' + ((it.workshops || []).join("、") || "-") + '</td>' +
+          '<td style="padding:4px 6px;border-bottom:1px solid var(--line2)">' + ((it.topics || []).join("、") || "-") + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+      $("chatList").innerHTML = html;
+    }).catch(function (e) { $("chatList").innerHTML = '<div class="msg" style="color:#C0392B">加载失败：' + e.message + "</div>"; });
+  }
+  $("btnChatList").addEventListener("click", loadChatList);
+  loadChatList();

@@ -30,9 +30,10 @@ from . import device_workshop
 from . import tag_alias
 from . import version_manager
 from . import field_record
+from . import chat_parser
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.33")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.34")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -869,6 +870,49 @@ def field_record_generate(req: FieldRecordGenerateReq):
     fname = f"繁工AI_{req.doc_type}_{datetime_now()}.docx"
     return StreamingResponse(io.BytesIO(content), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                              headers={"Content-Disposition": f'attachment; filename="field_record.docx"; filename*=UTF-8''' + quote(fname)})
+
+
+class ChatAnalyzeReq(BaseModel):
+    file_path: str = ""
+
+
+@app.post("/api/chat/analyze")
+def chat_analyze(req: ChatAnalyzeReq):
+    """群聊文件分析（v0.1.34）：解析消息+提取位号/车间/事项+摘要。"""
+    if not req.file_path or not os.path.exists(req.file_path):
+        raise HTTPException(400, "文件不存在")
+    return chat_parser.analyze_chat(req.file_path)
+
+
+@app.get("/api/chat/list")
+def chat_list():
+    """列出已解析的群聊文件（从 index 中 parser=chat 的文件）。"""
+    idx_path = os.path.join(config.DATA_DIR, "index.json")
+    if not os.path.exists(idx_path):
+        return {"items": []}
+    with open(idx_path, encoding="utf-8") as f:
+        idx = json.load(f)
+    items = []
+    for sha, info in idx.items():
+        if info.get("parser") == "chat":
+            cache_path = os.path.join(config.DATA_DIR, "parsed_cache", f"{sha}.json")
+            chat_info = {}
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, encoding="utf-8") as cf:
+                        cache = json.load(cf)
+                    ch = (cache.get("structure") or {}).get("chat") or {}
+                    chat_info = {
+                        "message_count": ch.get("message_count", 0),
+                        "sender_count": ch.get("sender_count", 0),
+                        "tags": ch.get("tags", []),
+                        "workshops": ch.get("workshops", []),
+                        "topics": ch.get("topics", []),
+                    }
+                except Exception:  # noqa: BLE001
+                    pass
+            items.append({"sha256": sha, **info, **chat_info})
+    return {"items": items, "count": len(items)}
 
 
 @app.get("/api/archive/status")

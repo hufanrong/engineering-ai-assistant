@@ -100,7 +100,6 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     stats["vectorized"] += 1
                 # 无论是否成功向量化都进上传队列（云端合并保留原文+解析）
                 upload_queue.enqueue(res)
-                _save_parsed_cache(res)
                 # v0.1.27：解析后自动归车间（人工登记不覆盖）
                 try:
                     from . import workshop_assign
@@ -118,6 +117,29 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                                                     size=_fsize, status=res.status)
                 except Exception:  # noqa: BLE001
                     pass
+                # v0.1.34：群聊文件自动解析关联（检测到聊天记录则解析消息+提取位号/车间/事项）
+                try:
+                    from . import chat_parser
+                    if chat_parser.is_chat_file(path, res.text or ""):
+                        chat_result = chat_parser.analyze_chat(path)
+                        if chat_result.get("ok"):
+                            res.structure = res.structure or {}
+                            res.structure["chat"] = {
+                                "message_count": chat_result["message_count"],
+                                "sender_count": chat_result["sender_count"],
+                                "senders": chat_result["senders"],
+                                "date_range": chat_result["date_range"],
+                                "tags": list(chat_result["extracted"]["tags"].keys()),
+                                "workshops": list(chat_result["extracted"]["workshops"].keys()),
+                                "topics": list(chat_result["extracted"]["topics"].keys()),
+                                "summary": chat_result["summary"],
+                            }
+                            res.parser = "chat"
+                            stats["chat_parsed"] = stats.get("chat_parsed", 0) + 1
+                except Exception:  # noqa: BLE001
+                    pass
+                # 所有后处理完成后保存解析缓存（含群聊/车间等 enrichment）
+                _save_parsed_cache(res)
             else:
                 stats["skipped" if res.status == "skipped" else "failed"] += 1
 
