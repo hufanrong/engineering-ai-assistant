@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.63")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.64")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1551,6 +1551,57 @@ def relations_merge_stats():
     from . import relations_merge as _rm
     return {"ok": True, **_rm.merge_stats()}
 
+
+
+@app.post("/api/construction-schedule/auto")
+def construction_schedule_auto(body: dict):
+    """v0.1.64：根据设备位置自动安排施工顺序。"""
+    from . import construction_schedule as _cs
+    start_date = body.get("start_date")
+    days_per_device = body.get("days_per_device", 2)
+    workshop_parallel = body.get("workshop_parallel", 1)
+    return {"ok": True, **_cs.auto_schedule_devices(start_date, days_per_device, workshop_parallel)}
+
+
+@app.get("/api/construction-schedule/gantt")
+def construction_schedule_gantt(workshop: str = None):
+    """v0.1.64：生成施工进度甘特图SVG。"""
+    from . import construction_schedule as _cs
+    svg = _cs.generate_gantt_svg(workshop=workshop)
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.get("/api/construction-schedule/stats")
+def construction_schedule_stats():
+    """v0.1.64：获取施工进度统计。"""
+    from . import construction_schedule as _cs
+    return {"ok": True, **_cs.get_schedule_stats()}
+
+
+@app.post("/api/construction-schedule/status")
+def construction_schedule_status(body: dict):
+    """v0.1.64：更新设备施工状态。"""
+    from . import construction_schedule as _cs
+    tag = body.get("tag", "")
+    status = body.get("status", "")
+    notes = body.get("notes", "")
+    if not tag or not status:
+        raise HTTPException(status_code=400, detail="缺少tag或status")
+    return {"ok": True, **_cs.update_device_status(tag, status, notes)}
+
+
+@app.get("/api/construction-schedule/status")
+def construction_schedule_get_status(tag: str = None):
+    """v0.1.64：获取设备施工状态。"""
+    from . import construction_schedule as _cs
+    return {"ok": True, **_cs.get_device_status(tag)}
+
+
+@app.get("/api/construction-schedule/workshops")
+def construction_schedule_workshops():
+    """v0.1.64：列出施工进度中的车间。"""
+    from . import construction_schedule as _cs
+    return {"ok": True, "workshops": _cs.list_workshops_in_schedule()}
 
 @app.get("/api/relations-merge/integrity")
 def relations_merge_integrity():

@@ -514,6 +514,32 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.64：设备安装位置与施工进度联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动（v0.1.64）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置（车间、标高、坐标）自动安排施工顺序，生成甘特图，管理设备施工状态。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="scheduleStartDate" placeholder="开始日期（YYYY-MM-DD，默认今天）" style="width:180px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="number" id="scheduleDaysPerDevice" value="2" min="1" style="width:100px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px" title="每台设备施工天数">
+    <button class="btn" id="btnScheduleAuto" style="background:#52C41A">自动排程</button>
+    <button class="btn" id="btnScheduleStats">进度统计</button>
+    <button class="btn" id="btnScheduleGantt">查看甘特图</button>
+  </div>
+  <div id="scheduleStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="scheduleGantt" style="max-width:100%;overflow-x:auto;display:none"></div>
+  <div id="scheduleStatusUpdate" style="font-size:12px;margin-top:6px;display:none">
+    <strong>更新设备状态：</strong>
+    <input type="text" id="scheduleStatusTag" placeholder="设备位号" style="width:100px;padding:3px 6px;font-size:11px">
+    <select id="scheduleStatusSelect" style="padding:3px 6px;font-size:11px">
+      <option value="pending">待施工</option>
+      <option value="in_progress">进行中</option>
+      <option value="completed">已完成</option>
+    </select>
+    <input type="text" id="scheduleStatusNotes" placeholder="备注" style="width:120px;padding:3px 6px;font-size:11px">
+    <button class="btn" id="btnScheduleStatusUpdate" style="padding:3px 8px;font-size:11px">更新</button>
+  </div>
+</div>
+
 <!-- v0.1.63：多电脑并库设备关系合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库设备关系合并（v0.1.63）</h3>

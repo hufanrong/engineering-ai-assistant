@@ -2441,3 +2441,79 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnRelMergeIntegrity");
   if (b3) b3.addEventListener("click", relMergeCheckIntegrity);
 });
+
+// v0.1.64：设备安装位置与施工进度联动
+function scheduleAuto() {
+  var startDate = document.getElementById("scheduleStartDate").value;
+  var days = parseInt(document.getElementById("scheduleDaysPerDevice").value) || 2;
+  var body = {days_per_device: days};
+  if (startDate) body.start_date = startDate;
+  fetch("/api/construction-schedule/auto", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(body)}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) {
+      alert("自动排程完成！\\n设备总数: " + d.total_devices + "台\\n开始日期: " + d.start_date + "\\n结束日期: " + d.end_date + "\\n总工期: " + d.total_days + "天\\n关键设备: " + d.critical_path_count + "台");
+      scheduleLoadStats();
+      document.getElementById("scheduleStatusUpdate").style.display = "block";
+    } else {
+      alert("排程失败：" + JSON.stringify(d));
+    }
+  }).catch(function(e){ alert("排程失败：" + e.message); });
+}
+function scheduleLoadStats() {
+  fetch("/api/construction-schedule/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleStats");
+    if (!d.ok || d.total_devices === 0) {
+      el.style.display = "block";
+      el.innerHTML = '<span style="color:#888">' + (d.message || "暂无数据") + '</span>';
+      return;
+    }
+    el.style.display = "block";
+    var html = '<strong>施工进度统计：</strong>总设备' + d.total_devices + '台 | ';
+    html += '待施工<span style="color:#95a5a6">' + d.pending + '</span> | ';
+    html += '进行中<span style="color:#f39c12">' + d.in_progress + '</span> | ';
+    html += '已完成<span style="color:#27ae60">' + d.completed + '</span> | ';
+    html += '进度<strong>' + d.progress_percent + '%</strong> | ';
+    html += '工期' + d.start_date + ' 至 ' + d.end_date + '（' + d.total_days + '天）';
+    if (d.workshop_stats) {
+      html += '<br><strong>按车间：</strong>';
+      for (var ws in d.workshop_stats) {
+        var s = d.workshop_stats[ws];
+        html += ws + '(' + s.completed + '/' + s.total + ') ';
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function scheduleShowGantt() {
+  fetch("/api/construction-schedule/gantt").then(function(r){return r.text();}).then(function(svg){
+    var el = document.getElementById("scheduleGantt");
+    el.style.display = "block";
+    el.innerHTML = svg;
+  }).catch(function(e){ alert("加载甘特图失败：" + e.message); });
+}
+function scheduleUpdateStatus() {
+  var tag = document.getElementById("scheduleStatusTag").value;
+  var status = document.getElementById("scheduleStatusSelect").value;
+  var notes = document.getElementById("scheduleStatusNotes").value;
+  if (!tag) { alert("请输入设备位号"); return; }
+  fetch("/api/construction-schedule/status", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({tag: tag, status: status, notes: notes})}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) {
+      alert("设备 " + tag + " 状态已更新为：" + status);
+      scheduleLoadStats();
+      scheduleShowGantt();
+    } else {
+      alert("更新失败：" + JSON.stringify(d));
+    }
+  }).catch(function(e){ alert("更新失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnScheduleAuto");
+  if (b1) b1.addEventListener("click", scheduleAuto);
+  var b2 = document.getElementById("btnScheduleStats");
+  if (b2) b2.addEventListener("click", scheduleLoadStats);
+  var b3 = document.getElementById("btnScheduleGantt");
+  if (b3) b3.addEventListener("click", scheduleShowGantt);
+  var b4 = document.getElementById("btnScheduleStatusUpdate");
+  if (b4) b4.addEventListener("click", scheduleUpdateStatus);
+});
