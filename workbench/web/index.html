@@ -99,6 +99,15 @@
     <div class="msg" id="scanMsg">等待扫描…</div>
     <div class="qr" id="scanStats"></div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2>失败 / 待处理文件（v0.1.21）</h2>
+      <div class="row" style="margin-bottom:6px">
+        <button class="btn ghost" id="btnFailRefresh">刷新清单</button>
+        <button class="btn ghost" id="btnFailClear">清空失败记录</button>
+        <span style="font-size:12px;color:var(--text2)" id="failHint">重试 3 次仍失败自动转"待处理"，需人工检查文件。</span>
+      </div>
+      <div class="msg" id="failList" style="font-size:13px">暂无失败文件</div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
       <h2>手动上传文件（手机端/浏览器直传）</h2>
       <label>上传人姓名（现场记录必填，方便溯源）</label>
       <div class="row">

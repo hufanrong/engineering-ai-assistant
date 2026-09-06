@@ -93,6 +93,51 @@
   $("btnCancel").addEventListener("click", function () {
     fetch("/api/scan/cancel", { method: "POST" }).then(refreshStatus);
   });
+  // ---------- ① 失败/待处理清单（v0.1.21） ----------
+  function loadFailList() {
+    fetch("/api/scan/failed-list").then(function (r) { return r.json(); }).then(function (d) {
+      var items = d.items || [];
+      var box = $("failList");
+      if (!items.length) { box.innerHTML = "暂无失败文件"; return; }
+      var html = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+        '<tr style="background:#f0f3f8"><th style="padding:6px;text-align:left">文件</th><th>错误</th><th>重试</th><th>状态</th><th>操作</th></tr>';
+      items.forEach(function (it) {
+        var st = it.status === "pending_manual"
+          ? '<span class="st failed">待处理</span>'
+          : '<span class="st partial">失败</span>';
+        var ops = '<button class="btn ghost" data-r="' + it.sha256 + '" style="padding:2px 8px;font-size:12px">重试</button> ' +
+          '<button class="btn ghost" data-d="' + it.sha256 + '" style="padding:2px 8px;font-size:12px">删除</button>';
+        html += '<tr><td style="padding:6px;word-break:break-all">' + esc(it.file_name) +
+          '<div style="color:#999;font-size:11px">' + esc((it.error || "").slice(0, 80)) + "</div></td>" +
+          '<td style="text-align:center">' + it.retry_count + "/3</td>" +
+          '<td style="text-align:center">' + st + "</td>" +
+          '<td style="text-align:center">' + ops + "</td></tr>";
+      });
+      html += "</table>";
+      box.innerHTML = html;
+      box.querySelectorAll("[data-r]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          fetch("/api/scan/retry-failed/" + b.dataset.r, { method: "POST" }).then(function (r) { return r.json(); })
+            .then(function (d) {
+              $("scanMsg").textContent = "重试完成：恢复 " + d.stats.recovered + "，仍失败 " + d.stats.still_failed + "，转待处理 " + d.stats.pending_manual;
+              loadFailList(); refreshStatus();
+            });
+        });
+      });
+      box.querySelectorAll("[data-d]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          fetch("/api/scan/failed/delete", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shas: [b.dataset.d] }) }).then(loadFailList);
+        });
+      });
+    }).catch(function () {});
+  }
+  $("btnFailRefresh").addEventListener("click", loadFailList);
+  $("btnFailClear").addEventListener("click", function () {
+    fetch("/api/scan/failed/clear", { method: "POST" }).then(function () { loadFailList(); refreshStatus(); });
+  });
+  loadFailList();
+
   $("folder").addEventListener("keydown", function (e) { if (e.key === "Enter") startScan(false); });
 
   // ---------- 结果库 ----------

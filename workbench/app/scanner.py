@@ -112,6 +112,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 "parser": res.parser,
                 "error": res.error,
                 "entities": len(res.entities),
+                "retry_count": 0,
                 "ts": datetime.datetime.now().isoformat(),
             }
             _save_index(idx)
@@ -139,17 +140,39 @@ def _save_parsed_cache(res: ParseResult):
         }, f, ensure_ascii=False, indent=1)
 
 
-def retry_failed_files(status: dict = None) -> dict:
-    """从登记里找出 failed 文件，重新解析并入库（供人工点"重试失败"）。"""
+MAX_RETRY = 3   # 单个文件失败重试上限（v0.1.21）
+
+
+def retry_failed_files(status: dict = None, shas: list = None) -> dict:
+    """重试失败文件（v0.1.21）：可全部重试或指定 sha；每次失败 retry_count+1，
+    达到 MAX_RETRY 后转 pending_manual（待处理，人工介入）。"""
     idx = _load_index()
     store = VectorStore()
-    targets = [(sha, info) for sha, info in idx.items() if info.get("status") == "failed"]
-    stats = {"retried": 0, "recovered": 0, "still_failed": 0, "missing": 0}
+    if shas:
+        targets = [(sha, info) for sha, info in idx.items()
+                   if sha in set(shas) and info.get("status") in ("failed", "pending_manual")]
+    else:
+        targets = [(sha, info) for sha, info in idx.items()
+                   if info.get("status") in ("failed", "pending_manual")]
+    stats = {"retried": 0, "recovered": 0, "still_failed": 0, "missing": 0,
+             "pending_manual": 0, "pending_list": []}
 
     for i, (sha, info) in enumerate(targets):
         path = info.get("file_path")
         if not path or not os.path.exists(path):
             stats["missing"] += 1
+            rc = int(info.get("retry_count", 0)) + 1
+            if rc >= MAX_RETRY:
+                idx[sha] = {**info, "status": "pending_manual", "retry_count": rc,
+                            "pending_note": "文件不在原位置且多次重试失败，请人工检查",
+                            "ts": datetime.datetime.now().isoformat()}
+                stats["pending_manual"] += 1
+                stats["pending_list"].append({"sha256": sha, "file_name": info.get("file_name", ""),
+                                              "error": info.get("error", "")})
+            else:
+                idx[sha] = {**info, "retry_count": rc, "ts": datetime.datetime.now().isoformat()}
+            _save_index(idx)
+            stats["retried"] += 1
             if status is not None:
                 status.update({"msg": f"文件已不在原位置: {info.get('file_name')}"})
             continue
@@ -163,11 +186,22 @@ def retry_failed_files(status: dict = None) -> dict:
                 "file_name": res.file_name, "file_path": path,
                 "status": res.status, "parser": res.parser,
                 "error": res.error, "entities": len(res.entities),
-                "ts": datetime.datetime.now().isoformat(),
+                "retry_count": 0, "ts": datetime.datetime.now().isoformat(),
             }
         else:
+            rc = int(info.get("retry_count", 0)) + 1
+            if rc >= MAX_RETRY:
+                idx[sha] = {**info, "status": "pending_manual", "retry_count": rc,
+                            "pending_note": "多次重试仍失败，请人工检查文件",
+                            "ts": datetime.datetime.now().isoformat()}
+                stats["pending_manual"] += 1
+                stats["pending_list"].append({"sha256": sha, "file_name": info.get("file_name", ""),
+                                              "error": res.error or info.get("error", "")})
+            else:
+                idx[sha] = {**info, "status": "failed", "retry_count": rc,
+                            "error": res.error or info.get("error", ""),
+                            "ts": datetime.datetime.now().isoformat()}
             stats["still_failed"] += 1
-            idx[sha] = {**info, "ts": datetime.datetime.now().isoformat()}
         stats["retried"] += 1
         _save_index(idx)
         if status is not None:
@@ -175,6 +209,38 @@ def retry_failed_files(status: dict = None) -> dict:
     if status is not None:
         status.update({"running": False, "stats": stats, "msg": "重试完成"})
     return stats
+
+
+def list_failed() -> list:
+    """失败 + 待处理文件清单（供①页展示/重试/删除）。"""
+    idx = _load_index()
+    out = []
+    for sha, info in idx.items():
+        if info.get("status") in ("failed", "pending_manual"):
+            out.append({
+                "sha256": sha,
+                "file_name": info.get("file_name", ""),
+                "file_path": info.get("file_path", ""),
+                "status": info.get("status", "failed"),
+                "error": info.get("error", ""),
+                "retry_count": int(info.get("retry_count", 0)),
+                "pending_note": info.get("pending_note", ""),
+                "ts": info.get("ts", ""),
+            })
+    out.sort(key=lambda x: x.get("ts", ""), reverse=True)
+    return out
+
+
+def delete_failed(shas: list) -> dict:
+    """删除失败/待处理登记（保留磁盘原文件）。"""
+    idx = _load_index()
+    n = 0
+    for sha in shas:
+        if sha in idx and idx[sha].get("status") in ("failed", "pending_manual"):
+            del idx[sha]
+            n += 1
+    _save_index(idx)
+    return {"deleted": n}
 
 
 def background_scan(folder, force: bool = False, status: dict = None):

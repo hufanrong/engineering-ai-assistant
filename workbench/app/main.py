@@ -23,7 +23,7 @@ from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.19")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.21")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -102,9 +102,42 @@ def cancel_scan():
     return {"ok": False, "msg": "当前没有运行中的扫描"}
 
 
+@app.get("/api/scan/failed-list")
+def scan_failed_list():
+    """失败 + 待处理文件清单（v0.1.21）。"""
+    return {"items": scanner.list_failed()}
+
+
+class RetryOneReq(BaseModel):
+    sha256: str
+
+
+class DeleteFailedReq(BaseModel):
+    shas: list[str]
+
+
+@app.post("/api/scan/retry-failed/{sha}")
+def retry_failed_one(sha: str):
+    """重试单个失败文件（同步执行，返回该文件结果）。"""
+    st = scanner.retry_failed_files(shas=[sha])
+    return {"stats": st, "target": sha}
+
+
+@app.post("/api/scan/failed/delete")
+def delete_failed(req: DeleteFailedReq):
+    return scanner.delete_failed(req.shas)
+
+
+@app.post("/api/scan/failed/clear")
+def clear_failed():
+    """清空全部失败/待处理登记。"""
+    items = scanner.list_failed()
+    return scanner.delete_failed([it["sha256"] for it in items])
+
+
 @app.post("/api/scan/retry-failed")
 def retry_failed():
-    """重试全部 failed 文件（人工触发，后台执行）。"""
+    """重试全部 failed/pending_manual 文件（人工触发，后台执行）。"""
     if SCAN_STATUS.get("running"):
         raise HTTPException(409, "已有任务在运行")
     SCAN_STATUS.update({"running": False, "done": 0, "total": 0, "msg": "", "stats": None})
