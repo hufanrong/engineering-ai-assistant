@@ -293,20 +293,35 @@ def field_transcribe(payload: dict = Body(...)):
 
 @app.post("/api/cloud/field-record-result")
 def field_record_result(payload: dict = Body(...)):
-    """v0.1.37：工作台分析现场记录后回写结果到云库（类型/预填数据/缺失字段）。"""
+    """v0.1.37：工作台分析现场记录后回写结果到云库（类型/预填数据/缺失字段）。
+    v0.1.40：多电脑分析结果合并——高置信度覆盖低置信度，缺失字段取并集。"""
     sha = payload.get("sha256", "")
     if not sha:
         raise HTTPException(400, "需要 sha256")
     fidx = _load_field_index()
     if sha not in fidx:
         raise HTTPException(404, "现场记录不存在")
-    fidx[sha]["record_type"] = payload.get("record_type", "")
-    fidx[sha]["record_confidence"] = payload.get("confidence", 0)
-    fidx[sha]["record_data"] = payload.get("data", {})
-    fidx[sha]["record_missing"] = payload.get("missing", [])
+    new_conf = payload.get("confidence", 0)
+    old_conf = fidx[sha].get("record_confidence", 0)
+    node = payload.get("node_name", "")
+    # 记录分析来源节点（多电脑追踪）
+    sources = fidx[sha].get("record_analyze_sources", [])
+    if node and node not in sources:
+        sources.append(node)
+    fidx[sha]["record_analyze_sources"] = sources
+    # 高置信度覆盖类型和数据
+    if new_conf >= old_conf:
+        fidx[sha]["record_type"] = payload.get("record_type", fidx[sha].get("record_type", ""))
+        fidx[sha]["record_confidence"] = new_conf
+        fidx[sha]["record_data"] = payload.get("data", fidx[sha].get("record_data", {}))
+    # 缺失字段取并集（多电脑分析的缺失合并）
+    old_missing = set(fidx[sha].get("record_missing", []))
+    new_missing = set(payload.get("missing", []))
+    fidx[sha]["record_missing"] = sorted(old_missing | new_missing)
     fidx[sha]["record_analyzed_at"] = datetime.datetime.now().isoformat()
     _save_field_index(fidx)
-    return {"ok": True, "sha256": sha, "record_type": fidx[sha]["record_type"]}
+    return {"ok": True, "sha256": sha, "record_type": fidx[sha]["record_type"],
+            "merged": new_conf < old_conf, "analyze_sources": sources}
 
 
 @app.post("/api/cloud/field-record-generate")

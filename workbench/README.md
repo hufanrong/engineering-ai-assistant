@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.39）
+# 繁工AI · 本地解析工作台（MVP v0.1.40）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.40**：**多电脑并库时现场记录去重合并**（本地拉取追踪 data/field_pulled.json，已拉取过的现场记录自动跳过（force=true强制重拉）；多台电脑对同一条现场记录的分析结果在云库侧合并——高置信度覆盖类型/数据，缺失字段取并集；分析来源节点追踪 record_analyze_sources；pull-field 返回 skipped/total_pulled 去重统计；新增/api/cloud/field-pulled 和 /api/cloud/field-pulled/clear 端点；回写分析结果时携带 node_name）
 - **v0.1.39**：**资料自动关联到设备/车间**（已生成的工程资料自动关联到对应设备和车间；关联来源：生成时传入的设备/车间 > 文件名中的位号/车间 > docx内容中的位号/车间；archive._save_generated保存时自动登记；支持扫描所有已生成资料批量登记；完整性检查用关联关系精准判断设备级/车间级资料是否存在；新增/api/doc-relations/{list,device/{tag},workshop/{ws},scan}端点；新模块app/doc_relations.py）
 - **v0.1.38**：**设备标高/楼层 z 坐标补充**（从设备台账Excel的标高/楼层列、CAD图纸EL/±0.000标注、OCR铭牌中提取设备安装标高；支持EL+100.000/±0.000/5.5m/3层/2F/二楼等多种格式解析；楼层按标准层高3m换算为标高；高置信度覆盖低置信度；空间结构模型从2D(x,y)升级为3D(x,y,z)，每台设备含z坐标+z来源+z置信度+z备注；AI空间摘要包含标高信息；⑤页空间结构区显示每台设备z坐标（绿/黄/红按置信度）+标高统计；新增/api/elevation/map端点；新模块app/elevation.py）
 - **v0.1.37**：**手机端现场记录直接生成**（手机端上传照片/语音/文字后，工作台拉取现场资料时自动调用field_record分析记录类型（开箱/隐蔽/施工日志等10类）+提取关键字段预填+列出缺失字段，分析结果回写云库；cloud_server新增/api/cloud/field-record-result和field-record-generate端点存储分析结果和生成状态；⑨页现场清单显示每条记录的识别类型+缺失字段+是否已生成；手机端field-list返回分析结果，户外可见）

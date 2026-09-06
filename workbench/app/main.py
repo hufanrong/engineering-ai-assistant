@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.39")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.40")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -496,8 +496,9 @@ def cloud_list_proxy(limit: int = 50):
 
 
 @app.post("/api/cloud/pull-field")
-def cloud_pull_field():
-    """把云端现场上传（照片/语音/文字）全部拉取到本地并自动解析入库，手机现场资料进入项目库。"""
+def cloud_pull_field(force: bool = False):
+    """把云端现场上传（照片/语音/文字）全部拉取到本地并自动解析入库，手机现场资料进入项目库。
+    v0.1.40：本地拉取追踪+去重，已拉取过的现场记录跳过（force=true 强制重拉）。"""
     import requests
     base = _cloud_base()
     if not base:
@@ -508,10 +509,24 @@ def cloud_pull_field():
         return {"pulled": 0, "message": "云端暂无现场上传"}
     pull_dir = os.path.join(config.DATA_DIR, "field_pull")
     os.makedirs(pull_dir, exist_ok=True)
+    # v0.1.40：本地拉取追踪（去重）
+    pulled_file = os.path.join(config.DATA_DIR, "field_pulled.json")
+    pulled = {}
+    if os.path.exists(pulled_file):
+        try:
+            with open(pulled_file, encoding="utf-8") as pf:
+                pulled = json.load(pf)
+        except Exception:  # noqa: BLE001
+            pulled = {}
     n = 0
+    skipped = 0
     errors = []
     for it in items:
         sha = it.get("sha256")
+        # v0.1.40：跳过已拉取的记录（除非 force）
+        if not force and sha in pulled:
+            skipped += 1
+            continue
         try:
             r = requests.get(f"{base}/api/cloud/field-file/{sha}", headers=_cloud_headers(), timeout=60)
             if r.status_code != 200:
@@ -523,6 +538,16 @@ def cloud_pull_field():
             with open(target, "wb") as fh:
                 fh.write(r.content)
             n += 1
+            # v0.1.40：登记拉取记录
+            pulled[sha] = {
+                "file_name": it.get("file_name", ""),
+                "project": it.get("project", ""),
+                "uploader": it.get("uploader", ""),
+                "ts": it.get("ts", ""),
+                "kind": it.get("kind", ""),
+                "pulled_at": datetime.datetime.now().isoformat(),
+                "node": config.NODE_NAME,
+            }
         except Exception as e:  # noqa: BLE001
             errors.append(f"{it.get('file_name')}: {e}")
     # v0.1.26：语音文件自动转写 → 现场文字记录入资料库（回写云库供手机端查看）
@@ -609,20 +634,28 @@ def cloud_pull_field():
                                   json={"sha256": sha, "record_type": analysis["doc_type"],
                                         "confidence": analysis["confidence"],
                                         "data": analysis["data"],
-                                        "missing": analysis["missing"]}, timeout=10)
+                                        "missing": analysis["missing"],
+                                        "node_name": config.NODE_NAME}, timeout=10)
                     record_analyzed += 1
                 except Exception:  # noqa: BLE001
                     pass
     except Exception:  # noqa: BLE001
         pass
-    return {"pulled": n, "errors": errors[:20],
+    # v0.1.40：保存拉取追踪
+    try:
+        with open(pulled_file, "w", encoding="utf-8") as pf:
+            json.dump(pulled, pf, ensure_ascii=False, indent=2)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"pulled": n, "skipped": skipped, "errors": errors[:20],
             "parsed": scan_stat.get("parsed", 0), "duplicate": scan_stat.get("duplicate", 0),
             "failed": scan_stat.get("failed", 0),
             "plate_back": plate_back,
             "voice_transcribed": transcribe_ok,
             "voice_pending": transcribe_pending,
             "record_analyzed": record_analyzed,
-            "record_generated": record_generated}
+            "record_generated": record_generated,
+            "total_pulled": len(pulled)}
 
 
 @app.get("/api/docplan/status")
@@ -1041,6 +1074,31 @@ def doc_relations_scan():
     from . import doc_relations as _dr
     n = _dr.scan_generated_docs()
     return {"ok": True, "scanned": n, "stats": _dr.stats()}
+
+
+@app.get("/api/cloud/field-pulled")
+def cloud_field_pulled():
+    """v0.1.40：本地已拉取的现场记录清单（去重追踪）。"""
+    pulled_file = os.path.join(config.DATA_DIR, "field_pulled.json")
+    if not os.path.exists(pulled_file):
+        return {"ok": True, "count": 0, "items": []}
+    try:
+        with open(pulled_file, encoding="utf-8") as f:
+            pulled = json.load(f)
+        items = [dict(v, sha256=k) for k, v in pulled.items()]
+        items.sort(key=lambda x: x.get("pulled_at", ""), reverse=True)
+        return {"ok": True, "count": len(items), "items": items[:200]}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "message": str(e)}
+
+
+@app.post("/api/cloud/field-pulled/clear")
+def cloud_field_pulled_clear():
+    """v0.1.40：清空本地拉取追踪（下次拉取会重新下载所有现场记录）。"""
+    pulled_file = os.path.join(config.DATA_DIR, "field_pulled.json")
+    if os.path.exists(pulled_file):
+        os.remove(pulled_file)
+    return {"ok": True, "message": "已清空拉取追踪"}
 
 
 @app.get("/api/elevation/map")
