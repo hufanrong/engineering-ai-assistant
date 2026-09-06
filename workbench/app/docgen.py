@@ -608,6 +608,52 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 施工计划专项（v0.1.60：设备数据联动——技术参数、进度安排、资源配置、关键节点）
+    if doc_type == "施工计划" and devices:
+        data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+        # 识别设备类型
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+        data["设备类型"] = eq_type
+        # 进度安排
+        schedule = _get_schedule(eq_type, devices)
+        data["进度安排"] = "\n".join(f"{i+1}. {s}" for i, s in enumerate(schedule))
+        # 资源配置
+        resources = _get_resource_config(eq_type, devices)
+        data["资源配置"] = "\n".join(f"{i+1}. {r}" for i, r in enumerate(resources))
+        # 关键节点
+        milestones = _get_milestones(eq_type)
+        data["关键节点"] = "\n".join(f"{i+1}. {m}" for i, m in enumerate(milestones))
+        # 计划工期估算
+        total_days = _estimate_duration(eq_type, len(devices))
+        data["计划工期"] = f"约{total_days}天（根据设备数量和类型估算，实际以现场为准）"
+        # v0.1.60：设备技术参数联动
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            tech_params = []
+            workshops = set()
+            for d in devices[:10]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"车间: {sd['workshop']}")
+                    workshops.add(sd["workshop"])
+                if sd.get("z") is not None:
+                    params.append(f"标高: {sd['z']}m")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+            if tech_params:
+                data["计划设备参数"] = "\n".join(tech_params)
+            if workshops:
+                data["施工车间"] = "、".join(workshops)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
@@ -1050,6 +1096,84 @@ def _get_remaining_issues(devices: list) -> dict:
     summary = f"共{len(issues)}项遗留问题（详见遗留问题清单）" if len(issues) > 1 else issues[0]
     return {"summary": summary, "issues": issues}
 
+
+
+def _get_schedule(eq_type: str, devices: list) -> list:
+    """v0.1.60：根据设备类型生成施工进度安排。"""
+    device_count = len(devices)
+    base_schedule = [
+        f"施工准备阶段（3-5天）：场地清理、材料进场、机具准备、人员进场",
+        f"基础验收阶段（2-3天）：基础尺寸复核、标高复核、地脚螺栓孔检查",
+        f"设备就位阶段（{max(1, device_count//2)}-{device_count}天）：设备吊装就位、初平初正",
+        f"设备精平阶段（{max(1, device_count//3)}-{max(2, device_count//2)}天）：精平精正、地脚螺栓紧固、二次灌浆",
+        f"管道连接阶段（{max(2, device_count//2)}-{device_count}天）：管道预制、管道安装、法兰连接",
+        f"单机试运转阶段（{max(1, device_count//3)}-{max(2, device_count//2)}天）：设备检查、空载试运转、负载试运转",
+        f"竣工验收阶段（2-3天）：资料整理、自检整改、报验验收",
+    ]
+    type_schedule = {
+        "泵": ["泵类设备安装可按车间/区域流水作业，每台泵安装周期约2-3天", "管道连接与设备安装可交叉作业，提高效率"],
+        "压缩机": ["压缩机基础养护期较长（7-14天），需提前安排基础施工", "压缩机对中要求高，精平阶段需预留充足时间", "润滑油系统冲洗需在管道连接完成后进行"],
+        "塔器": ["塔器吊装需大型吊车，需提前规划吊装方案和吊车进场时间", "塔器内件安装需在塔器就位固定后进行", "塔器管道连接量大，需预留充足时间"],
+        "换热器": ["换热器可成组安装，提高效率", "换热器水压试验需在管道连接前完成", "保温施工需在水压试验合格后进行"],
+    }
+    schedule = list(base_schedule)
+    schedule.extend(type_schedule.get(eq_type, []))
+    return schedule
+
+
+def _get_resource_config(eq_type: str, devices: list) -> list:
+    """v0.1.60：根据设备类型生成资源配置。"""
+    device_count = len(devices)
+    base_resources = [
+        f"人员配置：施工负责人1名、技术员1名、钳工{max(2, device_count//2)}名、管工{max(2, device_count//2)}名、焊工{max(1, device_count//3)}名、起重工2名、电工1名",
+        f"主要机具：汽车吊1台、叉车1台、电焊机{max(1, device_count//3)}台、切割机1台、水平仪1台、经纬仪1台",
+        f"主要材料：设备地脚螺栓、垫铁、二次灌浆料、管道材料、法兰、螺栓、垫片、焊条",
+        "安全防护：安全帽、安全带、防护手套、防护眼镜、警戒带、灭火器",
+    ]
+    type_resources = {
+        "泵": ["专用工具：泵对中表、塞尺、力矩扳手", "检测仪器：振动测试仪、温度测试仪"],
+        "压缩机": ["专用工具：压缩机对中表、塞尺、力矩扳手、气缸量具", "检测仪器：振动测试仪、温度测试仪、压力测试仪", "大型机具：如需现场组装，需配备卷扬机、滑轮组"],
+        "塔器": ["大型机具：根据塔器重量选择汽车吊或履带吊（50t-500t）", "专用工具：塔盘安装工具、内件安装工具", "安全设施：高空作业平台、安全绳、速差自控器"],
+        "换热器": ["专用工具：换热器抽芯机（如需抽芯检查）", "检测仪器：水压试验泵、压力表"],
+    }
+    resources = list(base_resources)
+    resources.extend(type_resources.get(eq_type, []))
+    return resources
+
+
+def _get_milestones(eq_type: str) -> list:
+    """v0.1.60：根据设备类型生成关键节点。"""
+    base_milestones = [
+        "M1：施工准备完成（场地、材料、机具、人员到位）",
+        "M2：基础验收合格（尺寸、标高、螺栓孔符合设计）",
+        "M3：设备就位完成（设备吊装就位、初平初正）",
+        "M4：设备精平完成（精平精正、螺栓紧固、二次灌浆）",
+        "M5：管道连接完成（管道安装、法兰连接、焊接完成）",
+        "M6：单机试运转合格（空载、负载试运转参数符合要求）",
+        "M7：竣工验收完成（资料齐全、自检合格、报验通过）",
+    ]
+    type_milestones = {
+        "泵": ["M3.1：泵联轴器对中合格", "M6.1：泵机械密封无泄漏"],
+        "压缩机": ["M2.1：压缩机基础养护期结束（7-14天）", "M5.1：润滑油系统冲洗合格", "M6.1：压缩机各级压力温度符合设计"],
+        "塔器": ["M3.1：塔器吊装就位（需大型吊车）", "M4.1：塔器垂直度符合规范", "M5.1：塔器内件安装完成"],
+        "换热器": ["M5.1：换热器水压试验合格", "M6.1：换热器保温施工完成"],
+    }
+    milestones = list(base_milestones)
+    milestones.extend(type_milestones.get(eq_type, []))
+    return milestones
+
+
+def _estimate_duration(eq_type: str, device_count: int) -> int:
+    """v0.1.60：估算计划工期（天）。"""
+    base_days = {
+        "泵": 15, "压缩机": 30, "塔器": 45, "换热器": 20,
+        "容器": 25, "风机": 12, "电机": 10, "阀门": 5, "储罐": 35,
+    }
+    base = base_days.get(eq_type, 20)
+    # 每增加5台设备增加3天
+    extra = max(0, (device_count - 1) // 5) * 3
+    return base + extra
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -1275,6 +1399,37 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         if data.get("遗留问题清单"):
             add_h("五、遗留问题及处理")
             for line in str(data["遗留问题清单"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+
+    # 施工计划专项（v0.1.60：设备数据联动章节）
+    if doc_type == "施工计划":
+        if data.get("计划设备参数"):
+            add_h("二、计划设备参数")
+            for line in str(data["计划设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("进度安排"):
+            add_h("三、施工进度安排")
+            for line in str(data["进度安排"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("资源配置"):
+            add_h("四、资源配置")
+            for line in str(data["资源配置"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("关键节点"):
+            add_h("五、关键节点")
+            for line in str(data["关键节点"]).split("\n"):
                 if line.strip():
                     p = doc.add_paragraph()
                     r = p.add_run(line.strip())
