@@ -219,6 +219,17 @@
       </div>
       <div id="chatList" style="margin-top:8px"></div>
     </div>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 style="margin:0 0 6px;font-size:15px">设备空间结构（v0.1.35）</h3>
+      <div class="msg" style="margin-bottom:6px">基于 CAD 坐标+设备台账+车间划分，建立 AI 可读的类3D空间结构。设备按车间分组、按坐标排序，自动计算相邻设备（15米内）。台账有但图纸未标注的设备单独标记。</div>
+      <div class="row">
+        <button class="btn" id="btnSpatialLoad">加载空间结构</button>
+        <button class="btn" id="btnSpatialSummary">AI 空间摘要</button>
+        <span id="spatialStats" style="font-size:13px;color:var(--text2)"></span>
+      </div>
+      <div id="spatialSummary" style="margin-top:8px;display:none;white-space:pre-wrap;font-size:12px;background:#fff;padding:8px 10px;border:1px solid var(--line);border-radius:8px;max-height:300px;overflow-y:auto"></div>
+      <div id="spatialTree" style="margin-top:8px"></div>
+    </div>
     <div class="msg" style="margin-bottom:8px">扫描/上传完成后点"重建图谱"：自动归组车间、分类图纸、按设备位号跨图纸/台账关联，并把空间摘要写入向量库（AI 可回答"P-101 在哪、在哪个车间"）。无法确认的冲突进入"待人工确认"。</div>
     <div class="row" style="margin-bottom:10px">
       <button class="btn" id="btnRebuildRel">重建图谱</button>

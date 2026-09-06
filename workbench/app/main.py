@@ -31,9 +31,10 @@ from . import tag_alias
 from . import version_manager
 from . import field_record
 from . import chat_parser
+from . import spatial_model
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.34")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.35")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -913,6 +914,67 @@ def chat_list():
                     pass
             items.append({"sha256": sha, **info, **chat_info})
     return {"items": items, "count": len(items)}
+
+
+@app.get("/api/spatial/structure")
+def spatial_structure():
+    """设备空间结构模型（v0.1.35）：车间→设备层级+坐标+相邻关系。"""
+    spatial = spatial_model.load_spatial()
+    if not spatial:
+        return {"ok": False, "message": "空间模型未构建，请先重建图谱"}
+    # 返回精简版（不含完整 cad_positions 避免过大）
+    slim = {
+        "stats": spatial["stats"],
+        "workshops": {},
+    }
+    for ws_name, ws in spatial["workshops"].items():
+        slim["workshops"][ws_name] = {
+            "device_count": ws["device_count"],
+            "cad_annotated": ws["cad_annotated"],
+            "excel_only": ws["excel_only"],
+            "pending": ws["pending"],
+            "devices": [],
+        }
+        for tag in ws["devices"]:
+            d = spatial["device_index"][tag]
+            slim["workshops"][ws_name]["devices"].append({
+                "tag": tag, "x": d["x"], "y": d["y"],
+                "coord_status": d["coord_status"],
+                "sources": d["sources"],
+                "neighbors": d["neighbors"][:10],
+            })
+    return {"ok": True, **slim}
+
+
+@app.get("/api/spatial/device/{tag}")
+def spatial_device(tag: str):
+    """单设备空间信息：坐标、车间、相邻设备、来源图纸。"""
+    spatial = spatial_model.load_spatial()
+    if not spatial:
+        raise HTTPException(404, "空间模型未构建")
+    dev = spatial["device_index"].get(tag)
+    if not dev:
+        raise HTTPException(404, f"设备 {tag} 不在空间模型中")
+    return dev
+
+
+@app.get("/api/spatial/workshop/{workshop}")
+def spatial_workshop(workshop: str):
+    """指定车间设备布局。"""
+    spatial = spatial_model.load_spatial()
+    if not spatial:
+        raise HTTPException(404, "空间模型未构建")
+    return spatial_model.get_workshop_layout(spatial, workshop)
+
+
+@app.get("/api/spatial/ai-summary")
+def spatial_ai_summary():
+    """AI 可读的空间结构文本摘要。"""
+    spatial = spatial_model.load_spatial()
+    if not spatial:
+        return {"ok": False, "message": "空间模型未构建"}
+    summary = spatial_model.generate_ai_summary(spatial)
+    return {"ok": True, "summary": summary, "chars": len(summary)}
 
 
 @app.get("/api/archive/status")

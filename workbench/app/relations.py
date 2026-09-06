@@ -588,6 +588,15 @@ def build_relations(force: bool = False) -> dict:
     }
     _save(graph)
     _append_spatial_summary(graph, docs, idx)
+    # v0.1.35：构建设备空间关系模型（AI 可读的类3D空间结构）
+    try:
+        from . import spatial_model
+        spatial = spatial_model.build_spatial_model(graph)
+        spatial_model.save_spatial(spatial)
+        graph["spatial_stats"] = spatial["stats"]
+    except Exception:  # noqa: BLE001
+        pass
+
     return graph
 
 
