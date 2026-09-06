@@ -291,6 +291,40 @@ def field_transcribe(payload: dict = Body(...)):
     return {"ok": True, "updated": None}
 
 
+@app.post("/api/cloud/field-record-result")
+def field_record_result(payload: dict = Body(...)):
+    """v0.1.37：工作台分析现场记录后回写结果到云库（类型/预填数据/缺失字段）。"""
+    sha = payload.get("sha256", "")
+    if not sha:
+        raise HTTPException(400, "需要 sha256")
+    fidx = _load_field_index()
+    if sha not in fidx:
+        raise HTTPException(404, "现场记录不存在")
+    fidx[sha]["record_type"] = payload.get("record_type", "")
+    fidx[sha]["record_confidence"] = payload.get("confidence", 0)
+    fidx[sha]["record_data"] = payload.get("data", {})
+    fidx[sha]["record_missing"] = payload.get("missing", [])
+    fidx[sha]["record_analyzed_at"] = datetime.datetime.now().isoformat()
+    _save_field_index(fidx)
+    return {"ok": True, "sha256": sha, "record_type": fidx[sha]["record_type"]}
+
+
+@app.post("/api/cloud/field-record-generate")
+def field_record_generate(payload: dict = Body(...)):
+    """v0.1.37：标记某条现场记录已生成工程资料（回写生成状态+文件名）。"""
+    sha = payload.get("sha256", "")
+    if not sha:
+        raise HTTPException(400, "需要 sha256")
+    fidx = _load_field_index()
+    if sha not in fidx:
+        raise HTTPException(404, "现场记录不存在")
+    fidx[sha]["record_generated"] = True
+    fidx[sha]["record_generated_file"] = payload.get("file_name", "")
+    fidx[sha]["record_generated_at"] = datetime.datetime.now().isoformat()
+    _save_field_index(fidx)
+    return {"ok": True, "sha256": sha}
+
+
 @app.get("/api/cloud/field-list")
 def field_list(project: str = "", uploader: str = ""):
     """电脑端拉取现场上传清单；可按项目/上传人过滤。"""

@@ -742,6 +742,20 @@
             ? '<span class="st parsed">已转写</span> <span style="color:var(--text2)">' + esc(String(it.transcript).slice(0, 120)) + "</span>"
             : '<span class="st failed">待转写</span>';
         }
+        // v0.1.37：现场记录自动分析结果
+        if (it.record_type) {
+          var rtColor = it.record_missing && it.record_missing.length ? "#FAAD14" : "#52C41A";
+          extra += '<div style="margin-top:3px"><span style="color:' + rtColor + ';font-weight:600">📋 ' + esc(it.record_type) + '</span>';
+          if (it.record_missing && it.record_missing.length) {
+            extra += ' <span style="color:#C0392B;font-size:11px">缺：' + esc(it.record_missing.join("、")) + "</span>";
+          } else {
+            extra += ' <span style="color:#52C41A;font-size:11px">字段齐全</span>';
+          }
+          if (it.record_generated) {
+            extra += ' <span class="st parsed">已生成</span>';
+          }
+          extra += "</div>";
+        }
         html += "<tr><td>" + esc((it.ts || "").slice(0, 16).replace("T", " ")) + "</td><td>" + esc(it.project) +
           "</td><td>" + esc(it.uploader) + "</td><td>" + esc(it.kind) + "</td><td>" + esc(it.file_name) +
           '</td><td style="font-size:12px">' + extra + "</td></tr>";

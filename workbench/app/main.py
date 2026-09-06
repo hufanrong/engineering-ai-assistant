@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.36")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.37")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -573,12 +573,56 @@ def cloud_pull_field():
                     plate_back += 1
                 except Exception:  # noqa: BLE001
                     pass
+    # v0.1.37：现场记录自动分析（识别类型+预填字段+缺失提醒），结果回写云库
+    record_analyzed = 0
+    record_generated = 0
+    try:
+        from . import field_record as _fr
+        for it in items:
+            sha = it.get("sha256", "")
+            if not sha:
+                continue
+            # 收集该条记录的文本内容（note + 语音转写 + OCR）
+            note = it.get("note", "") or ""
+            transcript = it.get("transcript", "") or ""
+            ocr_text = ""
+            # 从 parsed_cache 找 OCR 结果
+            cache_path = os.path.join(config.DATA_DIR, "parsed_cache", f"{sha}.json")
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, encoding="utf-8") as cf:
+                        _cache = json.load(cf)
+                    if _cache.get("parser") == "ocr":
+                        ocr_text = _cache.get("text", "") or ""
+                except Exception:  # noqa: BLE001
+                    pass
+            # 分析
+            analysis = _fr.analyze(note, ocr_text, transcript,
+                                    metadata={"project": it.get("project", ""),
+                                              "uploader": it.get("uploader", ""),
+                                              "ts": it.get("ts", "")})
+            if analysis.get("doc_type"):
+                # 回写云库
+                try:
+                    requests.post(f"{base}/api/cloud/field-record-result",
+                                  headers=_cloud_headers(),
+                                  json={"sha256": sha, "record_type": analysis["doc_type"],
+                                        "confidence": analysis["confidence"],
+                                        "data": analysis["data"],
+                                        "missing": analysis["missing"]}, timeout=10)
+                    record_analyzed += 1
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception:  # noqa: BLE001
+        pass
     return {"pulled": n, "errors": errors[:20],
             "parsed": scan_stat.get("parsed", 0), "duplicate": scan_stat.get("duplicate", 0),
             "failed": scan_stat.get("failed", 0),
             "plate_back": plate_back,
             "voice_transcribed": transcribe_ok,
-            "voice_pending": transcribe_pending}
+            "voice_pending": transcribe_pending,
+            "record_analyzed": record_analyzed,
+            "record_generated": record_generated}
 
 
 @app.get("/api/docplan/status")
