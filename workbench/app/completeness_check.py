@@ -168,21 +168,37 @@ def check_completeness(phase_filter: str = None) -> dict:
             else:
                 phase_missing.append({"type": doc_type, "level": "项目级", "priority": "高"})
 
-        # 车间级资料
+        # 车间级资料（v0.1.39：用 doc_relations 精准判断每个车间）
         for doc_type in phase.get("workshop_docs", []):
-            if doc_type in existing_types:
-                phase_existing.append({"type": doc_type, "level": "车间级", "count": len(generated.get(doc_type, [])) or 1})
-            else:
+            try:
+                from . import doc_relations as _dr
                 for ws in workshops:
-                    phase_missing.append({"type": doc_type, "level": "车间级", "workshop": ws, "priority": "中"})
+                    if _dr.workshop_has_doc_type(ws, doc_type):
+                        phase_existing.append({"type": doc_type, "level": "车间级", "workshop": ws})
+                    else:
+                        phase_missing.append({"type": doc_type, "level": "车间级", "workshop": ws, "priority": "中"})
+            except Exception:  # noqa: BLE001
+                if doc_type in existing_types:
+                    phase_existing.append({"type": doc_type, "level": "车间级", "count": 1})
+                else:
+                    for ws in workshops:
+                        phase_missing.append({"type": doc_type, "level": "车间级", "workshop": ws, "priority": "中"})
 
-        # 设备级资料
+        # 设备级资料（v0.1.39：用 doc_relations 精准判断每台设备）
         for doc_type in phase.get("device_docs", []):
-            if doc_type in existing_types:
-                phase_existing.append({"type": doc_type, "level": "设备级", "count": len(generated.get(doc_type, [])) or 1})
-            else:
+            try:
+                from . import doc_relations as _dr
                 for dev in devices:
-                    phase_missing.append({"type": doc_type, "level": "设备级", "device": dev, "priority": "高"})
+                    if _dr.device_has_doc_type(dev, doc_type):
+                        phase_existing.append({"type": doc_type, "level": "设备级", "device": dev})
+                    else:
+                        phase_missing.append({"type": doc_type, "level": "设备级", "device": dev, "priority": "高"})
+            except Exception:  # noqa: BLE001
+                if doc_type in existing_types:
+                    phase_existing.append({"type": doc_type, "level": "设备级", "count": 1})
+                else:
+                    for dev in devices:
+                        phase_missing.append({"type": doc_type, "level": "设备级", "device": dev, "priority": "高"})
 
         # 计算完成度
         total = len(phase_existing) + len(phase_missing)

@@ -29,14 +29,22 @@ def _gen_dir() -> str:
     return d
 
 
-def _save_generated(doc_type: str, content: bytes) -> str:
-    """生成文档落盘存档（v0.1.24）：data/generated_docs/{类型}/繁工AI_{类型}_{时间}.docx"""
+def _save_generated(doc_type: str, content: bytes, devices: list = None, workshops: list = None) -> str:
+    """生成文档落盘存档（v0.1.24）：data/generated_docs/{类型}/繁工AI_{类型}_{时间}.docx
+    v0.1.39：保存后自动登记设备/车间关联。"""
     tdir = os.path.join(_gen_dir(), doc_type)
     os.makedirs(tdir, exist_ok=True)
     fname = f"繁工AI_{doc_type}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
     path = os.path.join(tdir, fname)
     with open(path, "wb") as fh:
         fh.write(content)
+    # v0.1.39：自动登记资料关联
+    try:
+        from . import doc_relations as _dr
+        _dr.register_doc(f"{doc_type}/{fname}", doc_type, file_path=path,
+                         devices=devices, workshops=workshops, source="generated")
+    except Exception:  # noqa: BLE001
+        pass
     return path
 
 

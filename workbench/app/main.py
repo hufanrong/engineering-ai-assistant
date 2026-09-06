@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.38")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.39")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1010,6 +1010,37 @@ def spatial_workshop(workshop: str):
     if not spatial:
         raise HTTPException(404, "空间模型未构建")
     return spatial_model.get_workshop_layout(spatial, workshop)
+
+
+@app.get("/api/doc-relations/list")
+def doc_relations_list():
+    """v0.1.39：所有资料的设备/车间关联列表。"""
+    from . import doc_relations as _dr
+    return {"ok": True, "stats": _dr.stats(), "docs": _dr.get_all()}
+
+
+@app.get("/api/doc-relations/device/{tag}")
+def doc_relations_device(tag: str):
+    """v0.1.39：某台设备关联的所有资料。"""
+    from . import doc_relations as _dr
+    return {"ok": True, "tag": tag, "docs": _dr.get_by_device(tag)}
+
+
+@app.get("/api/doc-relations/workshop/{workshop}")
+def doc_relations_workshop(workshop: str):
+    """v0.1.39：某个车间关联的所有资料。"""
+    from . import doc_relations as _dr
+    from urllib.parse import unquote
+    ws = unquote(workshop)
+    return {"ok": True, "workshop": ws, "docs": _dr.get_by_workshop(ws)}
+
+
+@app.post("/api/doc-relations/scan")
+def doc_relations_scan():
+    """v0.1.39：扫描所有已生成资料，自动登记关联。"""
+    from . import doc_relations as _dr
+    n = _dr.scan_generated_docs()
+    return {"ok": True, "scanned": n, "stats": _dr.stats()}
 
 
 @app.get("/api/elevation/map")

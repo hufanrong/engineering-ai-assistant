@@ -1652,3 +1652,34 @@ function genDo() {
       }
     }).catch(function (e) { $("completenessStats").textContent = "检查失败：" + e.message; });
   });
+
+// v0.1.39：资料关联到设备/车间
+function docRelLoad() {
+  fetch("/api/doc-relations/list").then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.ok) { $("docRelList").innerHTML = '<div class="empty">加载失败</div>'; return; }
+    var st = d.stats || {};
+    $("docRelStats").textContent = "共 " + st.total_docs + " 份资料，关联设备 " + st.with_devices + " 份，关联车间 " + st.with_workshops + " 份";
+    var docs = d.docs || {};
+    var keys = Object.keys(docs);
+    if (!keys.length) { $("docRelList").innerHTML = '<div class="empty">暂无资料关联，点"扫描已生成资料"</div>'; return; }
+    var html = '<table><tr><th>资料类型</th><th>文件</th><th>关联设备</th><th>关联车间</th></tr>';
+    keys.slice(0, 30).forEach(function (k) {
+      var rec = docs[k];
+      var devs = (rec.devices || []).join("、") || '<span style="color:var(--text2)">—</span>';
+      var wss = (rec.workshops || []).join("、") || '<span style="color:var(--text2)">—</span>';
+      html += '<tr><td>' + esc(rec.doc_type) + '</td><td style="font-size:11px">' + esc(rec.doc_id) + '</td><td>' + devs + '</td><td>' + wss + '</td></tr>';
+    });
+    html += '</table>';
+    if (keys.length > 30) html += '<div style="font-size:11px;color:var(--text2);margin-top:4px">仅显示前30份，共' + keys.length + '份</div>';
+    $("docRelList").innerHTML = html;
+  }).catch(function () { $("docRelList").innerHTML = '<div class="empty">加载失败</div>'; });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  if ($("btnDocRelScan")) $("btnDocRelScan").addEventListener("click", function () {
+    fetch("/api/doc-relations/scan", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      alert("扫描完成，共登记 " + d.scanned + " 份资料");
+      docRelLoad();
+    });
+  });
+  if ($("btnDocRelRefresh")) $("btnDocRelRefresh").addEventListener("click", docRelLoad);
+});

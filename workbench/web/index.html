@@ -230,6 +230,17 @@
       <div id="spatialSummary" style="margin-top:8px;display:none;white-space:pre-wrap;font-size:12px;background:#fff;padding:8px 10px;border:1px solid var(--line);border-radius:8px;max-height:300px;overflow-y:auto"></div>
       <div id="spatialTree" style="margin-top:8px"></div>
     </div>
+    <!-- v0.1.39：资料关联到设备/车间 -->
+    <div style="margin-top:12px">
+      <h3 style="margin:0 0 6px">资料关联（设备/车间）</h3>
+      <div class="msg" style="margin-bottom:6px">已生成的工程资料自动关联到对应设备和车间，完整性检查可精准判断每台设备/每个车间是否已有资料。</div>
+      <div class="row" style="margin-bottom:6px;gap:6px">
+        <button class="btn" id="btnDocRelScan">扫描已生成资料</button>
+        <button class="btn ghost" id="btnDocRelRefresh">刷新</button>
+      </div>
+      <span id="docRelStats" style="font-size:12px;color:var(--text2)"></span>
+      <div id="docRelList" style="margin-top:6px"></div>
+    </div>
     <div class="msg" style="margin-bottom:8px">扫描/上传完成后点"重建图谱"：自动归组车间、分类图纸、按设备位号跨图纸/台账关联，并把空间摘要写入向量库（AI 可回答"P-101 在哪、在哪个车间"）。无法确认的冲突进入"待人工确认"。</div>
     <div class="row" style="margin-bottom:10px">
       <button class="btn" id="btnRebuildRel">重建图谱</button>
