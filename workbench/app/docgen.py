@@ -327,6 +327,48 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 技术交底专项（v0.1.51：设备数据联动——技术参数、施工步骤、安全要点、质量控制）
+    if doc_type == "技术交底" and devices:
+        data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+        # 识别设备类型，自动生成施工步骤和安全要点
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+        data["设备类型"] = eq_type
+        steps = _et.get_construction_steps(eq_type)
+        data["施工步骤"] = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+        # 安全要点（根据设备类型）
+        safety_points = _get_safety_points(eq_type, devices)
+        data["安全要点"] = "\n".join(f"{i+1}. {p}" for i, p in enumerate(safety_points))
+        # 质量控制要点
+        quality_points = _get_quality_points(eq_type)
+        data["质量控制要点"] = "\n".join(f"{i+1}. {p}" for i, p in enumerate(quality_points))
+        # 交底内容自动生成
+        data["交底内容"] = f"{eq_type}安装技术交底：施工准备→基础验收→设备就位→找平找正→管道连接→单机试运转。详见施工步骤、安全要点、质量控制要点。"
+        # v0.1.51：设备技术参数联动
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            tech_params = []
+            for d in devices[:5]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"车间: {sd['workshop']}")
+                if sd.get("x") is not None and sd.get("y") is not None:
+                    params.append(f"坐标: ({sd['x']}, {sd['y']})")
+                if sd.get("z") is not None:
+                    params.append(f"安装标高: {sd['z']}m")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+            if tech_params:
+                data["交底设备参数"] = "\n".join(tech_params)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
@@ -417,6 +459,55 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
     return {"data": data, "missing": missing, "devices": devices, "citations": citations}
 
 
+
+
+def _get_safety_points(eq_type: str, devices: list = None) -> list:
+    """v0.1.51：根据设备类型生成安全要点。"""
+    base = [
+        "作业前办理作业票，确认作业环境安全",
+        "作业人员持证上岗，佩戴个人防护用品",
+        "设置警戒区，无关人员不得进入作业区",
+        "作业前检查工器具完好，严禁带病作业",
+    ]
+    type_safety = {
+        "泵": ["联轴器防护罩安装到位后方可试运转", "试运转时严禁站在联轴器旋转方向正面", "泵进出口管道连接前清理管内杂物"],
+        "压缩机": ["压缩机试运转前确认润滑油位正常", "超压保护装置校验合格后方可投用", "皮带传动部位防护罩齐全"],
+        "塔器": ["高处作业系挂安全带，高挂低用", "塔器内作业办理受限空间作业票", "吊装时风力超过六级停止作业"],
+        "换热器": ["抽芯作业时防止芯子滑落伤人", "水压试验时升压缓慢，严禁超压", "法兰紧固按对角顺序均匀紧固"],
+        "容器": ["容器内作业办理受限空间作业票", "容器试压时严禁人员站在法兰正面", "防腐作业保持通风良好"],
+        "风机": ["风机试运转前检查叶轮旋转方向", "皮带防护罩安装齐全", "试运转时测量轴承温度不超标"],
+        "起重机": ["吊装作业专人指挥，信号统一", "吊索具安全系数不小于6", "吊装区域下方严禁站人"],
+        "电机": ["电机接线前确认电源断开并挂牌", "电机试运转前测量绝缘电阻合格", "联轴器防护罩安装到位"],
+        "阀门": ["阀门安装前核对型号规格和流向", "高压阀门试压合格后方可安装", "法兰紧固按对角顺序"],
+        "储罐": ["储罐焊接作业办理动火作业票", "罐内作业办理受限空间作业票", "储罐充水试验时监测基础沉降"],
+    }
+    points = list(base)
+    points.extend(type_safety.get(eq_type, ["按设备说明书和施工方案执行安全措施"]))
+    return points
+
+
+def _get_quality_points(eq_type: str) -> list:
+    """v0.1.51：根据设备类型生成质量控制要点。"""
+    base = [
+        "基础验收合格，混凝土强度达到设计要求",
+        "设备开箱检验合格，型号规格符合设计",
+        "设备就位后找平找正，偏差在规范允许范围内",
+        "管道连接无应力，法兰平行度符合要求",
+        "单机试运转参数符合设备技术文件要求",
+    ]
+    type_quality = {
+        "泵": ["泵的水平度偏差不大于0.05mm/m", "联轴器对中偏差径向≤0.05mm，端面≤0.03mm", "试运转时轴承温度不超过75℃"],
+        "压缩机": ["压缩机水平度偏差不大于0.05mm/m", "气缸与滑道对中偏差符合规范", "试运转时各级压力温度符合设计"],
+        "塔器": ["塔器垂直度偏差不大于高度的1/1000且不大于30mm", "塔盘水平度偏差不大于2mm", "附件安装位置符合图纸"],
+        "换热器": ["换热器抽芯检查管束完好", "水压试验压力为设计压力的1.25倍", "保冷保温层厚度符合设计"],
+        "容器": ["容器焊接接头无损检测比例符合设计", "容器水压试验压力符合规范", "附件安装位置和方向正确"],
+        "风机": ["风机叶轮与机壳间隙均匀", "皮带轮对中偏差符合要求", "试运转时轴承振动值不超标"],
+        "电机": ["电机绝缘电阻不小于0.5MΩ", "电机空载试运转电流不超过额定值", "电机轴承温度不超过80℃"],
+    }
+    points = list(base)
+    points.extend(type_quality.get(eq_type, ["按设备说明书和施工方案执行质量控制"]))
+    return points
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -470,6 +561,37 @@ def fill_template(doc_type: str, data: dict) -> bytes:
     for k in t["optional"]:
         if data.get(k):
             add_kv(k, data[k])
+
+    # 技术交底专项（v0.1.51：设备数据联动章节）
+    if doc_type == "技术交底":
+        if data.get("交底设备参数"):
+            add_h("二、交底设备参数")
+            for line in str(data["交底设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("施工步骤"):
+            add_h("三、施工步骤")
+            for line in str(data["施工步骤"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("安全要点"):
+            add_h("四、安全要点")
+            for line in str(data["安全要点"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("质量控制要点"):
+            add_h("五、质量控制要点")
+            for line in str(data["质量控制要点"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
 
     # 吊装方案专项参数（v0.1.30）
     if doc_type == "吊装方案":
