@@ -459,15 +459,36 @@
   $("dgType").addEventListener("change", renderDocForm);
   $("btnDgPrefill").addEventListener("click", function () {
     var ws = $("dgWorkshop").value;
-    fetch("/api/docgen/prefill?workshop=" + encodeURIComponent(ws), { method: "POST" })
+    var dt = $("dgType").value;
+    $("dgMsg").textContent = "预填中…";
+    fetch("/api/docgen/prefill?workshop=" + encodeURIComponent(ws) + "&doc_type=" + encodeURIComponent(dt), { method: "POST" })
       .then(function (r) { return r.json(); }).then(function (d) {
-        var refTxt = (d.references && d.references.length) ? "；平台规范可引用：" + d.references.slice(0, 3).map(function (r) { return r.std_no + " " + r.std_name; }).join("、") : "";
+        // 把预填数据写入表单输入框
+        var data = d.data || {};
+        Object.keys(data).forEach(function (k) {
+          if (k.startsWith("_")) return;
+          var inp = document.getElementById("dg_" + k);
+          if (inp && !inp.value.trim()) { inp.value = String(data[k]); }
+        });
+        if ($("dg_车间") && ws) $("dg_车间").value = ws;
+        // 缺失字段提示
+        var missing = d.missing || [];
+        var msg = "";
         if (d.devices && d.devices.length) {
-          $("dgMsg").textContent = "已预填 " + d.devices.length + " 台设备（" + (ws || "全项目") + "）：" + d.devices.slice(0, 12).map(function (v) { return v.tag; }).join("、") + (d.devices.length > 12 ? "…" : "") + refTxt;
-          if ($("dg_车间")) $("dg_车间").value = ws;
+          msg = "已预填 " + d.devices.length + " 台设备（" + (ws || "全项目") + "）：" +
+            d.devices.slice(0, 10).map(function (v) { return v.tag; }).join("、") +
+            (d.devices.length > 10 ? "…" : "");
         } else {
-          $("dgMsg").textContent = "该车间暂无设备，请先扫描解析并重建图谱" + refTxt;
+          msg = "该车间暂无设备，请先扫描解析并重建图谱";
         }
+        if (missing.length) {
+          msg += "\n⚠ 缺失字段（生成时标红待补充）：" + missing.join("、");
+        }
+        if (d.citations && d.citations.length) {
+          msg += "\n📚 已引用现行规范：" + d.citations.slice(0, 3).map(function (c) { return c.std_no; }).join("、");
+        }
+        $("dgMsg").textContent = msg;
+        $("dgMsg").style.whiteSpace = "pre-line";
       }).catch(function (e) { $("dgMsg").textContent = "预填失败：" + e.message; });
   });
   $("btnDgGen").addEventListener("click", function () {

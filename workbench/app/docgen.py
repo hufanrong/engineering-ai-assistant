@@ -6,12 +6,15 @@ import datetime
 import json
 import os
 
+from . import config
+
 # 方案类型注册：名称 / 说明 / 必填字段（缺失时前端提示）/ 可选字段
 TYPES = {
     "施工方案": {
         "label": "施工方案",
         "required": ["项目名称", "车间", "编制单位", "编制人", "施工内容", "施工日期"],
-        "optional": ["施工单位", "审核人", "批准人", "施工工艺", "质量措施", "安全措施", "进度安排"],
+        "optional": ["施工单位", "审核人", "批准人", "施工工艺", "质量措施", "安全措施", "进度安排", "涉及设备"],
+        "construction_params": ["施工内容", "施工工艺", "涉及设备"],
         "default_text": {
             "编制依据": "1. 设计图纸及设计交底文件\n2. 现行国家及行业标准规范\n3. 设备技术文件及随机资料\n4. 现场施工条件调查结果",
             "质量保证措施": "1. 严格执行三检制（自检、互检、专检）\n2. 关键工序设质量控制点，报验合格后进入下道工序\n3. 施工人员持证上岗，特种作业人员证件齐全",
@@ -20,8 +23,9 @@ TYPES = {
     },
     "吊装方案": {
         "label": "吊装方案",
-        "required": ["项目名称", "车间", "编制单位", "编制人", "吊装日期"],
-        "optional": ["施工单位", "审核人", "批准人", "吊装机械", "吊装安全措施"],
+        "required": ["项目名称", "车间", "编制单位", "编制人", "吊装日期", "吊装设备名称", "设备重量"],
+        "optional": ["施工单位", "审核人", "批准人", "吊装机械", "吊装半径", "吊装高度", "吊车站位", "吊索具", "吊装安全措施"],
+        "lifting_params": ["吊装设备名称", "设备重量", "吊装半径", "吊装高度", "吊车型号", "吊车站位", "吊索具"],
         "default_text": {
             "编制依据": "1. 设备安装图纸及技术文件\n2.《起重机械安全规程》GB/T 6067\n3.《建筑机械使用安全技术规程》JGJ 33\n4. 设备随机装箱单及发货资料",
             "吊装安全措施": "1. 吊装前办理吊装作业票，检查吊索具完好\n2. 明确指挥信号，专人指挥，无关人员撤离吊装区\n3. 六级及以上大风、雷雨等恶劣天气停止吊装\n4. 设备就位后立即找正固定，方可摘钩",
@@ -145,6 +149,104 @@ def std_citations(doc_type: str, limit: int = 3) -> list:
         return []
 
 
+def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
+    """v0.1.30：从解析库深度预填资料数据。
+    来源：relations layout（车间设备）→ device_workshop（设备车间归属）→
+          vector_store（设备参数/重量/型号检索）→ platform_store（规范正文引用）。
+    返回 {data: {...}, missing: [...], devices: [...], citations: [...]}。"""
+    data = {}
+    missing = []
+    t = TYPES.get(doc_type)
+    if not t:
+        return {"data": data, "missing": [], "devices": [], "citations": []}
+
+    # 项目名称（从配置或第一个车间推断）
+    data["项目名称"] = getattr(config, "PROJECT_NAME", "") or "紫金矿业工程项目"
+
+    # 车间
+    if workshop:
+        data["车间"] = workshop
+
+    # 从 relations 取车间设备
+    devices = []
+    try:
+        from . import relations
+        g = relations.load_relations()
+        all_devs = g.get("devices", [])
+        if workshop:
+            ws_devs = [d for d in all_devs if workshop in d.get("workshops", [])]
+        else:
+            ws_devs = all_devs
+        devices = [{"tag": d["tag"], "name": "见台账", "count": 1,
+                    "workshops": d.get("workshops", [])} for d in ws_devs[:60]]
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 设备级车间归属补充（v0.1.29）
+    try:
+        from . import device_workshop
+        for dv in devices:
+            dw = device_workshop.get_workshop(dv["tag"])
+            if dw and dw not in dv["workshops"]:
+                dv["workshops"].append(dw)
+    except Exception:  # noqa: BLE001
+        pass
+
+    data["_devices"] = devices
+
+    # 吊装方案专项：从设备台账/向量库检索重量等参数
+    if doc_type == "吊装方案" and devices:
+        first_dev = devices[0]
+        data["吊装设备名称"] = first_dev["tag"] + "（详见设备清单）"
+        # 尝试从向量库检索设备重量
+        try:
+            from . import vector_store
+            store = vector_store.VectorStore()
+            hits = store.search(f"{first_dev['tag']} 重量 设备参数", top_k=3)
+            for h in hits:
+                txt = str(h.get("text", ""))
+                import re as _re
+                m = _re.search(r"(重量|净重|毛重)\s*[:：=]?\s*(\d+(?:\.\d+)?)\s*(t|吨|kg|公斤)", txt, _re.I)
+                if m:
+                    w = float(m.group(2))
+                    unit = m.group(3).lower()
+                    if unit in ("kg", "公斤"):
+                        w = w / 1000.0
+                    data["设备重量"] = f"{w} t"
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        if "设备重量" not in data:
+            missing.append("设备重量（需从设备铭牌/台账补充）")
+        # 吊装参数默认建议
+        if "吊装半径" not in data:
+            missing.append("吊装半径（需现场测量）")
+        if "吊装高度" not in data:
+            missing.append("吊装高度（需根据设备安装高度确定）")
+        if "吊车型号" not in data:
+            data["吊车型号"] = "根据设备重量与吊装半径选择（建议25t汽车吊，具体以吊装计算为准）"
+        if "吊索具" not in data:
+            data["吊索具"] = "钢丝绳/吊带（根据设备重量选择，安全系数≥6）"
+
+    # 施工方案专项
+    if doc_type == "施工方案":
+        if devices:
+            data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+        if "施工内容" not in data:
+            missing.append("施工内容（需明确具体施工范围与工序）")
+
+    # 规范正文引用（v0.1.17 增强：只取现行规范）
+    citations = std_citations(doc_type, limit=4)
+    data["_std_citations"] = citations
+
+    # 检查必填字段缺失
+    for k in t["required"]:
+        if not str(data.get(k, "")).strip() and k not in missing:
+            missing.append(k)
+
+    return {"data": data, "missing": missing, "devices": devices, "citations": citations}
+
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -199,6 +301,19 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         if data.get(k):
             add_kv(k, data[k])
 
+    # 吊装方案专项参数（v0.1.30）
+    if doc_type == "吊装方案":
+        add_h("二、吊装参数")
+        lifting_keys = ["吊装设备名称", "设备重量", "吊装半径", "吊装高度", "吊车型号", "吊车站位", "吊索具"]
+        for k in lifting_keys:
+            if data.get(k) or k in t["required"]:
+                add_kv(k, data.get(k, ""))
+        # 吊装计算提示
+        p = doc.add_paragraph()
+        r = p.add_run("注：吊装半径、吊装高度需现场实测后填入；吊车型号应根据吊装重量与半径经吊装计算确定，本方案仅为建议。")
+        r.font.size = Pt(10)
+        r.font.color.rgb = __import__("docx.shared", fromlist=["RGBColor"]).RGBColor(0x66, 0x66, 0x66)
+
     # 设备清单（吊装方案/开箱验收自动带出）
     devices = data.get("_devices") or []
     if devices:
@@ -247,7 +362,7 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         tbl.rows[0].cells[i].text = h
     add_paragraph = doc.add_paragraph
     p = add_paragraph()
-    p.add_run(f"\n生成工具：繁工AI 本地解析工作台 v0.1.7 · 生成时间 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    p.add_run(f"\n生成工具：繁工AI 本地解析工作台 v0.1.30 · 生成时间 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     import io
     buf = io.BytesIO()

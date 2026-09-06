@@ -29,7 +29,7 @@ from . import workshop_assign
 from . import device_workshop
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.29")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.30")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -415,19 +415,14 @@ def docgen_types():
 
 
 def _prefill_data(workshop: str = "", doc_type: str = ""):
-    """从解析库（关联图谱）自动预填：车间设备清单 + 平台库规范引用（v0.1.12/0.1.18）。"""
-    g = relations.load_relations()
-    devices = [d for d in g.get("devices", []) if not workshop or workshop in d.get("workshops", [])]
-    dev_list = [{"tag": d["tag"], "name": "见台账", "count": 1,
-                 "files": d.get("files", [])[:3]} for d in devices[:100]]
-    refs = []
-    try:
-        idx = platform_store.list_items().get("items", [])
-        refs = [{"std_no": it.get("std_no", ""), "std_name": it.get("std_name", ""),
-                 "status": it.get("status", "")} for it in idx[:8] if it.get("std_no")]
-    except Exception:  # noqa: BLE001
-        pass
-    return {"workshop": workshop, "devices": dev_list, "references": refs}
+    """从解析库深度预填：车间设备 + 设备参数 + 规范正文引用 + 缺失字段列出（v0.1.30）。"""
+    from . import docgen
+    result = docgen.prefill_from_db(doc_type or "施工方案", workshop)
+    # 兼容旧字段
+    result["workshop"] = workshop
+    result["references"] = [{"std_no": c.get("std_no", ""), "std_name": c.get("std_name", ""),
+                              "status": c.get("status", "")} for c in result.get("citations", [])]
+    return result
 
 
 class PrefillReq(BaseModel):
