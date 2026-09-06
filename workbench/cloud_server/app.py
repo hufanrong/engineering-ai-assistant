@@ -12,6 +12,7 @@ import json
 import zipfile
 import hashlib
 import datetime
+import requests
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Form
 from fastapi.responses import StreamingResponse
@@ -32,7 +33,11 @@ os.makedirs(FIELD_DIR, exist_ok=True)
 # 与工作台 app/config.py 的 CLOUD_API_KEY 保持一致；留空则不鉴权（仅内网推荐）
 API_KEY = "fanGong_cloud_2026"
 
-app = FastAPI(title="繁工AI 云端合并主库", version="0.1.14")
+# 手机端 AI 对话桥接：填写电脑工作台地址（如 http://192.168.1.10:8756），
+# 手机 → 云库 → 工作台 AI 助手（本地多库检索+资料生成）；留空则云库本地轻量检索回答。
+AI_WORKBENCH_ENDPOINT = ""
+
+app = FastAPI(title="繁工AI 云端合并主库", version="0.1.19")
 
 
 def _load_index() -> dict:
@@ -105,8 +110,10 @@ def cloud_search(req: dict):
     if not query:
         raise HTTPException(400, "缺少 query")
     idx = _load_index()
-    # 简单词频检索（云端轻量方案；后续可接向量模型）
-    qs = set(query.lower().split())
+    # 轻量检索（v0.1.19 增强：大小写不敏感 + 中文二连字子串计分，手机端 AI 检索质量）
+    ql = query.lower()
+    qs = set(ql.split())
+    grams = [ql[i:i+2] for i in range(max(len(ql) - 1, 0))] if len(ql) >= 2 else []
     scored = []
     for sha in list(idx)[:2000]:
         p = os.path.join(PAYLOAD_DIR, f"{sha}.json")
@@ -118,16 +125,55 @@ def cloud_search(req: dict):
         except Exception:  # noqa: BLE001
             continue
         text = ((pkg.get("payload") or {}).get("text", "") or "")[:20000]
-        score = sum(1 for w in qs if w in text)
-        # 中文关键词按子串计分（整句直接命中大幅加分）
-        if len(query) > 1 and query in text:
+        tl = text.lower()
+        score = sum(1 for w in qs if w in tl)
+        if len(ql) > 1 and ql in tl:
             score += 3
+        score += sum(0.5 for g in grams if g in tl)  # 中文二连字命中
         if score > 0:
-            scored.append({"score": score, "sha256": sha,
+            scored.append({"score": round(score, 2), "sha256": sha,
                            "file_name": (pkg.get("payload") or {}).get("file_name", ""),
                            "text": text[:500], "node_name": pkg.get("node_name", "")})
     scored.sort(key=lambda x: -x["score"])
     return {"query": query, "results": scored[:top_k]}
+
+
+@app.post("/api/cloud/ai-chat")
+def cloud_ai_chat(req: dict, authorization: str = Header("")):
+    """手机端 AI 助手桥接（v0.1.19）：手机 → 云库 → 电脑工作台 AI。
+    配置 AI_WORKBENCH_ENDPOINT 后转发至工作台 /api/ai/chat（本地多库检索+Word 资料生成）；
+    未配置则用云库自身轻量检索回答。"""
+    _check_auth(authorization)
+    query = (req or {}).get("query", "")
+    if not query:
+        raise HTTPException(400, "缺少 query")
+    history = (req or {}).get("history") or []
+    ep = AI_WORKBENCH_ENDPOINT.strip().rstrip("/")
+    if ep:
+        try:
+            r = requests.post(f"{ep}/api/ai/chat",
+                              json={"query": query, "history": history}, timeout=120)
+            if r.status_code == 200:
+                return {"bridge": "workbench", "endpoint": ep, **r.json()}
+            return {"bridge": "workbench", "error": f"工作台返回 {r.status_code}", "mode": "error"}
+        except Exception as e:  # noqa: BLE001
+            return {"bridge": "workbench", "error": f"工作台不可达：{e}，已降级云库本地检索", "mode": "error",
+                    "fallback": _cloud_local_answer(query)}
+    return {"bridge": "cloud_local", "endpoint": "", **_cloud_local_answer(query)}
+
+
+def _cloud_local_answer(query: str, top_k: int = 5) -> dict:
+    """云库本地轻量回答：检索相关文件 + 状态汇总。"""
+    res = cloud_search({"query": query, "top_k": top_k})
+    lines = []
+    if res["results"]:
+        lines.append("云端资料命中：")
+        for i, it in enumerate(res["results"][:5], 1):
+            lines.append(f"  {i}. 《{it.get('file_name','')}》（{it.get('node_name','')}）：{(it.get('text') or '')[:80]}…")
+    else:
+        lines.append("云端资料未命中。可先在手机端上传现场照片/语音/文字，或让电脑端同步解析库。")
+    lines.append("（提示：在云库服务器配置 AI_WORKBENCH_ENDPOINT 指向电脑工作台，可获得完整 AI 问答与资料生成）")
+    return {"mode": "cloud_local", "answer": "\n".join(lines), "sources": {"project": len(res["results"])}}
 
 
 # ---------- 云库 <-> .fglib 互导（多电脑并库闭环） ----------
