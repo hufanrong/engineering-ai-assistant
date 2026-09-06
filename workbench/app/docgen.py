@@ -460,6 +460,52 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 设计变更专项（v0.1.55：设备数据联动——技术参数、变更内容、影响范围、处理建议、管线影响）
+    if doc_type == "设计变更" and devices:
+        data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+        # 识别设备类型
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+        data["设备类型"] = eq_type
+        # 变更内容建议
+        change_contents = _get_change_content(eq_type)
+        data["变更内容建议"] = "\n".join(f"{i+1}. {c}" for i, c in enumerate(change_contents))
+        # 影响范围分析
+        impact = _get_change_impact(eq_type, devices)
+        data["影响范围"] = impact["summary"]
+        data["影响车间"] = "、".join(impact["workshops"])
+        data["影响管线"] = "、".join(impact["pipes"])
+        data["影响相邻设备"] = "、".join(impact["neighbors"])
+        # 处理建议
+        suggestions = _get_change_suggestions(eq_type)
+        data["处理建议"] = "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions))
+        # 变更原因分类
+        data["变更原因"] = "现场与设计不符（详见变更内容）"
+        # v0.1.55：设备技术参数联动
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            tech_params = []
+            for d in devices[:5]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"车间: {sd['workshop']}")
+                if sd.get("x") is not None and sd.get("y") is not None:
+                    params.append(f"坐标: ({sd['x']}, {sd['y']})")
+                if sd.get("z") is not None:
+                    params.append(f"标高: {sd['z']}m")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+            if tech_params:
+                data["变更设备参数"] = "\n".join(tech_params)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
@@ -716,6 +762,103 @@ def _get_concealment_quality(eq_type: str) -> list:
     quality.extend(type_quality.get(eq_type, ["按设备说明书和施工验收规范执行"]))
     return quality
 
+
+
+def _get_change_content(eq_type: str) -> list:
+    """v0.1.55：根据设备类型生成变更内容建议。"""
+    type_content = {
+        "泵": ["泵基础尺寸或位置变更", "泵进出口管道走向或标高变更", "泵型号或规格变更", "泵安装方式变更（立式/卧式）"],
+        "压缩机": ["压缩机基础尺寸或位置变更", "压缩机管道系统走向变更", "压缩机型号或规格变更", "压缩机辅助系统配置变更"],
+        "塔器": ["塔器基础标高或位置变更", "塔器接管方位或标高变更", "塔器内件配置变更", "塔器保温或防腐要求变更"],
+        "换热器": ["换热器基础位置或标高变更", "换热器管程壳程接口变更", "换热器型号或规格变更", "换热器保温要求变更"],
+        "容器": ["容器基础标高或位置变更", "容器接管方位或标高变更", "容器型号或规格变更", "容器保温或防腐要求变更"],
+        "风机": ["风机基础位置或标高变更", "风机进出口管道走向变更", "风机型号或规格变更", "风机减振方式变更"],
+        "电机": ["电机基础位置或标高变更", "电机电缆走向或接线方式变更", "电机型号或功率变更", "电机接地方式变更"],
+        "阀门": ["阀门安装位置或标高变更", "阀门型号或规格变更", "阀门传动方式变更", "阀门保温要求变更"],
+        "储罐": ["储罐基础位置或标高变更", "储罐接管方位变更", "储罐容积或规格变更", "储罐防腐要求变更"],
+    }
+    return type_content.get(eq_type, ["设备位置或标高变更", "设备型号或规格变更", "设备管道连接方式变更"])
+
+
+def _get_change_impact(eq_type: str, devices: list) -> dict:
+    """v0.1.55：分析变更影响范围。"""
+    workshops = set()
+    pipes = []
+    neighbors = []
+    
+    # 从空间模型获取影响范围
+    try:
+        from . import relations as _rel
+        from . import spatial_model as _sm
+        g = _rel.load_relations()
+        spatial = _sm.build_spatial_model(g)
+        spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+        for d in devices[:5]:
+            tag = d["tag"]
+            sd = spatial_devs.get(tag, {})
+            if sd.get("workshop"):
+                workshops.add(sd["workshop"])
+            if sd.get("neighbors"):
+                for nb in sd["neighbors"][:3]:
+                    if nb.get("tag"):
+                        neighbors.append(nb["tag"])
+    except Exception:  # noqa: BLE001
+        pass
+    
+    # 从管线网络获取影响管线
+    try:
+        from . import piping_network as _pn
+        for d in devices[:3]:
+            tag = d["tag"]
+            dev_pipes = _pn.get_device_pipes(tag)
+            for p in dev_pipes[:3]:
+                pipes.append(p.get("pipe_no", ""))
+    except Exception:  # noqa: BLE001
+        pass
+    
+    if not workshops:
+        workshops.add("待确认")
+    
+    summary_parts = []
+    if workshops:
+        summary_parts.append(f"影响{len(workshops)}个车间")
+    if pipes:
+        summary_parts.append(f"影响{len(pipes)}条管线")
+    if neighbors:
+        summary_parts.append(f"影响{len(neighbors)}台相邻设备")
+    summary = "；".join(summary_parts) if summary_parts else "影响范围待确认"
+    
+    return {
+        "summary": summary,
+        "workshops": list(workshops),
+        "pipes": pipes[:10],
+        "neighbors": neighbors[:10],
+    }
+
+
+def _get_change_suggestions(eq_type: str) -> list:
+    """v0.1.55：根据设备类型生成变更处理建议。"""
+    base = [
+        "变更前组织设计、施工、监理三方会签确认",
+        "变更内容及时更新到相关专业图纸",
+        "变更工程量及时记录并作为结算依据",
+        "变更涉及的设备材料及时采购或调整",
+    ]
+    type_suggestions = {
+        "泵": ["变更后重新核对泵基础尺寸和地脚螺栓位置", "变更后重新进行管道应力分析", "变更后重新核对泵的汽蚀余量"],
+        "压缩机": ["变更后重新核对压缩机基础荷载和振动要求", "变更后重新进行管道系统设计", "变更后重新核对压缩机辅助系统配置"],
+        "塔器": ["变更后重新核对塔器基础荷载和垂直度要求", "变更后重新核对塔器接管与管道连接", "变更后重新进行塔器内件安装设计"],
+        "换热器": ["变更后重新核对换热器基础尺寸和标高", "变更后重新核对管程壳程管道连接", "变更后重新进行换热器水压试验"],
+        "容器": ["变更后重新核对容器基础荷载和标高", "变更后重新核对容器接管与管道连接", "变更后重新进行容器水压试验"],
+        "风机": ["变更后重新核对风机基础尺寸和减振要求", "变更后重新进行管道系统设计", "变更后重新核对风机风量和风压"],
+        "电机": ["变更后重新核对电机基础尺寸和荷载", "变更后重新进行电缆敷设设计", "变更后重新核对电机功率和绝缘要求"],
+        "阀门": ["变更后重新核对阀门安装位置和操作空间", "变更后重新进行管道应力分析", "变更后重新核对阀门试压要求"],
+        "储罐": ["变更后重新核对储罐基础荷载和沉降要求", "变更后重新核对储罐接管与管道连接", "变更后重新进行储罐充水试验"],
+    }
+    suggestions = list(base)
+    suggestions.extend(type_suggestions.get(eq_type, ["变更后重新核对设备安装要求", "变更后重新进行相关专业设计"]))
+    return suggestions
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -847,6 +990,40 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         if data.get("质量标准"):
             add_h("五、质量标准")
             for line in str(data["质量标准"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+
+    # 设计变更专项（v0.1.55：设备数据联动章节）
+    if doc_type == "设计变更":
+        if data.get("变更设备参数"):
+            add_h("二、变更设备参数")
+            for line in str(data["变更设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("变更内容建议"):
+            add_h("三、变更内容")
+            for line in str(data["变更内容建议"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("影响范围") or data.get("影响车间") or data.get("影响管线"):
+            add_h("四、影响范围分析")
+            if data.get("影响范围"):
+                add_kv("影响概述", data["影响范围"])
+            if data.get("影响车间"):
+                add_kv("影响车间", data["影响车间"])
+            if data.get("影响管线"):
+                add_kv("影响管线", data["影响管线"])
+            if data.get("影响相邻设备"):
+                add_kv("影响相邻设备", data["影响相邻设备"])
+        if data.get("处理建议"):
+            add_h("五、处理建议")
+            for line in str(data["处理建议"]).split("\n"):
                 if line.strip():
                     p = doc.add_paragraph()
                     r = p.add_run(line.strip())
