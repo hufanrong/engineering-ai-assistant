@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.67")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.68")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1718,6 +1718,34 @@ def completion_archive_update_doc(body: dict):
         raise HTTPException(status_code=400, detail="缺少tag/doc_type/status")
     return {"ok": True, **_ca.update_device_doc_status(tag, doc_type, status, file_name)}
 
+
+
+@app.get("/api/lifting-plan/generate")
+def lifting_plan_generate(tag: str):
+    """v0.1.68：生成设备吊装方案。"""
+    from . import lifting_plan as _lp
+    return {"ok": True, **_lp.generate_lifting_plan(tag)}
+
+
+@app.get("/api/lifting-plan/list")
+def lifting_plan_list():
+    """v0.1.68：列出已生成的吊装方案。"""
+    from . import lifting_plan as _lp
+    return {"ok": True, "plans": _lp.list_lifting_plans()}
+
+
+@app.get("/api/lifting-plan/stats")
+def lifting_plan_stats():
+    """v0.1.68：获取吊装方案统计。"""
+    from . import lifting_plan as _lp
+    return {"ok": True, **_lp.get_lifting_stats()}
+
+
+@app.get("/api/lifting-plan/params")
+def lifting_plan_params(type: str = ""):
+    """v0.1.68：获取设备类型吊装参数参考。"""
+    from . import lifting_plan as _lp
+    return {"ok": True, "params": _lp.get_lifting_params(type)}
 
 @app.get("/api/completion-archive/requirements")
 def completion_archive_requirements(type: str = ""):

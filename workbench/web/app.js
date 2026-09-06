@@ -2761,3 +2761,69 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnArchiveMissing");
   if (b4) b4.addEventListener("click", archiveLoadMissing);
 });
+
+// v0.1.68：设备安装位置与吊装方案联动
+function liftingGenerate() {
+  var tag = document.getElementById("liftingDeviceTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  fetch("/api/lifting-plan/generate?tag=" + encodeURIComponent(tag)).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("liftingDetail");
+    el.style.display = "block";
+    var html = '<strong>设备吊装方案 - ' + esc(d.tag) + ' ' + esc(d.name || '') + '</strong><br>';
+    html += '类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配') + ' | 标高: ' + (d.elevation != null ? d.elevation + 'm' : '未知');
+    if (d.x != null && d.y != null) html += ' | 坐标: (' + d.x + ', ' + d.y + ')';
+    html += '<br>';
+    if (d.lifting_params) {
+      var p = d.lifting_params;
+      html += '<hr style="margin:6px 0"><strong>吊装参数：</strong><br>';
+      html += '估算重量: ' + p.estimated_weight + 't | 估算高度: ' + p.estimated_height + 'm | 安装标高: ' + p.installation_elevation + 'm<br>';
+      html += '计算吊装高度: <strong>' + p.calculated_lifting_height + 'm</strong> | 所需吊车能力: ' + p.required_crane_capacity + 't<br>';
+      html += '建议吊车吨位: <strong style="color:#FF7A00">' + p.recommended_crane_tons + 't</strong> | 建议吊装半径: ' + p.recommended_lifting_radius + 'm | 吊装方法: ' + esc(p.recommended_lifting_method) + '<br>';
+      if (p.special_requirements && p.special_requirements.length > 0) {
+        html += '<strong>特殊要求：</strong>' + p.special_requirements.map(esc).join('；') + '<br>';
+      }
+    }
+    html += '<hr style="margin:6px 0"><strong>吊装环境分析：</strong><br>';
+    (d.lifting_environment || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>吊装顺序建议：</strong><br>';
+    (d.lifting_sequence || []).forEach(function(s, i){ html += (i+1) + '. ' + esc(s) + '<br>'; });
+    html += '<strong>安全注意事项：</strong><br>';
+    (d.safety_points || []).forEach(function(s, i){ html += (i+1) + '. ' + esc(s) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function liftingLoadList() {
+  fetch("/api/lifting-plan/list").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("liftingList");
+    var plans = d.plans || [];
+    if (plans.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无已生成的方案</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>已生成方案（' + plans.length + '个）：</strong><br>';
+    plans.forEach(function(p){
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'liftingDeviceTag\').value=\'' + p.tag + '\';liftingGenerate();" style="color:#1E5AA8">' + p.tag + '</a> ' + esc(p.name || '') + ' (' + esc(p.type || '') + '/' + esc(p.workshop || '') + '/' + p.crane_tons + 't)<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function liftingLoadStats() {
+  fetch("/api/lifting-plan/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("liftingStats");
+    el.style.display = "block";
+    if (d.total_plans === 0) { el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    var html = '<strong>吊装方案统计：</strong>已生成' + d.total_plans + '个 / 总设备' + d.total_devices + '台（覆盖率' + d.coverage_percent + '%）<br>';
+    if (d.crane_distribution) {
+      html += '<strong>吊车吨位分布：</strong>';
+      for (var k in d.crane_distribution) { html += esc(k) + ':' + d.crane_distribution[k] + '台 '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnLiftingGenerate");
+  if (b1) b1.addEventListener("click", liftingGenerate);
+  var b2 = document.getElementById("btnLiftingList");
+  if (b2) b2.addEventListener("click", liftingLoadList);
+  var b3 = document.getElementById("btnLiftingStats");
+  if (b3) b3.addEventListener("click", liftingLoadStats);
+});
