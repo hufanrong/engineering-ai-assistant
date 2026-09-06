@@ -500,6 +500,20 @@
   </div>
 </div>
 
+<!-- v0.1.58：设备安装位置与管线联动可视化 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与管线联动可视化（v0.1.58）</h3>
+  <div class="msg" style="margin-bottom:6px">展示设备在车间中的位置分布和设备间的管线连接关系，支持按车间和设备类型筛选。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnSpatialViz">生成可视化图</button>
+    <button class="btn" id="btnSpatialVizHtml" style="background:#16a085">打开完整页面</button>
+    <select id="vizWorkshop" style="padding:4px 8px;font-size:12px"><option value="">全部车间</option></select>
+    <select id="vizEqType" style="padding:4px 8px;font-size:12px"><option value="">全部类型</option></select>
+    <span id="spatialVizStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
+</div>
+
 <!-- v0.1.41：设备位置人工确认弹窗 -->
 <div id="spatialEditModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:12px;width:min(420px,92vw);padding:16px;box-sizing:border-box;">

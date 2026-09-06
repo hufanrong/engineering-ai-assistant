@@ -2146,3 +2146,54 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnArchiveExportEnhanced");
   if (b3) b3.addEventListener("click", archiveExportEnhanced);
 });
+
+// v0.1.58：设备安装位置与管线联动可视化
+function loadSpatialVizStats() {
+  fetch("/api/spatial-visualization/stats").then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.ok) return;
+    var el = document.getElementById("spatialVizStats");
+    if (el) el.textContent = d.total_devices + "台设备 | " + d.devices_with_coords + "台有坐标 | " + d.piping_connections + "条管线连接 | " + d.workshops + "个车间";
+    var ws = document.getElementById("vizWorkshop");
+    if (ws && d.workshop_list) {
+      d.workshop_list.forEach(function (w) {
+        var opt = document.createElement("option");
+        opt.value = w; opt.textContent = w;
+        ws.appendChild(opt);
+      });
+    }
+    var tp = document.getElementById("vizEqType");
+    if (tp && d.type_list) {
+      d.type_list.forEach(function (t) {
+        var opt = document.createElement("option");
+        opt.value = t; opt.textContent = t;
+        tp.appendChild(opt);
+      });
+    }
+  }).catch(function () {});
+}
+function generateSpatialViz() {
+  var w = document.getElementById("vizWorkshop").value;
+  var t = document.getElementById("vizEqType").value;
+  var url = "/api/spatial-visualization/svg?";
+  if (w) url += "workshop=" + encodeURIComponent(w) + "&";
+  if (t) url += "eq_type=" + encodeURIComponent(t);
+  fetch(url).then(function (r) { return r.text(); }).then(function (svg) {
+    var container = document.getElementById("spatialVizContainer");
+    container.style.display = "block";
+    container.innerHTML = svg;
+  }).catch(function (e) { alert("生成可视化图失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnSpatialViz");
+  if (b1) b1.addEventListener("click", generateSpatialViz);
+  var b2 = document.getElementById("btnSpatialVizHtml");
+  if (b2) b2.addEventListener("click", function () {
+    var w = document.getElementById("vizWorkshop").value;
+    var t = document.getElementById("vizEqType").value;
+    var url = "/api/spatial-visualization/html?";
+    if (w) url += "workshop=" + encodeURIComponent(w) + "&";
+    if (t) url += "eq_type=" + encodeURIComponent(t);
+    window.open(url, "_blank");
+  });
+  loadSpatialVizStats();
+});

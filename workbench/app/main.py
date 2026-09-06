@@ -8,7 +8,7 @@ import threading
 from typing import Union, List
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.57")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.58")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1379,6 +1379,29 @@ def construction_log_generate_enhanced(date: str, project_name: str = "", worksh
     from . import construction_log as _cl
     result = _cl.generate_log_data_enhanced(date, project_name, workshop)
     return {"ok": True, **result}
+
+
+@app.get("/api/spatial-visualization/svg")
+def spatial_visualization_svg(workshop: str = None, eq_type: str = None):
+    """v0.1.58：设备安装位置与管线联动SVG图。"""
+    from . import spatial_visualization as _sv
+    svg = _sv.generate_spatial_svg(workshop, eq_type)
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.get("/api/spatial-visualization/html")
+def spatial_visualization_html(workshop: str = None, eq_type: str = None):
+    """v0.1.58：设备安装位置与管线联动HTML页面。"""
+    from . import spatial_visualization as _sv
+    html = _sv.generate_spatial_html(workshop, eq_type)
+    return Response(content=html, media_type="text/html")
+
+
+@app.get("/api/spatial-visualization/stats")
+def spatial_visualization_stats():
+    """v0.1.58：可视化统计信息。"""
+    from . import spatial_visualization as _sv
+    return {"ok": True, **_sv.get_stats()}
 
 @app.get("/api/piping/stats")
 def piping_stats():
