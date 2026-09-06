@@ -258,7 +258,7 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
             else:
                 data["吊索具"] = "钢丝绳/吊带（根据设备重量选择，安全系数≥6）"
 
-    # 施工方案专项（v0.1.42：根据设备类型自动选择施工步骤）
+    # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
             data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
@@ -269,6 +269,70 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
             steps = _et.get_construction_steps(eq_type)
             data["施工步骤"] = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
             data["施工内容"] = f"{eq_type}安装施工（含基础验收、设备就位、找平找正、管道连接、单机试运转等）"
+            # v0.1.49：设备数据联动——技术参数、空间位置、管线连接、相邻设备
+            try:
+                from . import relations as _rel
+                from . import spatial_model as _sm
+                g = _rel.load_relations()
+                spatial = _sm.build_spatial_model(g)
+                spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+                # 设备技术参数汇总
+                tech_params = []
+                spatial_info = []
+                for d in devices[:5]:
+                    tag = d["tag"]
+                    sd = spatial_devs.get(tag, {})
+                    # 从设备图谱获取参数
+                    dev_info = next((x for x in g.get("devices", []) if x["tag"] == tag), {})
+                    params = []
+                    if sd.get("workshop"):
+                        params.append(f"车间: {sd['workshop']}")
+                    if sd.get("x") is not None and sd.get("y") is not None:
+                        params.append(f"坐标: ({sd['x']}, {sd['y']})")
+                    if sd.get("z") is not None:
+                        params.append(f"标高: {sd['z']}m")
+                    if sd.get("coord_status"):
+                        params.append(f"位置状态: {sd['coord_status']}")
+                    if params:
+                        tech_params.append(f"{tag}: {'; '.join(params)}")
+                    if sd.get("workshop"):
+                        spatial_info.append(f"{tag}位于{sd['workshop']}")
+                if tech_params:
+                    data["设备技术参数"] = "\n".join(tech_params)
+                if spatial_info:
+                    data["施工环境"] = "; ".join(spatial_info)
+                # 管线连接（v0.1.47 piping_network）
+                try:
+                    from . import piping_network as _pn
+                    pipe_connections = []
+                    for d in devices[:5]:
+                        tag = d["tag"]
+                        pipes = _pn.get_device_pipes(tag)
+                        conns = _pn.get_device_connections(tag)
+                        if pipes:
+                            pipe_info = [f"{p['pipe_no']}({p['medium']})" for p in pipes[:3]]
+                            pipe_connections.append(f"{tag}连接: {', '.join(pipe_info)}")
+                        if conns:
+                            conn_info = [f"→{c['to_device']}({c['pipe_no']})" for c in conns[:3] if c.get('to_device')]
+                            if conn_info:
+                                pipe_connections.append(f"{tag}关联设备: {', '.join(conn_info)}")
+                    if pipe_connections:
+                        data["相关管线"] = "\n".join(pipe_connections)
+                except Exception:  # noqa: BLE001
+                    pass
+                # 相邻设备（v0.1.35空间关系）
+                neighbors = []
+                for d in devices[:3]:
+                    tag = d["tag"]
+                    sd = spatial_devs.get(tag, {})
+                    if sd.get("neighbors"):
+                        nb = [n.get("tag", "") for n in sd["neighbors"][:3] if n.get("tag")]
+                        if nb:
+                            neighbors.append(f"{tag}相邻: {', '.join(nb)}")
+                if neighbors:
+                    data["相邻设备"] = "; ".join(neighbors)
+            except Exception:  # noqa: BLE001
+                pass
         if "施工内容" not in data:
             missing.append("施工内容（需明确具体施工范围与工序）")
 
@@ -378,7 +442,29 @@ def fill_template(doc_type: str, data: dict) -> bytes:
                 p = doc.add_paragraph()
                 r = p.add_run(line.strip())
                 r.font.size = Pt(11)
-        add_h("四、质量控制")
+        # v0.1.49：设备数据联动——技术参数、施工环境、管线连接、相邻设备
+        if data.get("设备技术参数"):
+            add_h("四、设备技术参数")
+            for line in str(data["设备技术参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("施工环境"):
+            add_h("五、施工环境")
+            add_kv("作业位置", data["施工环境"])
+        if data.get("相关管线"):
+            add_h("六、相关管线与连接")
+            for line in str(data["相关管线"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("相邻设备"):
+            add_h("七、相邻设备与交叉作业")
+            add_kv("相邻设备", data["相邻设备"])
+            add_kv("交叉作业注意", "施工前确认相邻设备状态，做好成品保护，交叉作业时设专人监护")
+        add_h("八、质量控制")
         add_kv("质量标准", "符合现行国家及行业施工验收规范，一次验收合格率100%")
         add_kv("质量控制点", "基础验收、设备找平找正、对中偏差、管道焊接、试运转参数")
 
