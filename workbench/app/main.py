@@ -32,9 +32,10 @@ from . import version_manager
 from . import field_record
 from . import chat_parser
 from . import spatial_model
+from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.35")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.36")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -975,6 +976,25 @@ def spatial_ai_summary():
         return {"ok": False, "message": "空间模型未构建"}
     summary = spatial_model.generate_ai_summary(spatial)
     return {"ok": True, "summary": summary, "chars": len(summary)}
+
+
+@app.get("/api/completeness/check")
+def api_completeness_check(phase: str = None):
+    """资料完整性检查（v0.1.36）：按工程阶段检查哪些资料缺失，列出待补充清单。"""
+    return completeness_check.check_completeness(phase)
+
+
+@app.get("/api/completeness/todo")
+def api_completeness_todo(limit: int = 50):
+    """待补充资料清单（按优先级排序）。"""
+    items = completeness_check.get_todo_list(limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/completeness/phase-status")
+def api_completeness_phase_status():
+    """各阶段资料完成状态。"""
+    return {"phases": completeness_check.get_phase_status()}
 
 
 @app.get("/api/archive/status")

@@ -317,6 +317,16 @@
   <!-- ⑧ 工程资料生成计划（v0.1.12） -->
   <div class="panel" id="p-docplan">
     <h2>工程资料生成计划（按项目进度，缺项进待办）</h2>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 style="margin:0 0 6px;font-size:15px">资料完整性检查（v0.1.36）</h3>
+      <div class="msg" style="margin-bottom:6px">按工程6个阶段（施工准备/设备到货/施工过程/吊装作业/设计变更/竣工验收）自动检查资料完整性，区分项目级/车间级/设备级，缺失项按优先级列出待补充清单。</div>
+      <div class="row">
+        <button class="btn" id="btnCompletenessCheck">检查完整性</button>
+        <span id="completenessStats" style="font-size:13px;color:var(--text2)"></span>
+      </div>
+      <div id="completenessPhases" style="margin-top:8px"></div>
+      <div id="completenessTodo" style="margin-top:8px"></div>
+    </div>
     <div class="msg" style="margin-bottom:8px">系统根据解析库自动判断"库里已有什么、每类资料缺什么"。缺的部分列出清单，把资料补进库后该资料自动转为"可生成"；也可在下方人工登记资料任务（现场进度需要做什么就登记什么）。生成结果优先 Word，签字由人工下载打印。</div>
     <div class="row" style="margin:10px 0;gap:8px">
       <select id="docplanType" style="max-width:180px">

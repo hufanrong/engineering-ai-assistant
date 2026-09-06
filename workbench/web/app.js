@@ -1582,3 +1582,51 @@ function genDo() {
       $("spatialSummary").style.display = "block";
     }).catch(function (e) { alert("生成失败：" + e.message); });
   });
+
+  // ---------- 资料完整性检查（v0.1.36） ----------
+  $("btnCompletenessCheck").addEventListener("click", function () {
+    $("completenessStats").textContent = "检查中…";
+    fetch("/api/completeness/check").then(function (r) { return r.json(); }).then(function (d) {
+      var st = d.stats || {};
+      $("completenessStats").textContent = "总体完成度 " + st.overall_completion + "% | 缺失 " + st.total_missing + " 项（高优 " + st.high_priority + " / 中优 " + st.medium_priority + "）| 设备 " + st.devices + " 台 / 车间 " + st.workshops + " 个";
+      // 阶段进度条
+      var html = "";
+      (d.phases || []).forEach(function (p) {
+        var color = p.completion >= 80 ? "#52C41A" : (p.completion >= 40 ? "#FAAD14" : "#EA6668");
+        html += '<div style="margin-bottom:6px">';
+        html += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">' + esc(p.phase) +
+          ' <span style="color:' + color + ';font-weight:700">' + p.completion + '%</span>' +
+          ' <span style="color:var(--text2);font-weight:400;font-size:12px">（' + p.completed + '/' + p.total_required + '，缺' + p.missing.length + '）</span></div>';
+        html += '<div style="background:var(--line);border-radius:4px;height:8px;overflow:hidden"><div style="background:' + color + ';height:100%;width:' + p.completion + '%"></div></div>';
+        if (p.missing.length) {
+          html += '<div style="font-size:11px;color:var(--text2);margin-top:2px">缺：' + p.missing.map(function (m) {
+            return esc(m.type) + (m.device ? '(' + esc(m.device) + ')' : (m.workshop ? '(' + esc(m.workshop) + ')' : ''));
+          }).join("、") + '</div>';
+        }
+        html += '</div>';
+      });
+      $("completenessPhases").innerHTML = html;
+      // 待办清单
+      var todo = d.missing || [];
+      if (todo.length) {
+        var thtml = '<div style="font-size:13px;font-weight:600;margin-bottom:4px">待补充清单（按优先级）</div>';
+        thtml += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>' +
+          '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid var(--line)">优先级</th>' +
+          '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid var(--line)">资料类型</th>' +
+          '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid var(--line)">级别</th>' +
+          '<th style="text-align:left;padding:3px 6px;border-bottom:1px solid var(--line)">对象</th></tr></thead><tbody>';
+        todo.slice(0, 30).forEach(function (m) {
+          var pc = m.priority === "高" ? "#EA6668" : (m.priority === "中" ? "#FAAD14" : "var(--text2)");
+          thtml += '<tr><td style="padding:3px 6px;border-bottom:1px solid var(--line2);color:' + pc + ';font-weight:600">' + esc(m.priority) + '</td>' +
+            '<td style="padding:3px 6px;border-bottom:1px solid var(--line2)">' + esc(m.type) + '</td>' +
+            '<td style="padding:3px 6px;border-bottom:1px solid var(--line2)">' + esc(m.level) + '</td>' +
+            '<td style="padding:3px 6px;border-bottom:1px solid var(--line2)">' + esc(m.device || m.workshop || "项目") + '</td></tr>';
+        });
+        thtml += '</tbody></table>';
+        if (todo.length > 30) thtml += '<div style="font-size:11px;color:var(--text2);margin-top:4px">… 另有 ' + (todo.length - 30) + ' 项</div>';
+        $("completenessTodo").innerHTML = thtml;
+      } else {
+        $("completenessTodo").innerHTML = '<div class="msg" style="color:#52C41A">✓ 资料完整，无待补充项</div>';
+      }
+    }).catch(function (e) { $("completenessStats").textContent = "检查失败：" + e.message; });
+  });
