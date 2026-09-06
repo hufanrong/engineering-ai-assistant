@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.53")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.54")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1371,6 +1371,14 @@ def archive_export_enhanced():
     disp = "attachment; filename=\"archive_enhanced.zip\"; filename*=UTF-8''" + quote(fname)
     return Response(content=content, media_type="application/zip",
                     headers={"Content-Disposition": disp})
+
+
+@app.get("/api/construction-log/generate-enhanced")
+def construction_log_generate_enhanced(date: str, project_name: str = "", workshop: str = ""):
+    """v0.1.54：增强版施工日志生成（含设备数据联动）。"""
+    from . import construction_log as _cl
+    result = _cl.generate_log_data_enhanced(date, project_name, workshop)
+    return {"ok": True, **result}
 
 @app.get("/api/piping/stats")
 def piping_stats():

@@ -358,3 +358,114 @@ def stats() -> dict:
         "latest_date": max(daily.keys()) if daily else None,
         "earliest_date": min(daily.keys()) if daily else None,
     }
+
+
+# ==================== v0.1.54 施工日志与设备数据联动增强 ====================
+
+def _get_device_construction_content(eq_type: str) -> list:
+    """v0.1.54：根据设备类型生成施工内容建议。"""
+    type_content = {
+        "泵": ["泵基础验收", "泵就位找平找正", "泵进出口管道连接", "泵联轴器对中", "泵单机试运转"],
+        "压缩机": ["压缩机基础验收", "压缩机就位找平", "气缸与滑道对中", "润滑油系统冲洗", "压缩机单机试运转"],
+        "塔器": ["塔器基础验收", "塔器吊装就位", "塔器垂直度找正", "塔器接管连接", "塔器内件安装"],
+        "换热器": ["换热器基础验收", "换热器就位找平", "换热器管程壳程连接", "换热器水压试验", "换热器保温施工"],
+        "容器": ["容器基础验收", "容器吊装就位", "容器垂直度找正", "容器接管连接", "容器水压试验"],
+        "风机": ["风机基础验收", "风机就位找平", "风机进出口管道连接", "风机皮带对中", "风机单机试运转"],
+        "电机": ["电机基础验收", "电机就位找平", "电机电缆接线", "电机绝缘测试", "电机空载试运转"],
+        "阀门": ["阀门检验试压", "阀门支架安装", "阀门法兰连接", "阀门传动装置安装", "阀门开关试验"],
+        "储罐": ["储罐基础验收", "储罐底板铺设焊接", "储罐壁板安装焊接", "储罐顶板安装", "储罐充水试验"],
+    }
+    return type_content.get(eq_type, ["设备基础验收", "设备就位找平", "设备管道连接", "设备试运转"])
+
+
+def _get_device_quality_safety(eq_type: str) -> dict:
+    """v0.1.54：根据设备类型生成质量安全要点。"""
+    type_qs = {
+        "泵": {"quality": ["泵水平度偏差≤0.05mm/m", "联轴器对中偏差径向≤0.05mm"], "safety": ["机械防护罩安装到位", "试运转时严禁站在旋转方向正面"]},
+        "压缩机": {"quality": ["压缩机水平度偏差≤0.05mm/m", "气缸与滑道对中符合规范"], "safety": ["超压保护装置校验合格", "润滑油位正常方可试运转"]},
+        "塔器": {"quality": ["塔器垂直度偏差≤高度1/1000", "塔盘水平度偏差≤2mm"], "safety": ["高处作业系挂安全带", "吊装时风力超过六级停止"]},
+        "换热器": {"quality": ["换热器水压试验压力为设计1.25倍", "保温层厚度符合设计"], "safety": ["水压试验时严禁站在法兰正面", "升压缓慢严禁超压"]},
+        "容器": {"quality": ["容器垂直度偏差≤高度1/1000", "焊缝无损检测合格"], "safety": ["容器内作业办理受限空间票", "试压时严禁站在法兰正面"]},
+        "风机": {"quality": ["风机叶轮与机壳间隙均匀", "皮带轮对中偏差符合要求"], "safety": ["皮带防护罩安装齐全", "试运转时测量轴承温度"]},
+        "电机": {"quality": ["电机绝缘电阻≥0.5MΩ", "电机底座水平度≤0.05mm/m"], "safety": ["接线前确认电源断开挂牌", "接地电阻≤4Ω"]},
+        "阀门": {"quality": ["阀门法兰螺栓紧固力矩符合规范", "阀门开关灵活无卡涩"], "safety": ["高压阀门试压合格方可安装", "法兰紧固按对角顺序"]},
+        "储罐": {"quality": ["储罐底板焊接无损检测合格", "充水试验基础沉降符合设计"], "safety": ["罐内作业办理受限空间票", "焊接作业办理动火票"]},
+    }
+    return type_qs.get(eq_type, {"quality": ["施工质量符合设计和规范要求"], "safety": ["作业人员佩戴防护用品", "设置警戒区"]})
+
+
+def enrich_log_with_devices(log_data: dict, devices: list = None) -> dict:
+    """v0.1.54：用设备数据丰富施工日志。
+    
+    Args:
+        log_data: 原始日志数据
+        devices: 设备列表，为空时从relations加载
+    
+    Returns:
+        丰富后的日志数据
+    """
+    data = dict(log_data)
+    
+    # 加载设备
+    if devices is None:
+        try:
+            from . import relations as _rel
+            g = _rel.load_relations()
+            devices = g.get("devices", [])
+        except Exception:  # noqa: BLE001
+            devices = []
+    
+    if not devices:
+        return data
+    
+    # 识别设备类型
+    try:
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+    except Exception:  # noqa: BLE001
+        eq_type = "通用设备"
+    
+    data["设备类型"] = eq_type
+    data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+    
+    # 施工内容建议
+    content_suggestions = _get_device_construction_content(eq_type)
+    data["施工内容建议"] = "\\n".join(f"{i+1}. {c}" for i, c in enumerate(content_suggestions))
+    
+    # 质量安全要点
+    qs = _get_device_quality_safety(eq_type)
+    data["质量要点"] = "\\n".join(f"{i+1}. {q}" for i, q in enumerate(qs["quality"]))
+    data["安全要点"] = "\\n".join(f"{i+1}. {s}" for i, s in enumerate(qs["safety"]))
+    
+    # 设备空间信息
+    try:
+        from . import spatial_model as _sm
+        from . import relations as _rel
+        g = _rel.load_relations()
+        spatial = _sm.build_spatial_model(g)
+        spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+        device_locations = []
+        for d in devices[:5]:
+            tag = d["tag"]
+            sd = spatial_devs.get(tag, {})
+            loc = []
+            if sd.get("workshop"):
+                loc.append(sd["workshop"])
+            if sd.get("z") is not None:
+                loc.append(f"标高{sd['z']}m")
+            if loc:
+                device_locations.append(f"{tag}({', '.join(loc)})")
+        if device_locations:
+            data["设备位置"] = "；".join(device_locations)
+    except Exception:  # noqa: BLE001
+        pass
+    
+    return data
+
+
+def generate_log_data_enhanced(date: str, project_name: str = "", workshop: str = "",
+                                extra_data: dict = None, devices: list = None) -> dict:
+    """v0.1.54：增强版施工日志生成（含设备数据联动）。"""
+    result = generate_log_data(date, project_name, workshop, extra_data)
+    result["data"] = enrich_log_with_devices(result["data"], devices)
+    return result
