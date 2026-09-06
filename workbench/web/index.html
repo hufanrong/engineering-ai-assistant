@@ -411,6 +411,22 @@
     </section>
 
 
+<!-- v0.1.45：设备台账多版本合并去重 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备台账合并去重（v0.1.45）</h3>
+  <div class="msg" style="margin-bottom:6px">自动识别同一设备在不同版本台账中的重复记录（位号匹配>名称+型号匹配），合并去重，最新版为准。名称相似但无法确认的留人工确认。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnEqMergeRun">执行合并</button>
+    <button class="btn ghost" id="btnEqMergeRefresh">刷新</button>
+    <span id="eqMergeStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="eqMergeList" style="font-size:12px;max-height:300px;overflow-y:auto"></div>
+  <div style="margin-top:8px">
+    <h4 style="margin:0 0 4px;font-size:13px">待人工确认（名称相似）</h4>
+    <div id="eqMergePending" style="font-size:12px"></div>
+  </div>
+</div>
+
 <!-- v0.1.41：设备位置人工确认弹窗 -->
 <div id="spatialEditModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:12px;width:min(420px,92vw);padding:16px;box-sizing:border-box;">

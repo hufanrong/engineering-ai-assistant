@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.44")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.45")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1169,6 +1169,71 @@ def spatial_device_confirm(tag: str, payload: dict = Body(default={})):
     """v0.1.41：确认设备位置（位置待确认 → 人工确认）。"""
     from . import spatial_model as _sm
     return _sm.confirm_device(tag, workshop=payload.get("workshop"))
+
+
+@app.post("/api/equipment-merge/run")
+def equipment_merge_run():
+    """v0.1.45：执行设备台账多版本合并去重。"""
+    from . import relations as _rel
+    from . import equipment_merge as _em
+    g = _rel.load_relations()
+    # 构建 docs 带 _cache
+    docs = {}
+    import os, json as _json
+    idx_file = os.path.join("data", "index.json")
+    if os.path.exists(idx_file):
+        with open(idx_file, encoding="utf-8") as f:
+            idx = _json.load(f)
+        for sha, info in idx.items():
+            cache_file = os.path.join("data", "parsed_cache", f"{sha}.json")
+            if os.path.exists(cache_file):
+                with open(cache_file, encoding="utf-8") as f:
+                    cache = _json.load(f)
+                docs[sha] = {"_cache": cache, "file_name": info.get("file_name", "")}
+    result = _em.run_merge(docs)
+    return {"ok": True, **result}
+
+
+@app.get("/api/equipment-merge/list")
+def equipment_merge_list():
+    """v0.1.45：合并后的设备列表。"""
+    from . import equipment_merge as _em
+    return {"ok": True, "items": _em.get_merged()}
+
+
+@app.get("/api/equipment-merge/pending")
+def equipment_merge_pending():
+    """v0.1.45：待人工确认的匹配对。"""
+    from . import equipment_merge as _em
+    return {"ok": True, "items": _em.get_pending()}
+
+
+@app.post("/api/equipment-merge/confirm/{index}")
+def equipment_merge_confirm(index: int, payload: dict = Body(...)):
+    """v0.1.45：人工确认/拒绝待合并项。action: confirm/reject/merge_as_new"""
+    from . import equipment_merge as _em
+    action = payload.get("action", "confirm")
+    canonical_tag = payload.get("canonical_tag", "")
+    result = _em.confirm_merge(index, action, canonical_tag)
+    return result
+
+
+@app.post("/api/equipment-merge/resolve-conflict")
+def equipment_merge_resolve_conflict(payload: dict = Body(...)):
+    """v0.1.45：解决字段冲突。"""
+    from . import equipment_merge as _em
+    canonical_tag = payload.get("canonical_tag", "")
+    field = payload.get("field", "")
+    choose = payload.get("choose", "new")
+    result = _em.resolve_conflict(canonical_tag, field, choose)
+    return result
+
+
+@app.get("/api/equipment-merge/stats")
+def equipment_merge_stats():
+    """v0.1.45：合并统计。"""
+    from . import equipment_merge as _em
+    return {"ok": True, **_em.stats()}
 
 
 @app.get("/api/spatial/pending")

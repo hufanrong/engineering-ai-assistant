@@ -1797,3 +1797,106 @@ document.addEventListener("DOMContentLoaded", function () {
   var btn = document.getElementById("btnChatCandRefresh");
   if (btn) btn.addEventListener("click", chatCandLoad);
 });
+
+
+// v0.1.45：设备台账合并去重
+function eqMergeRun() {
+  fetch("/api/equipment-merge/run", { method: "POST" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ok) {
+        alert("合并完成：共" + d.total_equipment + "条记录，合并为" + d.merged_count + "台设备，去重" + d.duplicate_removed + "条，待确认" + d.pending_count + "项");
+        eqMergeLoad();
+      } else { alert("合并失败"); }
+    }).catch(function (e) { alert("合并失败：" + e.message); });
+}
+function eqMergeLoad() {
+  fetch("/api/equipment-merge/stats").then(function (r) { return r.json(); }).then(function (d) {
+    var el = document.getElementById("eqMergeStats");
+    if (el) el.textContent = "合并" + d.total_merged + "台 | 多版本" + d.multi_version_devices + "台 | 去重" + d.duplicate_removed + "条 | 待确认" + d.pending_confirm + "项 | 字段冲突" + d.field_conflicts + "个";
+  }).catch(function () {});
+  fetch("/api/equipment-merge/list").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("eqMergeList");
+    var items = d.items || [];
+    if (!items.length) { box.innerHTML = '<div class="empty">暂无合并数据，请先执行合并</div>'; return; }
+    var html = "";
+    items.forEach(function (dev) {
+      var tag = dev.canonical_tag || "";
+      var name = dev.name || "—";
+      var model = dev.model || "—";
+      var ws = dev.workshop || "—";
+      var srcCount = dev.source_count || 1;
+      var conflicts = dev.conflicts || [];
+      var badge = srcCount > 1 ? '<span style="background:#FF7A00;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px">' + srcCount + '版本</span>' : "";
+      var conflictBadge = conflicts.length ? '<span style="background:#C0392B;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px">冲突' + conflicts.length + '</span>' : "";
+      html += '<div style="padding:5px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:3px;background:#fff">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:3px">';
+      html += '<span><strong style="color:var(--accent)">' + esc(tag) + '</strong> ' + esc(name) + badge + conflictBadge + '</span>';
+      html += '<span style="font-size:11px;color:var(--text2)">' + esc(ws) + ' | ' + esc(model) + '</span>';
+      html += '</div>';
+      if (conflicts.length) {
+        conflicts.forEach(function (c) {
+          html += '<div style="font-size:11px;color:#C0392B;margin-top:2px;padding-left:8px">';
+          html += esc(c.field) + ': 旧="' + esc(c.old_value) + '" 新="' + esc(c.new_value) + '" ';
+          html += '<button data-tag="' + esc(tag) + '" data-field="' + esc(c.field) + '" data-choose="old" class="eq-conflict-btn" style="font-size:10px;padding:1px 5px;border:1px solid #52C41A;background:#fff;color:#52C41A;border-radius:3px;cursor:pointer">用旧</button> ';
+          html += '<button data-tag="' + esc(tag) + '" data-field="' + esc(c.field) + '" data-choose="new" class="eq-conflict-btn" style="font-size:10px;padding:1px 5px;border:1px solid #FF7A00;background:#fff;color:#FF7A00;border-radius:3px;cursor:pointer">用新</button>';
+          html += '</div>';
+        });
+      }
+      html += '</div>';
+    });
+    box.innerHTML = html;
+    box.querySelectorAll(".eq-conflict-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        eqMergeResolveConflict(this.getAttribute("data-tag"), this.getAttribute("data-field"), this.getAttribute("data-choose"));
+      });
+    });
+  }).catch(function () { document.getElementById("eqMergeList").innerHTML = '<div class="empty">加载失败</div>'; });
+  fetch("/api/equipment-merge/pending").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("eqMergePending");
+    var items = d.items || [];
+    if (!items.length) { box.innerHTML = '<div class="empty">暂无待确认项</div>'; return; }
+    var html = "";
+    items.forEach(function (p, i) {
+      var mr = p.match_result || {};
+      var ne = p.new_eq || {};
+      html += '<div style="padding:5px 8px;border:1px solid #FF7A00;border-radius:5px;margin-bottom:3px;background:#FFF8F0">';
+      html += '<div style="font-size:12px"><strong>' + esc(p.existing_tag) + '</strong> (' + esc(p.existing_name) + ') ↔ <strong>' + esc(ne.tag || ne.name || "?") + '</strong> (' + esc(ne.name || "") + ')</div>';
+      html += '<div style="font-size:11px;color:var(--text2);margin:2px 0">' + esc(mr.reason || "") + ' (置信度' + (mr.confidence ? Math.round(mr.confidence * 100) + '%' : '?') + ')</div>';
+      html += '<div style="display:flex;gap:4px;margin-top:3px">';
+      html += '<button data-index="' + i + '" data-action="confirm" class="eq-pending-btn" style="font-size:11px;padding:2px 8px;border:none;background:#52C41A;color:#fff;border-radius:4px;cursor:pointer">确认合并</button>';
+      html += '<button data-index="' + i + '" data-action="reject" class="eq-pending-btn" style="font-size:11px;padding:2px 8px;border:none;background:#C0392B;color:#fff;border-radius:4px;cursor:pointer">保持独立</button>';
+      html += '</div></div>';
+    });
+    box.innerHTML = html;
+    box.querySelectorAll(".eq-pending-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        eqMergeConfirm(parseInt(this.getAttribute("data-index")), this.getAttribute("data-action"));
+      });
+    });
+  }).catch(function () { document.getElementById("eqMergePending").innerHTML = '<div class="empty">加载失败</div>'; });
+}
+function eqMergeConfirm(index, action) {
+  fetch("/api/equipment-merge/confirm/" + index, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: action })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.ok) { alert("操作成功"); eqMergeLoad(); }
+    else { alert("操作失败：" + (d.error || "")); }
+  }).catch(function (e) { alert("操作失败：" + e.message); });
+}
+function eqMergeResolveConflict(tag, field, choose) {
+  fetch("/api/equipment-merge/resolve-conflict", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ canonical_tag: tag, field: field, choose: choose })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.ok) eqMergeLoad();
+    else alert("解决冲突失败");
+  }).catch(function () { alert("解决冲突失败"); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnEqMergeRun");
+  if (b1) b1.addEventListener("click", eqMergeRun);
+  var b2 = document.getElementById("btnEqMergeRefresh");
+  if (b2) b2.addEventListener("click", eqMergeLoad);
+});
