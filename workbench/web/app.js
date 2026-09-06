@@ -276,6 +276,9 @@
         return '<span class="chip">' + c[0] + " <b>" + c[1] + "</b></span>";
       }).join("");
 
+      // v0.1.25：关系网络图
+      try { renderRelNet(g); } catch (e) { console.error(e); }
+
       // v0.1.23：铭牌候选设备人工确认
       var hc = g.human_confirm || [];
       var cand = hc.filter(function (c) { return (c.type || "").indexOf("铭牌未在台账") >= 0; });
@@ -1028,3 +1031,132 @@ function genDo() {
     document.body.appendChild(a); a.click(); a.remove();
   });
   loadArchive();
+  // ---------- 关系网络图（v0.1.25，三列分层：车间 → 图纸 → 设备） ----------
+  // 确定性布局：每次打开布局一致；点击节点高亮关联子网。
+  function renderRelNet(g) {
+    var box = $("relNet");
+    if (!box) return;
+    box.innerHTML = "";
+    var ws = g.workshops || [];
+    var dwgs = g.drawings || [];
+    var devs = g.devices || [];
+    if (!ws.length && !dwgs.length && !devs.length) {
+      box.innerHTML = '<div class="msg">暂无图谱数据，先扫描/上传资料并重建图谱。</div>';
+      return;
+    }
+    // 容量控制：设备太多时只取每车间前 40 台，其余提示
+    var capDev = [];
+    var perWs = {};
+    devs.forEach(function (d) {
+      var w = (d.workshops && d.workshops[0]) || "未归车间";
+      if (!perWs[w]) perWs[w] = 0;
+      if (perWs[w] < 40 && capDev.length < 260) { capDev.push(d); perWs[w]++; }
+    });
+    devs = capDev;
+    var devNames = {};
+    devs.forEach(function (d) { devNames[d.tag] = d; });
+
+    var colW = 210, gapX = 70;
+    var W = colW * 3 + gapX * 2 + 60;
+    var rows = Math.max(ws.length, dwgs.length, devs.length, 6);
+    var cellH = 56;
+    var H = rows * cellH + 40;
+    var cx = { ws: 40 + colW / 2, dwg: 40 + colW + gapX + colW / 2, dev: 40 + colW * 2 + gapX * 2 + colW / 2 };
+
+    function yAt(i, n) { return 30 + (n <= 1 ? 0 : i * (H - 60) / (n - 1 || 1)); }
+
+    // 节点坐标
+    var wsPos = {}, dwgPos = {}, devPos = {};
+    ws.forEach(function (w, i) { wsPos[w.workshop] = { x: cx.ws, y: yAt(i, ws.length), c: w.workshop }; });
+    dwgs.forEach(function (d, i) { dwgPos[d.file] = { x: cx.dwg, y: yAt(i, dwgs.length), c: d.no || d.file }; });
+    devs.forEach(function (d, i) { devPos[d.tag] = { x: cx.dev, y: yAt(i, devs.length), c: d.tag }; });
+
+    // 边集：车间-图纸 / 图纸-设备 / 设备-车间
+    var edges = [];
+    dwgs.forEach(function (d) {
+      if (d.workshop && wsPos[d.workshop]) edges.push({ a: wsPos[d.workshop], b: dwgPos[d.file], cls: "ws-dwg", aK: d.workshop, bK: d.file });
+    });
+    var devIdxByFile = {};
+    devs.forEach(function (d) {
+      (d.files || []).forEach(function (f) { if (f.indexOf(".dxf") >= 0 || f.indexOf(".dwg") >= 0) (devIdxByFile[f] = devIdxByFile[f] || []).push(d.tag); });
+    });
+    Object.keys(devIdxByFile).forEach(function (f) {
+      if (!dwgPos[f]) return;
+      devIdxByFile[f].forEach(function (t) {
+        if (devPos[t]) edges.push({ a: dwgPos[f], b: devPos[t], cls: "dwg-dev", aK: f, bK: t });
+      });
+    });
+    devs.forEach(function (d) {
+      var w = (d.workshops || [])[0];
+      if (w && wsPos[w]) edges.push({ a: devPos[d.tag], b: wsPos[w], cls: "dev-ws", aK: d.tag, bK: w });
+    });
+
+    var svg = '<svg id="relNetSvg" viewBox="0 0 ' + W + " " + H + '" style="width:100%;max-width:1100px;background:#FAFAF8;border-radius:10px" xmlns="http://www.w3.org/2000/svg">';
+    // 边
+    edges.forEach(function (e) {
+      svg += '<line class="netEdge" data-a="' + esc(e.aK) + '" data-b="' + esc(e.bK) + '" x1="' + e.a.x + '" y1="' + e.a.y +
+        '" x2="' + e.b.x + '" y2="' + e.b.y + '" stroke="#C9C4B8" stroke-width="1.2"/>';
+    });
+    // 图例
+    svg += '<g font-size="11" font-family="sans-serif">';
+    svg += '<rect x="14" y="10" width="12" height="12" rx="3" fill="#1E5AA8"/><text x="32" y="21" fill="#444">车间</text>';
+    svg += '<rect x="86" y="10" width="12" height="12" rx="3" fill="#FF7A00"/><text x="104" y="21" fill="#444">图纸</text>';
+    svg += '<rect x="158" y="10" width="12" height="12" rx="3" fill="#2E9E5B"/><text x="176" y="21" fill="#444">设备</text>';
+    svg += '<line x1="238" y1="16" x2="278" y2="16" stroke="#C9C4B8" stroke-width="1.2"/><text x="286" y="21" fill="#444">关联边</text>';
+    svg += "</g>";
+    // 车间节点
+    ws.forEach(function (w, i) {
+      var p = wsPos[w.workshop];
+      svg += '<g class="netNode" data-k="' + esc(w.workshop) + '" data-role="ws" transform="translate(' + p.x + "," + p.y + ')">' +
+        '<rect x="-64" y="-14" width="128" height="28" rx="14" fill="#1E5AA8"/>' +
+        '<text x="0" y="4" text-anchor="middle" font-size="11" fill="#fff">' + esc(w.workshop) + "(" + (w.device_count || 0) + "台)" + "</text></g>";
+    });
+    // 图纸节点
+    dwgs.forEach(function (d, i) {
+      var p = dwgPos[d.file];
+      svg += '<g class="netNode" data-k="' + esc(d.file) + '" data-role="dwg" transform="translate(' + p.x + "," + p.y + ')">' +
+        '<rect x="-90" y="-12" width="180" height="24" rx="12" fill="#FF7A00"/>' +
+        '<text x="0" y="4" text-anchor="middle" font-size="10" fill="#fff">' + esc(d.no || d.file) + "</text></g>";
+    });
+    // 设备节点
+    devs.forEach(function (d, i) {
+      var p = devPos[d.tag];
+      svg += '<g class="netNode" data-k="' + esc(d.tag) + '" data-role="dev" transform="translate(' + p.x + "," + p.y + ')">' +
+        '<circle r="9" fill="#2E9E5B"/><text x="0" y="3.5" text-anchor="middle" font-size="8" fill="#fff">' + esc(d.tag.slice(-3)) + "</text></g>";
+    });
+    svg += "</svg>";
+    svg += '<div style="font-size:12px;color:var(--text2);margin-top:4px">点击节点高亮其关联子网（车间 ↔ 图纸 ↔ 设备）；设备过多时每车间最多显示 40 台。</div>';
+    box.innerHTML = svg;
+
+    var svgEl = box.querySelector("#relNetSvg");
+    function clearHigh() {
+      svgEl.querySelectorAll(".netEdge").forEach(function (l) { l.setAttribute("stroke", "#C9C4B8"); l.setAttribute("stroke-width", "1.2"); });
+      svgEl.querySelectorAll(".netNode").forEach(function (n) { n.setAttribute("opacity", "1"); });
+    }
+    svgEl.querySelectorAll(".netNode").forEach(function (n) {
+      n.style.cursor = "pointer";
+      n.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var k = n.getAttribute("data-k");
+        clearHigh();
+        // 收集关联 key：直接相连的边（含自身）
+        var targets = {};
+        targets[k] = 1;
+        edges.forEach(function (e) {
+          if (e.aK === k) targets[e.bK] = 1;
+          if (e.bK === k) targets[e.aK] = 1;
+        });
+        svgEl.querySelectorAll(".netNode").forEach(function (x) {
+          if (!targets[x.getAttribute("data-k")]) x.setAttribute("opacity", "0.18");
+        });
+        svgEl.querySelectorAll(".netEdge").forEach(function (l) {
+          var a = l.getAttribute("data-a"), b = l.getAttribute("data-b");
+          if (targets[a] && targets[b]) { l.setAttribute("stroke", "#1E5AA8"); l.setAttribute("stroke-width", "2.4"); }
+        });
+      });
+    });
+    svgEl.addEventListener("click", function (e) {
+      if (e.target === svgEl) clearHigh();
+    });
+  }
+
