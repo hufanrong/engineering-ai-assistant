@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.46")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.47")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1281,6 +1281,68 @@ def construction_log_generate(date: str, payload: dict = Body(default={})):
     return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     headers={"Content-Disposition": disp})
 
+
+
+@app.post("/api/piping/build")
+def piping_build():
+    """v0.1.47：构建管线网络（从CAD图纸提取管线和连接关系）。"""
+    from . import piping_network as _pn
+    import os, json as _json
+    docs = {}
+    idx_file = os.path.join("data", "index.json")
+    if os.path.exists(idx_file):
+        with open(idx_file, encoding="utf-8") as f:
+            idx = _json.load(f)
+        for sha, info in idx.items():
+            cache_file = os.path.join("data", "parsed_cache", sha + ".json")
+            if os.path.exists(cache_file):
+                with open(cache_file, encoding="utf-8") as f:
+                    cache = _json.load(f)
+                docs[sha] = {"_cache": cache, "file_name": info.get("file_name", "")}
+    result = _pn.build_piping_network(docs)
+    return {"ok": True, "total_pipes": result["total_pipes"],
+            "total_connections": result["total_connections"],
+            "devices_with_pipes": result["devices_with_pipes"]}
+
+
+@app.get("/api/piping/pipes")
+def piping_pipes():
+    """v0.1.47：列出所有管线。"""
+    from . import piping_network as _pn
+    return {"ok": True, "items": _pn.list_all_pipes()}
+
+
+@app.get("/api/piping/connections")
+def piping_connections():
+    """v0.1.47：列出所有设备连接关系。"""
+    from . import piping_network as _pn
+    return {"ok": True, "items": _pn.list_connections()}
+
+
+@app.get("/api/piping/device/{tag}")
+def piping_device(tag: str):
+    """v0.1.47：获取指定设备的管线和连接关系。"""
+    from . import piping_network as _pn
+    return {"ok": True, "tag": tag,
+            "pipes": _pn.get_device_pipes(tag),
+            "connections": _pn.get_device_connections(tag)}
+
+
+@app.get("/api/piping/pipe/{pipe_no}")
+def piping_pipe_info(pipe_no: str):
+    """v0.1.47：获取指定管线的详细信息。"""
+    from . import piping_network as _pn
+    info = _pn.get_pipe_info(pipe_no)
+    if not info:
+        return {"ok": False, "error": "管线不存在"}
+    return {"ok": True, **info}
+
+
+@app.get("/api/piping/stats")
+def piping_stats():
+    """v0.1.47：管线网络统计。"""
+    from . import piping_network as _pn
+    return {"ok": True, **_pn.stats()}
 
 @app.get("/api/construction-log/stats")
 def construction_log_stats():

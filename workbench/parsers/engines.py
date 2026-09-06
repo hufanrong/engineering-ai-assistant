@@ -400,6 +400,7 @@ def parse_cad(res: ParseResult):
             "title_block": title_fields,          # 图号/图名/比例/设计/日期等
             "blocks": tags[:800],                 # 设备/图块 + 坐标 + 属性（空间库打底）
             "dimensions": dims[:800],             # 尺寸标注 + 测量值
+            "lines": lines_p[:2000],              # v0.1.47：线段（管线/管道/连接线）
         },
         "text_labels": labels[:500],
         "version": doc.dxfversion,

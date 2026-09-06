@@ -2011,3 +2011,58 @@ document.addEventListener("DOMContentLoaded", function () {
   var b5 = document.getElementById("btnLogClose");
   if (b5) b5.addEventListener("click", function () { document.getElementById("logEditor").style.display = "none"; });
 });
+
+// v0.1.47：设备间管线/连接关系
+function pipingBuild() {
+  fetch("/api/piping/build", { method: "POST" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ok) {
+        alert("管线网络构建完成：" + d.total_pipes + "条管线，" + d.total_connections + "个连接，" + d.devices_with_pipes + "台设备有管线");
+        pipingLoad();
+      } else { alert("构建失败"); }
+    }).catch(function (e) { alert("构建失败：" + e.message); });
+}
+function pipingLoad() {
+  fetch("/api/piping/stats").then(function (r) { return r.json(); }).then(function (d) {
+    var el = document.getElementById("pipingStats");
+    if (el) el.textContent = d.total_pipes + "条管线 | " + d.total_connections + "个连接 | " + d.devices_with_pipes + "台设备";
+  }).catch(function () {});
+  fetch("/api/piping/pipes").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("pipingPipeList");
+    var items = d.items || [];
+    if (!items.length) { box.innerHTML = '<div class="empty">暂无管线，请先构建</div>'; return; }
+    var html = "";
+    items.slice(0, 50).forEach(function (p) {
+      var conf = p.confidence || 0;
+      var confColor = conf >= 0.7 ? "#52C41A" : conf >= 0.5 ? "#FAAD14" : "#C0392B";
+      html += '<div style="padding:3px 6px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:4px">';
+      html += '<span><strong style="color:var(--accent)">' + esc(p.pipe_no) + '</strong> ' + esc(p.medium || "") + (p.size ? ' DN' + p.size : "") + '</span>';
+      html += '<span style="color:' + confColor + ';font-size:10px">' + Math.round(conf * 100) + '%</span>';
+      html += '</div>';
+    });
+    if (items.length > 50) html += '<div style="padding:3px;color:var(--text2);font-size:10px">...共' + items.length + '条，仅显示前50条</div>';
+    box.innerHTML = html;
+  }).catch(function () { document.getElementById("pipingPipeList").innerHTML = '<div class="empty">加载失败</div>'; });
+  fetch("/api/piping/connections").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("pipingConnList");
+    var items = d.items || [];
+    if (!items.length) { box.innerHTML = '<div class="empty">暂无连接关系</div>'; return; }
+    var html = "";
+    items.slice(0, 50).forEach(function (c) {
+      var from = c.from_device || "?";
+      var to = c.to_device || "图纸外";
+      html += '<div style="padding:3px 6px;border-bottom:1px solid var(--line);font-size:11px">';
+      html += '<strong>' + esc(from) + '</strong> ←[' + esc(c.pipe_no) + '/' + esc(c.medium || "") + ']→ <strong>' + esc(to) + '</strong>';
+      html += '</div>';
+    });
+    if (items.length > 50) html += '<div style="padding:3px;color:var(--text2);font-size:10px">...共' + items.length + '个，仅显示前50个</div>';
+    box.innerHTML = html;
+  }).catch(function () { document.getElementById("pipingConnList").innerHTML = '<div class="empty">加载失败</div>'; });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnPipingBuild");
+  if (b1) b1.addEventListener("click", pipingBuild);
+  var b2 = document.getElementById("btnPipingRefresh");
+  if (b2) b2.addEventListener("click", pipingLoad);
+});

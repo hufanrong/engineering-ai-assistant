@@ -462,6 +462,27 @@
   </div>
 </div>
 
+<!-- v0.1.47：设备间管线/连接关系 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备间管线/连接关系（v0.1.47）</h3>
+  <div class="msg" style="margin-bottom:6px">从CAD/PID图纸提取管线编号和介质，通过空间位置关联管线两端连接的设备，构建设备-管线-设备连接网络。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnPipingBuild">构建管线网络</button>
+    <button class="btn ghost" id="btnPipingRefresh">刷新</button>
+    <span id="pipingStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div>
+      <h4 style="margin:0 0 4px;font-size:13px">管线列表</h4>
+      <div id="pipingPipeList" style="font-size:11px;max-height:200px;overflow-y:auto"></div>
+    </div>
+    <div>
+      <h4 style="margin:0 0 4px;font-size:13px">设备连接关系</h4>
+      <div id="pipingConnList" style="font-size:11px;max-height:200px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
 <!-- v0.1.41：设备位置人工确认弹窗 -->
 <div id="spatialEditModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:12px;width:min(420px,92vw);padding:16px;box-sizing:border-box;">
