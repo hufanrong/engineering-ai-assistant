@@ -330,6 +330,13 @@ def build_relations(force: bool = False) -> dict:
                 if w and w not in dev["workshops"]:
                     dev["workshops"].append(w)
 
+    # v0.1.29：设备级车间归属——从台账行 workshop_hint 自动登记（人工优先不覆盖）
+    try:
+        from . import device_workshop
+        device_workshop.rebuild_from_excel(docs)
+    except Exception:  # noqa: BLE001
+        pass
+
     # 冲突/待确认：跨车间出现 或 图纸无车间归属但含设备
     for tag, dev in device_map.items():
         ws_set = [w for w in dev["workshops"] if w]
@@ -434,10 +441,20 @@ def build_relations(force: bool = False) -> dict:
             main_ws = winners[0] if len(winners) == 1 else None  # 平票→人工确认
         else:
             main_ws = None
+        # v0.1.29：设备登记车间（人工＞台账行＞位号推断）覆盖投票
+        _dw = ""
+        try:
+            from . import device_workshop
+            _dw = device_workshop.get_workshop(tag)
+        except Exception:  # noqa: BLE001
+            pass
+        if _dw:
+            main_ws = _dw
         layout.append({"tag": tag, "workshop": main_ws,
                        "votes": [{"workshop": w, "weight": v} for w, v in sorted(ws_votes.items(), key=lambda x: -x[1])],
                        "files": len(dev["in_files"]),
-                       "confirmed": main_ws is not None and len(ws_votes) == 1,
+                       "confirmed": main_ws is not None and (len(ws_votes) == 1 or bool(_dw)),
+                       "device_workshop_source": _dw,
                        "cross_drawings": len({f["file"] for f in dev["in_files"] if f["where"].startswith("cad")})})
     # 平票冲突补充进 human_confirm
     for row in layout:

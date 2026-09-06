@@ -26,9 +26,10 @@ from . import docplan
 from . import archive
 from . import voice_transcribe
 from . import workshop_assign
+from . import device_workshop
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.28")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.29")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -735,6 +736,48 @@ def workshop_re_auto():
     """对未归车间的文件重新自动识别。"""
     n = workshop_assign.re_auto_unassigned()
     return {"ok": True, "newly_assigned": n}
+
+
+class DeviceWorkshopReq(BaseModel):
+    tag: str
+    workshop: str
+
+
+@app.get("/api/device-workshop/list")
+def device_workshop_list():
+    """设备级车间归属列表（v0.1.29）：跨车间箱单设备按台账/位号分到各车间。"""
+    return {"devices": device_workshop.list_devices(), "groups": device_workshop.list_by_workshop(),
+            "stats": device_workshop.stats()}
+
+
+@app.post("/api/device-workshop/assign")
+def device_workshop_assign(req: DeviceWorkshopReq):
+    """人工指定单台设备车间（最高优先，重建图谱后生效）。"""
+    if not req.tag.strip() or not req.workshop.strip():
+        raise HTTPException(400, "需要 tag 与车间")
+    ok = device_workshop.manual_assign(req.tag, req.workshop)
+    return {"ok": ok, "tag": req.tag, "workshop": device_workshop.get_workshop(req.tag)}
+
+
+@app.post("/api/device-workshop/rebuild")
+def device_workshop_rebuild():
+    """从已解析台账重新提取设备车间归属（不覆盖人工登记）。"""
+    from . import relations
+    docs = relations._load_docs() if hasattr(relations, "_load_docs") else {}
+    if not docs:
+        # 从 parsed_cache 重建 docs
+        import os as _os, json as _json
+        cache_dir = _os.path.join(config.DATA_DIR, "parsed_cache")
+        if _os.path.exists(cache_dir):
+            for fn in _os.listdir(cache_dir)[:2000]:
+                try:
+                    with open(_os.path.join(cache_dir, fn), encoding="utf-8") as f:
+                        c = _json.load(f)
+                    docs[c.get("sha256", fn)] = c
+                except Exception:
+                    pass
+    n = device_workshop.rebuild_from_excel(docs)
+    return {"ok": True, "newly_assigned": n, "total": device_workshop.stats()["total"]}
 
 
 @app.get("/api/archive/status")

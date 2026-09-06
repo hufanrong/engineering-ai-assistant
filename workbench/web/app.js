@@ -1268,3 +1268,44 @@ function genDo() {
       });
   });
   loadWorkshopList();
+
+  // ---------- 设备级车间归属（v0.1.29） ----------
+  function loadDeviceWorkshop() {
+    fetch("/api/device-workshop/list").then(function (r) { return r.json(); }).then(function (d) {
+      var items = d.devices || [];
+      var st = d.stats || {};
+      $("devWsSummary").textContent = "共 " + (st.total || 0) + " 台设备 · " +
+        Object.keys(st.by_workshop || {}).map(function (w) { return w + ":" + st.by_workshop[w]; }).join(" / ");
+      if (!items.length) { $("devWsList").innerHTML = '<div class="empty">暂无设备车间归属，上传设备台账后点"从台账重新提取"</div>'; return; }
+      var html = '<table><tr><th>位号</th><th>车间</th><th>来源</th><th>置信度</th><th>操作</th></tr>';
+      items.slice(0, 80).forEach(function (it) {
+        var src = { manual: "人工", excel_row: "台账行", tag_infer: "位号推断", cad: "CAD", filename: "文件名" }[it.source] || it.source;
+        var conf = Math.round((it.confidence || 0) * 100) + "%";
+        html += "<tr><td>" + esc(it.tag) + "</td><td>" + esc(it.workshop) + "</td>" +
+          "<td>" + esc(src) + "</td><td>" + conf + "</td>" +
+          '<td><button class="btn small devWsAssign" data-tag="' + esc(it.tag) + '">修改车间</button></td></tr>';
+      });
+      if (items.length > 80) html += '<tr><td colspan="5" style="font-size:12px;color:var(--text2)">仅显示前 80 台，共 ' + items.length + " 台</td></tr>";
+      html += "</table>";
+      $("devWsList").innerHTML = html;
+      Array.prototype.forEach.call(document.querySelectorAll(".devWsAssign"), function (b) {
+        b.addEventListener("click", function () {
+          var ws = prompt("指定设备 " + b.getAttribute("data-tag") + " 的车间（如：3号车间）：");
+          if (!ws) return;
+          fetch("/api/device-workshop/assign", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tag: b.getAttribute("data-tag"), workshop: ws }) })
+            .then(function (r) { return r.json(); }).then(function (d) {
+              if (d.ok) { loadDeviceWorkshop(); }
+              else { alert("指定失败"); }
+            }).catch(function (e) { alert("失败：" + e.message); });
+        });
+      });
+    }).catch(function (e) { $("devWsList").innerHTML = '<div style="color:#C0392B">加载失败：' + esc(e.message) + "</div>"; });
+  }
+  $("btnDevWsRefresh").addEventListener("click", loadDeviceWorkshop);
+  $("btnDevWsRebuild").addEventListener("click", function () {
+    fetch("/api/device-workshop/rebuild", { method: "POST" }).then(function (r) { return r.json(); })
+      .then(function (d) { alert("重新提取完成，新归车间 " + d.newly_assigned + " 台，共 " + d.total + " 台（重建图谱后生效）"); loadDeviceWorkshop(); })
+      .catch(function (e) { alert("失败：" + e.message); });
+  });
+  loadDeviceWorkshop();

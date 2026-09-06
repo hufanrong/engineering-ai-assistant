@@ -208,6 +208,16 @@
     <div class="row" id="relStats" style="margin-bottom:10px;gap:6px"></div>
     <div id="relCand" style="margin-bottom:10px"></div>
     <div id="relNet" style="margin-bottom:10px"></div>
+    <div style="border-top:1px solid var(--line);margin:12px 0;padding-top:10px">
+      <h3 style="margin:0 0 6px">设备级车间归属（v0.1.29）</h3>
+      <div class="msg" style="margin-bottom:6px">跨车间箱单/台账中的设备按台账行"车间"列或位号前缀自动分到各车间；人工指定最高优先，重建图谱后生效。</div>
+      <div class="row" style="margin-bottom:6px">
+        <button class="btn small" id="btnDevWsRefresh">刷新设备车间</button>
+        <button class="btn ghost small" id="btnDevWsRebuild">从台账重新提取</button>
+        <span style="font-size:12px;color:var(--text2)" id="devWsSummary"></span>
+      </div>
+      <div id="devWsList"></div>
+    </div>
     <div id="relDwgOut" style="margin-bottom:10px"></div>
     <select id="relWorkshop" style="max-width:260px;margin-bottom:8px">
       <option value="">— 选择车间查看详情 —</option>

@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.28）
+# 繁工AI · 本地解析工作台（MVP v0.1.29）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.29**：**设备箱单跨车间自动归类**（设备级车间归属：台账行"车间"列自动登记每台设备→车间，位号前缀推断兜底（P-101→1号车间），人工指定最高优先；跨车间箱单文件本身归未归车间但设备正确分到各车间；relations 图谱用设备登记车间覆盖投票；新增app/device_workshop.py与/api/device-workshop/{list,assign,rebuild}，⑤页设备车间归属表）
 - **v0.1.28**：**平台规范库联网核验升级**（多源聚合核验：自定义端点＞openstd＞工标网csres＞标准分享网bzfxw＞百度搜索摘要，多数票决状态+置信度+来源记录；废止/待核验条目提供搜索最新版快捷链接；单条立即核验 /api/platform/verify；核验元数据 verify_source/confidence/sources 持久化）
 - **v0.1.27**：**车间资料自动划分增强**（上传/扫描后自动识别车间：CAD标题栏＞文件名＞正文关键词；无法确认进未归车间；单文件/批量人工指定车间，重建图谱即生效；新增app/workshop_assign.py与/api/workshop/{list,assign,batch-assign,re-auto}）
 - **v0.1.26**：**手机语音自动转写**（拉取现场语音自动转文字成现场记录入资料库：本机 faster-whisper 或 AI 网关 /transcribe 自动转写，转写文本回写云库手机端可见；未装模型/未配置网关→待转写清单人工补录；新增 /api/cloud/field-transcribe）
