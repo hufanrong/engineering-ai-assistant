@@ -223,15 +223,52 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
             missing.append("吊装半径（需现场测量）")
         if "吊装高度" not in data:
             missing.append("吊装高度（需根据设备安装高度确定）")
+        # v0.1.42：根据设备重量自动选择吊装方法
         if "吊车型号" not in data:
-            data["吊车型号"] = "根据设备重量与吊装半径选择（建议25t汽车吊，具体以吊装计算为准）"
+            from . import equipment_types as _et
+            weight_str = data.get("设备重量", "")
+            weight_t = 0.0
+            import re as _re2
+            wm = _re2.search(r"(\d+(?:\.\d+)?)", str(weight_str))
+            if wm:
+                weight_t = float(wm.group(1))
+                if "kg" in str(weight_str).lower():
+                    weight_t = weight_t / 1000.0
+            lifting = _et.select_lifting_method(weight_t)
+            data["吊车型号"] = lifting["crane_type"]
+            data["吊装方法"] = lifting["method"]
+            data["吊装说明"] = lifting["notes"]
         if "吊索具" not in data:
-            data["吊索具"] = "钢丝绳/吊带（根据设备重量选择，安全系数≥6）"
+            # v0.1.42：根据重量选择吊索具规格
+            weight_str = data.get("设备重量", "")
+            import re as _re3
+            wm = _re3.search(r"(\d+(?:\.\d+)?)", str(weight_str))
+            if wm:
+                w = float(wm.group(1))
+                if "kg" in str(weight_str).lower():
+                    w = w / 1000.0
+                if w <= 5:
+                    data["吊索具"] = "1t/3t吊带或钢丝绳（安全系数≥6）"
+                elif w <= 25:
+                    data["吊索具"] = "5t/10t钢丝绳（安全系数≥6，卸扣匹配）"
+                elif w <= 50:
+                    data["吊索具"] = "15t/25t钢丝绳（安全系数≥6，需计算吊耳强度）"
+                else:
+                    data["吊索具"] = f"{int(w*0.8)}t以上钢丝绳（安全系数≥6，需专项计算）"
+            else:
+                data["吊索具"] = "钢丝绳/吊带（根据设备重量选择，安全系数≥6）"
 
-    # 施工方案专项
+    # 施工方案专项（v0.1.42：根据设备类型自动选择施工步骤）
     if doc_type == "施工方案":
         if devices:
             data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+            # v0.1.42：识别设备类型，自动生成施工步骤
+            from . import equipment_types as _et
+            eq_type = _et.get_equipment_type_from_devices(devices)
+            data["设备类型"] = eq_type
+            steps = _et.get_construction_steps(eq_type)
+            data["施工步骤"] = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+            data["施工内容"] = f"{eq_type}安装施工（含基础验收、设备就位、找平找正、管道连接、单机试运转等）"
         if "施工内容" not in data:
             missing.append("施工内容（需明确具体施工范围与工序）")
 
@@ -332,6 +369,18 @@ def fill_template(doc_type: str, data: dict) -> bytes:
     else:
         add_h("二、相关设备")
         add_kv("设备清单", data.get("_devices_hint", "可到关联图谱页选择车间自动带出"))
+
+    # v0.1.42：施工方案专项——施工步骤（按设备类型自动生成）
+    if doc_type == "施工方案" and data.get("施工步骤"):
+        add_h("三、施工步骤")
+        for line in str(data["施工步骤"]).split("\n"):
+            if line.strip():
+                p = doc.add_paragraph()
+                r = p.add_run(line.strip())
+                r.font.size = Pt(11)
+        add_h("四、质量控制")
+        add_kv("质量标准", "符合现行国家及行业施工验收规范，一次验收合格率100%")
+        add_kv("质量控制点", "基础验收、设备找平找正、对中偏差、管道焊接、试运转参数")
 
     # 默认章节文本
     section_no = 2 if (devices or doc_type in ("吊装方案", "开箱验收记录", "隐蔽工程验收记录")) else 2

@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.41）
+# 繁工AI · 本地解析工作台（MVP v0.1.42）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.42**：**施工方案/吊装方案模板优化**（根据设备类型自动选择施工方案内容：泵/压缩机/换热器/塔器/容器/反应器/工业炉/输送设备/电动机等10类设备各有专属施工步骤；位号前缀识别（P=泵/C=压缩机/E=换热器/T=塔器/V=容器等HG/T 20519标准）+设备名称关键词识别；吊装方案根据设备重量自动选择吊装方法和吊车型号（≤2t手动葫芦/≤5t 8t汽车吊/≤25t 25t汽车吊/≤50t 50t汽车吊/≤100t 100t汽车吊或履带吊/≤200t 150t履带吊/>200t 300t以上履带吊）；根据重量自动选择吊索具规格；施工方案生成含施工步骤+质量控制章节；新模块app/equipment_types.py）
 - **v0.1.41**：**设备位置人工确认界面**（位置待确认的设备可手动指定x/y/z坐标、车间归属、标高；修改后自动重新计算相邻设备和统计；coord_status从'位置待确认'变为'人工确认'；支持车间变更（从旧车间移除+加入新车间）；新增/api/spatial/device/{tag}/update、/api/spatial/device/{tag}/confirm、/api/spatial/pending端点；⑤页空间结构区位置待确认设备显示编辑按钮+弹出表单；spatial_model新增update_device_location/confirm_device/_update_stats函数）
 - **v0.1.40**：**多电脑并库时现场记录去重合并**（本地拉取追踪 data/field_pulled.json，已拉取过的现场记录自动跳过（force=true强制重拉）；多台电脑对同一条现场记录的分析结果在云库侧合并——高置信度覆盖类型/数据，缺失字段取并集；分析来源节点追踪 record_analyze_sources；pull-field 返回 skipped/total_pulled 去重统计；新增/api/cloud/field-pulled 和 /api/cloud/field-pulled/clear 端点；回写分析结果时携带 node_name）
 - **v0.1.39**：**资料自动关联到设备/车间**（已生成的工程资料自动关联到对应设备和车间；关联来源：生成时传入的设备/车间 > 文件名中的位号/车间 > docx内容中的位号/车间；archive._save_generated保存时自动登记；支持扫描所有已生成资料批量登记；完整性检查用关联关系精准判断设备级/车间级资料是否存在；新增/api/doc-relations/{list,device/{tag},workshop/{ws},scan}端点；新模块app/doc_relations.py）
