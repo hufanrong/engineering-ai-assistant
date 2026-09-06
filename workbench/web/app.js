@@ -2973,3 +2973,71 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnDisclosureStats");
   if (b3) b3.addEventListener("click", disclosureLoadStats);
 });
+
+// v0.1.71：设备安装位置与施工日志联动
+function siteLogGenerate() {
+  var tag = document.getElementById("siteLogDeviceTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  var date = document.getElementById("siteLogDate").value.trim();
+  var weather = document.getElementById("siteLogWeather").value.trim() || "晴";
+  var url = "/api/site-log/generate?tag=" + encodeURIComponent(tag) + "&weather=" + encodeURIComponent(weather);
+  if (date) url += "&date=" + encodeURIComponent(date);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("siteLogDetail");
+    el.style.display = "block";
+    var html = '<strong>施工日志 - ' + esc(d.tag) + ' ' + esc(d.name || '') + '</strong><br>';
+    html += '日期: ' + esc(d.log_date) + ' | 天气: ' + esc(d.weather) + ' | 类型: ' + esc(d.type || '未知') + ' | 状态: ' + esc(d.construction_status || '') + '<br>';
+    html += '<strong>一、施工部位：</strong>' + esc(d.construction_location) + '<br>';
+    html += '<strong>二、施工内容：</strong><br>';
+    (d.construction_content || []).forEach(function(c, i){ html += (i+1) + '. ' + esc(c) + '<br>'; });
+    html += '<strong>三、人员配置：</strong>' + (d.personnel || []).map(esc).join('、') + '<br>';
+    html += '<strong>四、机具设备：</strong>' + (d.equipment || []).map(esc).join('、') + '<br>';
+    html += '<strong>五、材料使用：</strong>' + (d.materials || []).map(esc).join('、') + '<br>';
+    html += '<strong>六、质量检查：</strong><br>';
+    (d.quality_results || []).forEach(function(q, i){ html += (i+1) + '. ' + esc(q) + '<br>'; });
+    html += '<strong>七、安全情况：</strong><br>';
+    (d.safety_situation || []).forEach(function(s, i){ html += (i+1) + '. ' + esc(s) + '<br>'; });
+    html += '<strong>八、问题及处理：</strong><br>';
+    (d.issues || []).forEach(function(iss, i){ html += (i+1) + '. ' + esc(iss) + '<br>'; });
+    html += '<strong>九、明日计划（' + esc(d.tomorrow_date) + '）：</strong><br>';
+    (d.tomorrow_plan || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function siteLogLoadList() {
+  var tag = document.getElementById("siteLogDeviceTag").value.trim();
+  var url = "/api/site-log/list" + (tag ? "?tag=" + encodeURIComponent(tag) : "");
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("siteLogList");
+    var logs = d.logs || [];
+    if (logs.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无施工日志</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>施工日志（' + logs.length + '条）：</strong><br>';
+    logs.slice(0, 15).forEach(function(log) {
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'siteLogDeviceTag\').value=\'' + log.tag + '\';document.getElementById(\'siteLogDate\').value=\'' + log.log_date + '\';siteLogGenerate();" style="color:#1E5AA8">' + log.log_date + '</a> ' + esc(log.tag) + ' ' + esc(log.name || '') + ' (' + esc(log.type || '') + '/' + esc(log.workshop || '') + '/' + esc(log.construction_status || '') + ')<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function siteLogLoadStats() {
+  fetch("/api/site-log/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("siteLogStats");
+    el.style.display = "block";
+    if (d.total_logs === 0) { el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    var html = '<strong>日志统计：</strong>共' + d.total_logs + '条 / 覆盖' + d.devices_with_logs + '台设备 / 总设备' + d.total_devices + '台（覆盖率' + d.coverage_percent + '%）<br>';
+    if (d.status_count) {
+      html += '<strong>按状态：</strong>';
+      for (var k in d.status_count) { html += esc(k) + ':' + d.status_count[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnSiteLogGenerate");
+  if (b1) b1.addEventListener("click", siteLogGenerate);
+  var b2 = document.getElementById("btnSiteLogList");
+  if (b2) b2.addEventListener("click", siteLogLoadList);
+  var b3 = document.getElementById("btnSiteLogStats");
+  if (b3) b3.addEventListener("click", siteLogLoadStats);
+});

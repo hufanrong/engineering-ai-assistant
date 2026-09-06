@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.70")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.71")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1820,6 +1820,34 @@ def technical_disclosure_stats():
     from . import technical_disclosure as _td
     return {"ok": True, **_td.get_disclosure_stats()}
 
+
+
+@app.get("/api/site-log/generate")
+def site_log_generate(tag: str, date: str = None, weather: str = "晴"):
+    """v0.1.71：生成设备施工日志。"""
+    from . import site_log as _sl
+    return {"ok": True, **_sl.generate_site_log(tag, date, weather)}
+
+
+@app.get("/api/site-log/list")
+def site_log_list(tag: str = None):
+    """v0.1.71：列出生成的施工日志。"""
+    from . import site_log as _sl
+    return {"ok": True, "logs": _sl.list_site_logs(tag)}
+
+
+@app.get("/api/site-log/stats")
+def site_log_stats():
+    """v0.1.71：获取施工日志统计。"""
+    from . import site_log as _sl
+    return {"ok": True, **_sl.get_site_log_stats()}
+
+
+@app.get("/api/site-log/template")
+def site_log_template(type: str = ""):
+    """v0.1.71：获取设备类型施工日志模板。"""
+    from . import site_log as _sl
+    return {"ok": True, "template": _sl.get_log_template(type)}
 
 @app.get("/api/technical-disclosure/template")
 def technical_disclosure_template(type: str = ""):
