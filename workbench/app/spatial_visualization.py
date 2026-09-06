@@ -466,3 +466,241 @@ def generate_elevation_stack_svg(workshop=None, device_type=None) -> str:
         svg.append(f'<text x="{legend_x+30}" y="{ly+3}" font-size="9" fill="#555">{dtype}</text>')
     svg.append('</svg>')
     return "\n".join(svg)
+
+
+def _isometric_project(x, y, z, scale=1.0, center_x=500, center_y=400):
+    """v0.1.62：等轴测投影转换。
+    
+    等轴测投影公式：
+    x' = (x - y) * cos(30°) * scale + center_x
+    y' = (x + y) * sin(30°) * scale - z * scale + center_y
+    
+    Args:
+        x, y, z: 三维坐标
+        scale: 缩放比例
+        center_x, center_y: 画布中心点
+    
+    Returns:
+        (screen_x, screen_y) 屏幕坐标
+    """
+    import math
+    cos30 = math.cos(math.radians(30))
+    sin30 = math.sin(math.radians(30))
+    sx = (x - y) * cos30 * scale + center_x
+    sy = (x + y) * sin30 * scale - z * scale + center_y
+    return sx, sy
+
+
+def _orthographic_project(x, y, z, view="front", scale=1.0, center_x=500, center_y=400):
+    """v0.1.62：正交投影转换。
+    
+    Args:
+        x, y, z: 三维坐标
+        view: 视角 - "front"正视图(x-z平面), "side"侧视图(y-z平面), "top"俯视图(x-y平面)
+        scale: 缩放比例
+        center_x, center_y: 画布中心点
+    
+    Returns:
+        (screen_x, screen_y) 屏幕坐标
+    """
+    if view == "front":
+        # 正视图：x轴水平，z轴垂直
+        sx = x * scale + center_x
+        sy = -z * scale + center_y
+    elif view == "side":
+        # 侧视图：y轴水平，z轴垂直
+        sx = y * scale + center_x
+        sy = -z * scale + center_y
+    elif view == "top":
+        # 俯视图：x轴水平，y轴垂直
+        sx = x * scale + center_x
+        sy = y * scale + center_y
+    else:
+        sx = x * scale + center_x
+        sy = -z * scale + center_y
+    return sx, sy
+
+
+def generate_isometric_svg(view="isometric", workshop=None, device_type=None,
+                            show_piping=True) -> str:
+    """v0.1.62：生成三维等轴测/正交视图SVG。
+    
+    Args:
+        view: 视角 - "isometric"等轴测, "front"正视图, "side"侧视图, "top"俯视图
+        workshop: 车间筛选
+        device_type: 设备类型筛选
+        show_piping: 是否显示管线连接
+    
+    Returns:
+        SVG字符串
+    """
+    devices, network = _load_spatial_data()
+    
+    # 筛选设备
+    filtered = []
+    for d in devices:
+        if workshop and d.get("workshop") != workshop:
+            continue
+        if device_type and d.get("type") != device_type:
+            continue
+        filtered.append(d)
+    
+    # 计算坐标范围用于归一化
+    xs = [d.get("x", 0) for d in filtered if d.get("x") is not None]
+    ys = [d.get("y", 0) for d in filtered if d.get("y") is not None]
+    zs = [d.get("z", 0) for d in filtered if d.get("z") is not None]
+    
+    if not xs:
+        xs = [0, 10]
+    if not ys:
+        ys = [0, 10]
+    if not zs:
+        zs = [0, 5]
+    
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    min_z, max_z = min(zs), max(zs)
+    
+    range_x = max_x - min_x if max_x > min_x else 1
+    range_y = max_y - min_y if max_y > min_y else 1
+    range_z = max_z - min_z if max_z > min_z else 1
+    
+    # 计算缩放比例
+    width, height = 1000, 700
+    max_range = max(range_x, range_y, range_z)
+    scale = min(300 / max_range if max_range > 0 else 50, 80)
+    
+    center_x = width // 2
+    center_y = height // 2 + 50
+    
+    # 归一化坐标（以最小值为原点）
+    def norm_x(d):
+        return (d.get("x", min_x) - min_x) if d.get("x") is not None else range_x / 2
+    def norm_y(d):
+        return (d.get("y", min_y) - min_y) if d.get("y") is not None else range_y / 2
+    def norm_z(d):
+        return (d.get("z", min_z) - min_z) if d.get("z") is not None else range_z / 2
+    
+    # 投影函数
+    if view == "isometric":
+        def project(d):
+            return _isometric_project(norm_x(d), norm_y(d), norm_z(d),
+                                       scale=scale, center_x=center_x, center_y=center_y)
+    else:
+        def project(d):
+            return _orthographic_project(norm_x(d), norm_y(d), norm_z(d),
+                                          view=view, scale=scale, center_x=center_x, center_y=center_y)
+    
+    # 生成SVG
+    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" style="background:#f8f9fa;font-family:Arial,sans-serif">']
+    
+    # 标题
+    view_names = {"isometric": "等轴测视图", "front": "正视图", "side": "侧视图", "top": "俯视图"}
+    title = f"设备安装位置三维视图 - {view_names.get(view, view)}"
+    svg.append(f'<text x="{width//2}" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#1E5AA8">{title}</text>')
+    
+    # 坐标轴（等轴测视图显示三轴）
+    if view == "isometric":
+        # X轴（红色）
+        x1, y1 = _isometric_project(0, 0, 0, scale, center_x, center_y)
+        x2, y2 = _isometric_project(range_x * 1.2, 0, 0, scale, center_x, center_y)
+        svg.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#e74c3c" stroke-width="2"/>')
+        svg.append(f'<text x="{x2+5}" y="{y2}" font-size="12" fill="#e74c3c">X</text>')
+        # Y轴（绿色）
+        x2, y2 = _isometric_project(0, range_y * 1.2, 0, scale, center_x, center_y)
+        svg.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#2ecc71" stroke-width="2"/>')
+        svg.append(f'<text x="{x2+5}" y="{y2}" font-size="12" fill="#2ecc71">Y</text>')
+        # Z轴（蓝色）
+        x2, y2 = _isometric_project(0, 0, range_z * 1.5, scale, center_x, center_y)
+        svg.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#3498db" stroke-width="2"/>')
+        svg.append(f'<text x="{x2+5}" y="{y2}" font-size="12" fill="#3498db">Z（标高）</text>')
+    else:
+        # 正交视图显示两轴
+        if view == "front":
+            svg.append(f'<line x1="80" y1="{height-80}" x2="{width-40}" y2="{height-80}" stroke="#e74c3c" stroke-width="2"/>')
+            svg.append(f'<text x="{width-35}" y="{height-75}" font-size="12" fill="#e74c3c">X</text>')
+            svg.append(f'<line x1="80" y1="60" x2="80" y2="{height-80}" stroke="#3498db" stroke-width="2"/>')
+            svg.append(f'<text x="70" y="55" font-size="12" fill="#3498db">Z</text>')
+        elif view == "side":
+            svg.append(f'<line x1="80" y1="{height-80}" x2="{width-40}" y2="{height-80}" stroke="#2ecc71" stroke-width="2"/>')
+            svg.append(f'<text x="{width-35}" y="{height-75}" font-size="12" fill="#2ecc71">Y</text>')
+            svg.append(f'<line x1="80" y1="60" x2="80" y2="{height-80}" stroke="#3498db" stroke-width="2"/>')
+            svg.append(f'<text x="70" y="55" font-size="12" fill="#3498db">Z</text>')
+        elif view == "top":
+            svg.append(f'<line x1="80" y1="{height-80}" x2="{width-40}" y2="{height-80}" stroke="#e74c3c" stroke-width="2"/>')
+            svg.append(f'<text x="{width-35}" y="{height-75}" font-size="12" fill="#e74c3c">X</text>')
+            svg.append(f'<line x1="80" y1="60" x2="80" y2="{height-80}" stroke="#2ecc71" stroke-width="2"/>')
+            svg.append(f'<text x="70" y="55" font-size="12" fill="#2ecc71">Y</text>')
+    
+    # 绘制管线连接（先画管线，设备在上面）
+    if show_piping and network.get("connections"):
+        device_positions = {}
+        for d in filtered:
+            device_positions[d["tag"]] = project(d)
+        
+        for conn in network["connections"]:
+            from_dev = conn.get("from_device")
+            to_dev = conn.get("to_device")
+            if from_dev in device_positions and to_dev in device_positions:
+                x1, y1 = device_positions[from_dev]
+                x2, y2 = device_positions[to_dev]
+                pipe_no = conn.get("pipe_no", "")
+                svg.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#e67e22" stroke-width="1.5" stroke-dasharray="4,2"/>')
+                if pipe_no:
+                    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                    svg.append(f'<text x="{mx}" y="{my-5}" text-anchor="middle" font-size="9" fill="#e67e22">{pipe_no}</text>')
+    
+    # 绘制设备（按z坐标排序，z大的先画在后面）
+    sorted_devices = sorted(filtered, key=lambda d: norm_z(d), reverse=True)
+    for d in sorted_devices:
+        sx, sy = project(d)
+        tag = d["tag"]
+        dev_type = d.get("type", "其他")
+        color = DEVICE_TYPE_COLORS.get(dev_type, "#95a5a6")
+        
+        # 设备阴影（等轴测视图增加立体感）
+        if view == "isometric":
+            svg.append(f'<ellipse cx="{sx+3}" cy="{sy+3}" rx="14" ry="6" fill="rgba(0,0,0,0.15)"/>')
+        
+        # 设备圆点
+        svg.append(f'<circle cx="{sx}" cy="{sy}" r="12" fill="{color}" stroke="#fff" stroke-width="2"/>')
+        
+        # 标高指示线（等轴测视图）
+        if view == "isometric" and d.get("z") is not None:
+            z_val = round(d["z"], 2)
+            svg.append(f'<text x="{sx+18}" y="{sy-8}" font-size="10" fill="#3498db">EL{z_val}</text>')
+        
+        # 设备标注
+        svg.append(f'<text x="{sx+18}" y="{sy+4}" font-size="11" fill="#333">{tag}</text>')
+        if d.get("workshop"):
+            svg.append(f'<text x="{sx+18}" y="{sy+18}" font-size="9" fill="#888">{d["workshop"]}</text>')
+    
+    # 图例
+    legend_x = width - 180
+    legend_y = 60
+    svg.append(f'<rect x="{legend_x}" y="{legend_y}" width="170" height="220" fill="white" stroke="#ddd" rx="5"/>')
+    svg.append(f'<text x="{legend_x+10}" y="{legend_y+20}" font-size="12" font-weight="bold" fill="#333">设备类型图例</text>')
+    for i, (dtype, color) in enumerate(DEVICE_TYPE_COLORS.items()):
+        ly = legend_y + 40 + i * 16
+        svg.append(f'<circle cx="{legend_x+20}" cy="{ly}" r="6" fill="{color}"/>')
+        svg.append(f'<text x="{legend_x+35}" y="{ly+4}" font-size="10" fill="#555">{dtype}</text>')
+    
+    # 管线图例
+    svg.append(f'<line x1="{legend_x+15}" y1="{legend_y+200}" x2="{legend_x+35}" y2="{legend_y+200}" stroke="#e67e22" stroke-width="1.5" stroke-dasharray="4,2"/>')
+    svg.append(f'<text x="{legend_x+40}" y="{legend_y+204}" font-size="10" fill="#555">管线连接</text>')
+    
+    # 统计信息
+    svg.append(f'<text x="90" y="{height-30}" font-size="11" fill="#666">设备总数: {len(filtered)} | 视角: {view_names.get(view, view)} | 坐标范围: X[{min_x:.1f},{max_x:.1f}] Y[{min_y:.1f},{max_y:.1f}] Z[{min_z:.1f},{max_z:.1f}]</text>')
+    
+    svg.append('</svg>')
+    return "\n".join(svg)
+
+
+def list_views() -> list:
+    """v0.1.62：列出可用视角。"""
+    return [
+        {"id": "isometric", "name": "等轴测视图", "description": "三维等轴测投影，展示空间关系"},
+        {"id": "front", "name": "正视图", "description": "X-Z平面正交投影"},
+        {"id": "side", "name": "侧视图", "description": "Y-Z平面正交投影"},
+        {"id": "top", "name": "俯视图", "description": "X-Y平面正交投影"},
+    ]

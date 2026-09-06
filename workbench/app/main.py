@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.61")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.62")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1414,6 +1414,25 @@ def spatial_visualization_elevation_layer(elevation: float = None,
     svg = _sv.generate_elevation_layer_svg(elevation=elevation, workshop=workshop, device_type=device_type)
     return Response(content=svg, media_type="image/svg+xml")
 
+
+
+@app.get("/api/spatial-visualization/3d/views")
+def spatial_visualization_3d_views():
+    """v0.1.62：列出可用三维视角。"""
+    from . import spatial_visualization as _sv
+    return {"ok": True, "views": _sv.list_views()}
+
+
+@app.get("/api/spatial-visualization/3d/isometric")
+def spatial_visualization_3d_isometric(view: str = "isometric",
+                                        workshop: str = None,
+                                        device_type: str = None,
+                                        show_piping: bool = True):
+    """v0.1.62：生成三维等轴测/正交视图SVG。"""
+    from . import spatial_visualization as _sv
+    svg = _sv.generate_isometric_svg(view=view, workshop=workshop,
+                                       device_type=device_type, show_piping=show_piping)
+    return Response(content=svg, media_type="image/svg+xml")
 
 @app.get("/api/spatial-visualization/elevation/stack")
 def spatial_visualization_elevation_stack(workshop: str = None,

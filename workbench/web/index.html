@@ -514,6 +514,25 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.62：设备安装位置三维可视化（等轴测视图） -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置三维可视化（v0.1.62）</h3>
+  <div class="msg" style="margin-bottom:6px">等轴测视图展示设备三维空间位置，支持视角切换（等轴测/正视图/侧视图/俯视图）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="view3dSelect" style="padding:4px 8px;font-size:12px">
+      <option value="isometric">等轴测视图</option>
+      <option value="front">正视图</option>
+      <option value="side">侧视图</option>
+      <option value="top">俯视图</option>
+    </select>
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
+      <input type="checkbox" id="showPiping3d" checked> 显示管线
+    </label>
+    <button class="btn" id="btn3dGenerate" style="background:#FF7A00">生成三维视图</button>
+  </div>
+  <div id="view3dSvgContainer" style="max-width:100%;overflow-x:auto;display:none"></div>
+</div>
+
 <!-- v0.1.61：设备位置按标高分层可视化 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备位置按标高分层可视化（v0.1.61）</h3>

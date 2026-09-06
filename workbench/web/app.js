@@ -2335,3 +2335,19 @@ document.addEventListener("DOMContentLoaded", function () {
   if (b3) b3.addEventListener("click", elevationLoadList);
   elevationLoadList();
 });
+
+// v0.1.62：设备安装位置三维可视化
+function view3dGenerate() {
+  var view = document.getElementById("view3dSelect").value;
+  var showPiping = document.getElementById("showPiping3d").checked;
+  var url = "/api/spatial-visualization/3d/isometric?view=" + view + "&show_piping=" + showPiping;
+  fetch(url).then(function(r){return r.text();}).then(function(svg){
+    var el = document.getElementById("view3dSvgContainer");
+    el.style.display = "block";
+    el.innerHTML = svg;
+  }).catch(function(e){ alert("加载失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b = document.getElementById("btn3dGenerate");
+  if (b) b.addEventListener("click", view3dGenerate);
+});
