@@ -7,7 +7,7 @@ import json
 import threading
 from typing import Union, List
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.40")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.41")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1110,6 +1110,43 @@ def elevation_map():
         return {"ok": True, "count": len(emap), "devices": emap}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "message": str(e)}
+
+
+@app.post("/api/spatial/device/{tag}/update")
+def spatial_device_update(tag: str, payload: dict = Body(...)):
+    """v0.1.41：人工更新设备位置（坐标/车间/标高）。"""
+    from . import spatial_model as _sm
+    result = _sm.update_device_location(
+        tag,
+        x=payload.get("x"),
+        y=payload.get("y"),
+        z=payload.get("z"),
+        workshop=payload.get("workshop"),
+        coord_status=payload.get("coord_status", "人工确认"),
+        note=payload.get("note", ""),
+    )
+    return result
+
+
+@app.post("/api/spatial/device/{tag}/confirm")
+def spatial_device_confirm(tag: str, payload: dict = Body(default={})):
+    """v0.1.41：确认设备位置（位置待确认 → 人工确认）。"""
+    from . import spatial_model as _sm
+    return _sm.confirm_device(tag, workshop=payload.get("workshop"))
+
+
+@app.get("/api/spatial/pending")
+def spatial_pending():
+    """v0.1.41：位置待确认的设备列表。"""
+    from . import spatial_model as _sm
+    spatial = _sm.load_spatial()
+    pending = []
+    for tag, dev in spatial.get("device_index", {}).items():
+        if dev.get("coord_status") == "位置待确认":
+            pending.append({"tag": tag, "workshop": dev.get("workshop", ""),
+                            "x": dev.get("x"), "y": dev.get("y"), "z": dev.get("z"),
+                            "sources": dev.get("source_types", [])})
+    return {"ok": True, "count": len(pending), "devices": pending}
 
 
 @app.get("/api/spatial/ai-summary")

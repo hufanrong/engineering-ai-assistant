@@ -1587,10 +1587,13 @@ function genDo() {
             if (dev.z_note) elevStr += ' <span style="color:var(--text2);font-size:11px">(' + esc(dev.z_note) + ')</span>';
           }
           var nb = (dev.neighbors || []).length ? (" 相邻:" + (dev.neighbors || []).map(function (n) { return n.tag + "(" + n.distance_m + "m)"; }).join("、")) : "";
+          var editBtn = dev.coord_status === "位置待确认"
+            ? ' <button style="font-size:11px;padding:1px 6px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer" onclick="spatialEditDevice(\'' + esc(dev.tag) + '\')">编辑</button>'
+            : '';
           html += '<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line2)">' +
             '<span style="font-weight:600">' + esc(dev.tag) + '</span> ' +
             '<span style="color:' + statusColor + '">[' + esc(dev.coord_status) + ']</span> ' +
-            '<span style="color:var(--text2)">' + coord + elevStr + nb + '</span></div>';
+            '<span style="color:var(--text2)">' + coord + elevStr + nb + '</span>' + editBtn + '</div>';
         });
         html += '</div></div>';
       }
@@ -1683,3 +1686,49 @@ document.addEventListener("DOMContentLoaded", function () {
   });
   if ($("btnDocRelRefresh")) $("btnDocRelRefresh").addEventListener("click", docRelLoad);
 });
+
+// v0.1.41：设备位置人工确认
+var _editTag = "";
+function spatialEditDevice(tag) {
+  _editTag = tag;
+  document.getElementById("editDeviceTag").textContent = tag;
+  // 加载当前设备信息
+  fetch("/api/spatial/device/" + encodeURIComponent(tag)).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.ok && d.device) {
+      document.getElementById("editX").value = d.device.x != null ? d.device.x : "";
+      document.getElementById("editY").value = d.device.y != null ? d.device.y : "";
+      document.getElementById("editZ").value = d.device.z != null ? d.device.z : "";
+      document.getElementById("editWorkshop").value = d.device.workshop || "";
+    }
+  }).catch(function () {});
+  document.getElementById("spatialEditModal").style.display = "flex";
+}
+function spatialEditClose() {
+  document.getElementById("spatialEditModal").style.display = "none";
+}
+function spatialEditConfirm() {
+  var payload = {};
+  var x = document.getElementById("editX").value;
+  var y = document.getElementById("editY").value;
+  var z = document.getElementById("editZ").value;
+  var ws = document.getElementById("editWorkshop").value;
+  var note = document.getElementById("editNote").value;
+  if (x !== "") payload.x = parseFloat(x);
+  if (y !== "") payload.y = parseFloat(y);
+  if (z !== "") payload.z = parseFloat(z);
+  if (ws) payload.workshop = ws;
+  if (note) payload.note = note;
+  payload.coord_status = "人工确认";
+  fetch("/api/spatial/device/" + encodeURIComponent(_editTag) + "/update", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.ok) {
+      alert("设备 " + _editTag + " 位置已确认");
+      spatialEditClose();
+      // 刷新空间结构
+      if (typeof spatialLoad === "function") spatialLoad();
+    } else {
+      alert("更新失败：" + (d.message || "未知错误"));
+    }
+  }).catch(function (e) { alert("更新失败：" + e.message); });
+}

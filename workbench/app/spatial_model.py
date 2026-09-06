@@ -11,6 +11,7 @@
 import math
 import os
 import json
+import datetime
 from . import config
 from . import elevation as _elev
 import json
@@ -297,3 +298,101 @@ def load_spatial(path: str = None) -> dict:
         return {}
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def update_device_location(tag: str, x: float = None, y: float = None, z: float = None,
+                           workshop: str = None, coord_status: str = "人工确认",
+                           note: str = "") -> dict:
+    """v0.1.41：人工更新设备位置（坐标/车间/标高）。
+
+    Args:
+        tag: 设备位号
+        x, y, z: 坐标（None 表示不修改）
+        workshop: 车间（None 表示不修改）
+        coord_status: 坐标状态（默认"人工确认"）
+        note: 备注
+
+    Returns:
+        更新后的设备信息
+    """
+    spatial = load_spatial()
+    if not spatial or tag not in spatial.get("device_index", {}):
+        return {"ok": False, "message": f"设备 {tag} 不存在"}
+    dev = spatial["device_index"][tag]
+    if x is not None:
+        dev["x"] = x
+        dev["has_cad_coords"] = True
+    if y is not None:
+        dev["y"] = y
+    if z is not None:
+        dev["z"] = z
+        dev["z_source"] = "manual"
+        dev["z_confidence"] = 1.0
+    if coord_status:
+        dev["coord_status"] = coord_status
+    if note:
+        dev["manual_note"] = note
+    dev["updated_at"] = datetime.datetime.now().isoformat()
+    dev["updated_by"] = "manual"
+
+    # 车间变更
+    if workshop and workshop != dev.get("workshop"):
+        old_ws = dev.get("workshop")
+        dev["workshop"] = workshop
+        # 从旧车间移除
+        if old_ws and old_ws in spatial.get("workshops", {}):
+            if tag in spatial["workshops"][old_ws].get("devices", []):
+                spatial["workshops"][old_ws]["devices"].remove(tag)
+                spatial["workshops"][old_ws]["device_count"] = len(spatial["workshops"][old_ws]["devices"])
+        # 加入新车间
+        if workshop not in spatial.get("workshops", {}):
+            spatial["workshops"][workshop] = {
+                "devices": [], "device_count": 0,
+                "cad_annotated": 0, "excel_only": 0, "pending": 0,
+            }
+        if tag not in spatial["workshops"][workshop]["devices"]:
+            spatial["workshops"][workshop]["devices"].append(tag)
+            spatial["workshops"][workshop]["device_count"] = len(spatial["workshops"][workshop]["devices"])
+
+    # 重新计算相邻设备
+    try:
+        _compute_neighbors(spatial["device_index"])
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 更新统计
+    _update_stats(spatial)
+
+    save_spatial(spatial)
+    return {"ok": True, "device": dev}
+
+
+def confirm_device(tag: str, workshop: str = None) -> dict:
+    """v0.1.41：确认设备位置（位置待确认 → 人工确认）。"""
+    spatial = load_spatial()
+    if not spatial or tag not in spatial.get("device_index", {}):
+        return {"ok": False, "message": f"设备 {tag} 不存在"}
+    dev = spatial["device_index"][tag]
+    dev["coord_status"] = "人工确认"
+    dev["confirmed_at"] = datetime.datetime.now().isoformat()
+    if workshop:
+        return update_device_location(tag, workshop=workshop)
+    _update_stats(spatial)
+    save_spatial(spatial)
+    return {"ok": True, "device": dev}
+
+
+def _update_stats(spatial: dict):
+    """更新空间模型统计。"""
+    di = spatial.get("device_index", {})
+    spatial["stats"]["total_devices"] = len(di)
+    spatial["stats"]["cad_annotated"] = sum(1 for d in di.values() if d.get("coord_status") == "图纸标注")
+    spatial["stats"]["excel_only"] = sum(1 for d in di.values() if d.get("coord_status") == "台账记录（图纸未标注）")
+    spatial["stats"]["pending_location"] = sum(1 for d in di.values() if d.get("coord_status") == "位置待确认")
+    spatial["stats"]["manual_confirmed"] = sum(1 for d in di.values() if d.get("coord_status") == "人工确认")
+    spatial["stats"]["with_elevation"] = sum(1 for d in di.values() if d.get("z") is not None)
+    # 车间统计
+    for ws_name, ws in spatial.get("workshops", {}).items():
+        ws["cad_annotated"] = sum(1 for t in ws.get("devices", []) if di.get(t, {}).get("coord_status") == "图纸标注")
+        ws["excel_only"] = sum(1 for t in ws.get("devices", []) if di.get(t, {}).get("coord_status") == "台账记录（图纸未标注）")
+        ws["pending"] = sum(1 for t in ws.get("devices", []) if di.get(t, {}).get("coord_status") == "位置待确认")
