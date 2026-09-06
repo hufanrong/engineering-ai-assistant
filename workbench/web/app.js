@@ -2827,3 +2827,87 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnLiftingStats");
   if (b3) b3.addEventListener("click", liftingLoadStats);
 });
+
+// v0.1.69：多电脑并库施工进度合并
+function scheduleMergeFile() {
+  var file = document.getElementById("scheduleMergeFile").value.trim();
+  var pc = document.getElementById("scheduleMergePC").value.trim();
+  var strategy = document.getElementById("scheduleMergeStrategy").value;
+  if (!file) { alert("请输入源进度JSON文件路径"); return; }
+  fetch("/api/schedule-merge/merge-file", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({file_path: file, source_pc: pc, conflict_strategy: strategy})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.detail) { alert("合并失败：" + d.detail); return; }
+    var log = d.log || {};
+    alert("合并完成！源设备:" + log.source_devices + " 合并:" + log.merged_devices + " 跳过:" + log.skipped_duplicate + " 冲突:" + log.conflicts);
+    scheduleMergeLoadStats();
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function scheduleMergeLoadStats() {
+  fetch("/api/schedule-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleMergeStats");
+    el.style.display = "block";
+    var html = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并' + d.total_devices_merged + '台 | 跳过' + d.total_devices_skipped + '台 | 冲突' + d.total_conflicts + '次<br>';
+    html += '待处理冲突:' + d.pending_conflicts + ' | 已解决:' + d.resolved_conflicts + ' | 当前设备:' + d.current_total_devices + '台<br>';
+    if (d.current_status_distribution) {
+      html += '<strong>状态分布：</strong>';
+      for (var k in d.current_status_distribution) { html += esc(k) + ':' + d.current_status_distribution[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function scheduleMergeLoadPending() {
+  fetch("/api/schedule-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleMergePending");
+    var pending = d.pending || [];
+    if (pending.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#27ae60">无待处理冲突</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + pending.length + '个）：</strong><br>';
+    pending.slice(0, 10).forEach(function(p, i) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(231,76,60,0.05);border-radius:4px">';
+      html += '<strong>' + esc(p.tag) + '</strong> 来源:' + esc(p.source_pc || '') + '<br>';
+      html += '源状态:' + esc(p.source_status) + ' vs 当前:' + esc(p.current_status) + '<br>';
+      html += '<button onclick="scheduleMergeResolve(' + i + ',\'use_source\')" style="font-size:11px;padding:2px 6px;margin-right:4px">用源数据</button>';
+      html += '<button onclick="scheduleMergeResolve(' + i + ',\'keep_existing\')" style="font-size:11px;padding:2px 6px;margin-right:4px">保留现有</button>';
+      html += '<button onclick="scheduleMergeResolve(' + i + ',\'skip\')" style="font-size:11px;padding:2px 6px">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function scheduleMergeResolve(index, decision) {
+  fetch("/api/schedule-merge/resolve", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({index: index, decision: decision})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("已处理：" + d.decision); scheduleMergeLoadPending(); scheduleMergeLoadStats(); }
+    else alert("处理失败：" + (d.error || ""));
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function scheduleMergeLoadIntegrity() {
+  fetch("/api/schedule-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleMergeIntegrity");
+    el.style.display = "block";
+    var html = '<strong>进度完整性：</strong>总设备' + d.total_devices + '台 | 有状态' + d.devices_with_status + '台 | 已完成' + d.completed_devices + '台 | 进行中' + d.in_progress_devices + '台 | 完成率' + d.completion_percent + '%<br>';
+    if (d.issues && d.issues.length > 0) {
+      html += '<strong>问题（' + d.issues_count + '个）：</strong><br>';
+      d.issues.forEach(function(iss) {
+        html += '- ' + esc(iss.type) + ': ' + iss.count + '台' + (iss.devices ? ' (' + iss.devices.slice(0,5).map(esc).join(',') + '...)' : '') + '<br>';
+      });
+    } else {
+      html += '<span style="color:#27ae60">无问题</span>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnScheduleMergeFile");
+  if (b1) b1.addEventListener("click", scheduleMergeFile);
+  var b2 = document.getElementById("btnScheduleMergeStats");
+  if (b2) b2.addEventListener("click", scheduleMergeLoadStats);
+  var b3 = document.getElementById("btnScheduleMergePending");
+  if (b3) b3.addEventListener("click", scheduleMergeLoadPending);
+  var b4 = document.getElementById("btnScheduleMergeIntegrity");
+  if (b4) b4.addEventListener("click", scheduleMergeLoadIntegrity);
+});

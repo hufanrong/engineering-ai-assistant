@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.68")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.69")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1740,6 +1740,70 @@ def lifting_plan_stats():
     from . import lifting_plan as _lp
     return {"ok": True, **_lp.get_lifting_stats()}
 
+
+
+@app.post("/api/schedule-merge/merge")
+def schedule_merge_merge(body: dict):
+    """v0.1.69：合并源施工进度数据。"""
+    from . import schedule_merge as _sm
+    source = body.get("source_schedule", {})
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    return {"ok": True, **_sm.merge_schedule(source, source_pc, strategy)}
+
+
+@app.post("/api/schedule-merge/merge-file")
+def schedule_merge_merge_file(body: dict):
+    """v0.1.69：从文件合并施工进度数据。"""
+    from . import schedule_merge as _sm
+    file_path = body.get("file_path", "")
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    source = _sm.load_schedule_from_file(file_path)
+    if "error" in source:
+        raise HTTPException(status_code=400, detail=source["error"])
+    return {"ok": True, **_sm.merge_schedule(source, source_pc, strategy)}
+
+
+@app.get("/api/schedule-merge/pending")
+def schedule_merge_pending():
+    """v0.1.69：列出待人工确认的进度冲突。"""
+    from . import schedule_merge as _sm
+    return {"ok": True, "pending": _sm.list_pending()}
+
+
+@app.post("/api/schedule-merge/resolve")
+def schedule_merge_resolve(body: dict):
+    """v0.1.69：处理待人工确认的进度冲突。"""
+    from . import schedule_merge as _sm
+    index = body.get("index", 0)
+    decision = body.get("decision", "")
+    if decision not in ["use_source", "keep_existing", "skip"]:
+        raise HTTPException(status_code=400, detail="decision必须是use_source/keep_existing/skip")
+    return {"ok": True, **_sm.resolve_pending(index, decision)}
+
+
+@app.get("/api/schedule-merge/log")
+def schedule_merge_log():
+    """v0.1.69：列出合并日志。"""
+    from . import schedule_merge as _sm
+    return {"ok": True, "log": _sm.list_merge_log()}
+
+
+@app.get("/api/schedule-merge/stats")
+def schedule_merge_stats():
+    """v0.1.69：获取合并统计信息。"""
+    from . import schedule_merge as _sm
+    return {"ok": True, **_sm.merge_stats()}
+
+
+@app.get("/api/schedule-merge/integrity")
+def schedule_merge_integrity():
+    """v0.1.69：检查施工进度完整性。"""
+    from . import schedule_merge as _sm
+    return {"ok": True, **_sm.check_schedule_integrity()}
 
 @app.get("/api/lifting-plan/params")
 def lifting_plan_params(type: str = ""):
