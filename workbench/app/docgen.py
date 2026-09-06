@@ -552,6 +552,62 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 竣工资料专项（v0.1.57：设备数据联动——技术参数、交工范围、遗留问题、验收记录）
+    if doc_type == "竣工资料" and devices:
+        data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+        # 识别设备类型
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+        data["设备类型"] = eq_type
+        # 交工范围
+        completion_scope = _get_completion_scope(eq_type, devices)
+        data["交工范围"] = completion_scope
+        # 遗留问题（从完整性检查获取）
+        remaining = _get_remaining_issues(devices)
+        data["遗留问题及处理"] = remaining["summary"]
+        data["遗留问题清单"] = "\n".join(f"{i+1}. {r}" for i, r in enumerate(remaining["issues"])) if remaining["issues"] else "无遗留问题"
+        # 验收记录编号（从已生成文档获取）
+        try:
+            import os as _os
+            gen_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "data", "generated_docs")
+            acceptance_records = []
+            for dtype in ["开箱验收记录", "隐蔽工程验收记录"]:
+                dtype_dir = _os.path.join(gen_dir, dtype)
+                if _os.path.exists(dtype_dir):
+                    files = _os.listdir(dtype_dir)
+                    acceptance_records.extend([f.replace(".docx", "") for f in files[:5]])
+            if acceptance_records:
+                data["验收记录编号"] = "、".join(acceptance_records)
+                data["隐蔽工程资料编号"] = "、".join([r for r in acceptance_records if "隐蔽" in r]) or "待整理"
+        except Exception:  # noqa: BLE001
+            pass
+        # v0.1.57：设备技术参数联动
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            tech_params = []
+            workshops = set()
+            for d in devices[:10]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"车间: {sd['workshop']}")
+                    workshops.add(sd["workshop"])
+                if sd.get("z") is not None:
+                    params.append(f"标高: {sd['z']}m")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+            if tech_params:
+                data["竣工设备参数"] = "\n".join(tech_params)
+            if workshops:
+                data["交工车间"] = "、".join(workshops)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
@@ -947,6 +1003,53 @@ def _get_damage_suggestions(eq_type: str) -> list:
     suggestions.extend(type_suggestions.get(eq_type, ["受损部件需厂家评估修复或更换"]))
     return suggestions
 
+
+
+def _get_completion_scope(eq_type: str, devices: list) -> str:
+    """v0.1.57：根据设备类型生成交工范围。"""
+    type_scope = {
+        "泵": "泵类设备安装、管道连接、单机试运转及验收",
+        "压缩机": "压缩机类设备安装、辅助系统连接、单机试运转及验收",
+        "塔器": "塔器类设备安装、内件安装、管道连接、水压试验及验收",
+        "换热器": "换热器类设备安装、管道连接、水压试验、保温施工及验收",
+        "容器": "容器类设备安装、管道连接、水压试验、保温施工及验收",
+        "风机": "风机类设备安装、管道连接、单机试运转及验收",
+        "电机": "电机类设备安装、接线、绝缘测试、空载试运转及验收",
+        "阀门": "阀门类设备安装、试压、管道连接及验收",
+        "储罐": "储罐类设备安装、焊接、充水试验、防腐施工及验收",
+    }
+    base_scope = type_scope.get(eq_type, "设备安装、管道连接、试运转及验收")
+    device_count = len(devices)
+    return f"{base_scope}（共{device_count}台{type_scope.get(eq_type, '设备')}）"
+
+
+def _get_remaining_issues(devices: list) -> dict:
+    """v0.1.57：从完整性检查获取遗留问题。"""
+    issues = []
+    try:
+        from . import completeness_check as _cc
+        result = _cc.check_completeness()
+        # 检查设备级缺失
+        device_completeness = result.get("device_completeness", {})
+        for tag, info in device_completeness.items():
+            if not info.get("complete", True):
+                missing = info.get("missing", [])
+                if missing:
+                    issues.append(f"{tag}：缺少{'、'.join(missing)}")
+        # 检查阶段缺失
+        stage_completeness = result.get("stage_completeness", {})
+        for stage, info in stage_completeness.items():
+            if info.get("missing_count", 0) > 0:
+                issues.append(f"{stage}阶段：缺少{info.get('missing_count', 0)}项资料")
+    except Exception:  # noqa: BLE001
+        pass
+    
+    if not issues:
+        issues.append("暂未发现遗留问题，建议现场最终确认")
+    
+    summary = f"共{len(issues)}项遗留问题（详见遗留问题清单）" if len(issues) > 1 else issues[0]
+    return {"summary": summary, "issues": issues}
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -1143,6 +1246,35 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         if data.get("索赔建议"):
             add_h("五、索赔建议")
             for line in str(data["索赔建议"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+
+    # 竣工资料专项（v0.1.57：设备数据联动章节）
+    if doc_type == "竣工资料":
+        if data.get("竣工设备参数"):
+            add_h("二、竣工设备参数")
+            for line in str(data["竣工设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("交工范围") or data.get("交工车间"):
+            add_h("三、交工范围")
+            if data.get("交工范围"):
+                add_kv("交工内容", data["交工范围"])
+            if data.get("交工车间"):
+                add_kv("交工车间", data["交工车间"])
+        if data.get("验收记录编号") or data.get("隐蔽工程资料编号"):
+            add_h("四、验收资料清单")
+            if data.get("验收记录编号"):
+                add_kv("验收记录编号", data["验收记录编号"])
+            if data.get("隐蔽工程资料编号"):
+                add_kv("隐蔽工程资料编号", data["隐蔽工程资料编号"])
+        if data.get("遗留问题清单"):
+            add_h("五、遗留问题及处理")
+            for line in str(data["遗留问题清单"]).split("\n"):
                 if line.strip():
                     p = doc.add_paragraph()
                     r = p.add_run(line.strip())
