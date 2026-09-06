@@ -2517,3 +2517,62 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnScheduleStatusUpdate");
   if (b4) b4.addEventListener("click", scheduleUpdateStatus);
 });
+
+// v0.1.65：设备安装位置与施工方案联动
+function planGenerate() {
+  var tag = document.getElementById("planDeviceTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  fetch("/api/installation-plan/generate?tag=" + encodeURIComponent(tag)).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("planDetail");
+    el.style.display = "block";
+    var html = '<strong>设备安装施工方案 - ' + esc(d.tag) + ' ' + esc(d.name || '') + '</strong><br>';
+    html += '类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配') + ' | 标高: ' + (d.elevation != null ? d.elevation + 'm' : '未知') + '<br>';
+    if (d.adjacent_devices && d.adjacent_devices.length > 0) {
+      html += '<strong>相邻设备：</strong>' + d.adjacent_devices.map(function(a){return a.tag + '(' + a.distance + 'm)';}).join(', ') + '<br>';
+    }
+    html += '<hr style="margin:6px 0">';
+    html += '<strong>一、施工环境分析</strong><br>';
+    (d.construction_environment || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>二、施工顺序建议</strong><br>';
+    (d.construction_sequence || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>三、安全注意事项</strong><br>';
+    (d.safety_points || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>四、质量控制要点</strong><br>';
+    (d.quality_points || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function planLoadList() {
+  fetch("/api/installation-plan/list").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("planList");
+    var plans = d.plans || [];
+    if (plans.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无已生成的方案</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>已生成方案（' + plans.length + '个）：</strong><br>';
+    plans.forEach(function(p){
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'planDeviceTag\').value=\'' + p.tag + '\';planGenerate();" style="color:#1E5AA8">' + p.tag + '</a> ' + esc(p.name || '') + ' (' + esc(p.type || '') + '/' + esc(p.workshop || '') + ')<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function planLoadStats() {
+  fetch("/api/installation-plan/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("planStats");
+    el.style.display = "block";
+    var html = '<strong>方案统计：</strong>已生成' + d.total_plans + '个 / 总设备' + d.total_devices + '台（覆盖率' + d.coverage_percent + '%）';
+    if (d.type_count) {
+      html += ' | 按类型: ';
+      for (var t in d.type_count) { html += t + ':' + d.type_count[t] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnPlanGenerate");
+  if (b1) b1.addEventListener("click", planGenerate);
+  var b2 = document.getElementById("btnPlanList");
+  if (b2) b2.addEventListener("click", planLoadList);
+  var b3 = document.getElementById("btnPlanStats");
+  if (b3) b3.addEventListener("click", planLoadStats);
+});

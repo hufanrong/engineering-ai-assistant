@@ -514,6 +514,21 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.65：设备安装位置与施工方案联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工方案联动（v0.1.65）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成施工方案要点，包括施工环境分析、施工顺序建议、安全注意事项、质量控制要点。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="planDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnPlanGenerate" style="background:#52C41A">生成方案</button>
+    <button class="btn" id="btnPlanList">方案列表</button>
+    <button class="btn" id="btnPlanStats">统计</button>
+  </div>
+  <div id="planStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="planList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="planDetail" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.64：设备安装位置与施工进度联动 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动（v0.1.64）</h3>

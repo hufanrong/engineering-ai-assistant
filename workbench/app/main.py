@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.64")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.65")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1596,6 +1596,34 @@ def construction_schedule_get_status(tag: str = None):
     from . import construction_schedule as _cs
     return {"ok": True, **_cs.get_device_status(tag)}
 
+
+
+@app.get("/api/installation-plan/generate")
+def installation_plan_generate(tag: str):
+    """v0.1.65：生成设备安装施工方案。"""
+    from . import installation_plan as _ip
+    return {"ok": True, **_ip.generate_installation_plan(tag)}
+
+
+@app.get("/api/installation-plan/spatial-info")
+def installation_plan_spatial_info(tag: str):
+    """v0.1.65：获取设备空间信息。"""
+    from . import installation_plan as _ip
+    return {"ok": True, **_ip.get_device_spatial_info(tag)}
+
+
+@app.get("/api/installation-plan/list")
+def installation_plan_list():
+    """v0.1.65：列出已生成的安装方案。"""
+    from . import installation_plan as _ip
+    return {"ok": True, "plans": _ip.list_installation_plans()}
+
+
+@app.get("/api/installation-plan/stats")
+def installation_plan_stats():
+    """v0.1.65：获取安装方案统计。"""
+    from . import installation_plan as _ip
+    return {"ok": True, **_ip.get_plan_stats()}
 
 @app.get("/api/construction-schedule/workshops")
 def construction_schedule_workshops():
