@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.42")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.43")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -961,6 +961,42 @@ def chat_analyze(req: ChatAnalyzeReq):
     if not req.file_path or not os.path.exists(req.file_path):
         raise HTTPException(400, "文件不存在")
     return chat_parser.analyze_chat(req.file_path)
+
+
+@app.get("/api/chat/candidates")
+def chat_candidates():
+    """v0.1.43：群聊提及设备候选列表（待人工确认）。"""
+    from . import relations as _rel
+    candidates = _rel.list_chat_candidates()
+    return {"ok": True, "count": len(candidates), "candidates": candidates}
+
+
+@app.post("/api/chat/candidate/{tag}/confirm")
+def chat_candidate_confirm(tag: str, payload: dict = Body(...)):
+    """v0.1.43：确认群聊提及设备（加入正式设备图谱）。"""
+    from . import relations as _rel
+    workshop = payload.get("workshop", "")
+    note = payload.get("note", "")
+    if not workshop:
+        raise HTTPException(400, "需要指定车间")
+    result = _rel.confirm_chat_candidate(tag, workshop, note)
+    return {"ok": True, "tag": tag, "confirmed": result}
+
+
+@app.post("/api/chat/candidate/{tag}/reject")
+def chat_candidate_reject(tag: str, payload: dict = Body(default={})):
+    """v0.1.43：拒绝群聊提及设备（不再提示）。"""
+    from . import relations as _rel
+    reason = payload.get("reason", "")
+    result = _rel.reject_chat_candidate(tag, reason)
+    return result
+
+
+@app.get("/api/chat/rejected")
+def chat_rejected():
+    """v0.1.43：已拒绝的候选设备列表。"""
+    from . import relations as _rel
+    return {"ok": True, "items": _rel.list_rejected_candidates()}
 
 
 @app.get("/api/chat/list")

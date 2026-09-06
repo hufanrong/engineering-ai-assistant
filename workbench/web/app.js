@@ -1732,3 +1732,68 @@ function spatialEditConfirm() {
     }
   }).catch(function (e) { alert("更新失败：" + e.message); });
 }
+
+
+// v0.1.43：群聊提及设备候选（人工确认/拒绝）
+function chatCandLoad() {
+  fetch("/api/chat/candidates").then(function (r) { return r.json(); }).then(function (d) {
+    var box = document.getElementById("chatCandidates");
+    var countEl = document.getElementById("chatCandCount");
+    if (!d.ok) { box.innerHTML = '<div class="empty">加载失败</div>'; return; }
+    var cands = d.candidates || [];
+    countEl.textContent = cands.length ? ("共 " + cands.length + " 台待确认") : "暂无待确认设备";
+    if (!cands.length) { box.innerHTML = '<div class="empty">群聊中未发现待确认设备</div>'; return; }
+    var html = "";
+    cands.forEach(function (c) {
+      var tag = c.tag || "";
+      var topics = (c.topics || []).join("、") || "—";
+      var evidence = (c.evidence || []).slice(0, 3).join("、") || "—";
+      html += '<div style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-bottom:4px;background:#fff">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">';
+      html += '<span style="font-weight:600;color:var(--accent)">' + esc(tag) + '</span>';
+      html += '<div style="display:flex;gap:4px">';
+      html += '<input id="candWs_' + esc(tag) + '" placeholder="归属车间" style="padding:3px 6px;font-size:11px;border:1px solid var(--line);border-radius:4px;width:100px">';
+      html += '<button data-tag="' + esc(tag) + '" data-action="confirm" style="padding:3px 8px;font-size:11px;background:#52C41A;color:#fff;border:none;border-radius:4px;cursor:pointer">确认</button>';
+      html += '<button data-tag="' + esc(tag) + '" data-action="reject" style="padding:3px 8px;font-size:11px;background:#C0392B;color:#fff;border:none;border-radius:4px;cursor:pointer">拒绝</button>';
+      html += '</div></div>';
+      html += '<div style="font-size:11px;color:var(--text2);margin-top:2px">话题：' + esc(topics) + ' | 证据：' + esc(evidence) + '</div>';
+      html += '</div>';
+    });
+    box.innerHTML = html;
+    // 事件委托
+    box.querySelectorAll("button[data-action]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var tag = this.getAttribute("data-tag");
+        var action = this.getAttribute("data-action");
+        if (action === "confirm") chatCandConfirm(tag);
+        else chatCandReject(tag);
+      });
+    });
+  }).catch(function () { document.getElementById("chatCandidates").innerHTML = '<div class="empty">加载失败</div>'; });
+}
+function chatCandConfirm(tag) {
+  var wsInput = document.getElementById("candWs_" + tag);
+  var ws = wsInput ? wsInput.value.trim() : "";
+  if (!ws) { alert("请先填写归属车间"); wsInput.focus(); return; }
+  fetch("/api/chat/candidate/" + encodeURIComponent(tag) + "/confirm", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workshop: ws, note: "前端人工确认" })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.ok) { alert("设备 " + tag + " 已确认归属 " + ws); chatCandLoad(); }
+    else { alert("确认失败：" + (d.message || "未知错误")); }
+  }).catch(function (e) { alert("确认失败：" + e.message); });
+}
+function chatCandReject(tag) {
+  if (!confirm("确认拒绝设备 " + tag + "？拒绝后不再提示。")) return;
+  fetch("/api/chat/candidate/" + encodeURIComponent(tag) + "/reject", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: "前端人工拒绝" })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.ok) { alert("设备 " + tag + " 已拒绝"); chatCandLoad(); }
+    else { alert("拒绝失败"); }
+  }).catch(function (e) { alert("拒绝失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var btn = document.getElementById("btnChatCandRefresh");
+  if (btn) btn.addEventListener("click", chatCandLoad);
+});

@@ -73,6 +73,65 @@ def confirm_candidate(tag: str, workshop: str, note: str = "") -> dict:
     return m[tag.strip()]
 
 
+# v0.1.43：群聊提及设备候选——人工确认/拒绝
+REJECT_FILE = None
+
+
+def _ensure_reject():
+    global REJECT_FILE
+    if REJECT_FILE is None:
+        REJECT_FILE = os.path.join(config.DATA_DIR, "rejected_candidates.json")
+
+
+def _load_rejected() -> dict:
+    _ensure_reject()
+    if os.path.exists(REJECT_FILE):
+        try:
+            with open(REJECT_FILE, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def _save_rejected(m: dict):
+    _ensure_reject()
+    with open(REJECT_FILE, "w", encoding="utf-8") as f:
+        json.dump(m, f, ensure_ascii=False, indent=1)
+
+
+def list_chat_candidates() -> list:
+    """v0.1.43：列出群聊提及设备候选（待人工确认）。"""
+    g = load_relations()
+    rejected = _load_rejected()
+    candidates = []
+    for hc in g.get("human_confirm", []):
+        if hc.get("type") == "群聊提及设备（候选）":
+            tag = hc.get("tag", "")
+            if tag and tag not in rejected:
+                candidates.append(hc)
+    return candidates
+
+
+def confirm_chat_candidate(tag: str, workshop: str, note: str = "") -> dict:
+    """v0.1.43：确认群聊提及设备（加入正式设备图谱，归属指定车间）。"""
+    return confirm_candidate(tag, workshop, note or "群聊提及设备人工确认")
+
+
+def reject_chat_candidate(tag: str, reason: str = "") -> dict:
+    """v0.1.43：拒绝群聊提及设备（不再提示）。"""
+    m = _load_rejected()
+    m[tag.strip()] = {"reason": reason or "", "ts": datetime.datetime.now().isoformat()}
+    _save_rejected(m)
+    return {"ok": True, "tag": tag, "rejected": True}
+
+
+def list_rejected_candidates() -> list:
+    """v0.1.43：列出已拒绝的候选设备。"""
+    m = _load_rejected()
+    return [{"tag": k, **v} for k, v in m.items()]
+
+
 def _load_index():
     idx_file = os.path.join(config.DATA_DIR, "index.json")
     if os.path.exists(idx_file):
@@ -433,8 +492,11 @@ def build_relations(force: bool = False) -> dict:
         for _ws in _ch.get("workshops", []):
             chat_workshops.setdefault(_ws, []).append(d["file_name"])
     # 群聊提及但不在设备图谱中的位号 → 人工确认（群聊提及候选设备）
+    rejected_tags = set(_load_rejected().keys())
     for _tag, _files in sorted(chat_by_tag.items()):
         if _tag in device_map or _tag in confirmed_map or _tag in _seen_conflict:
+            continue
+        if _tag in rejected_tags:
             continue
         # 避免与铭牌候选重复
         if any(hc.get("tag") == _tag for hc in human_confirm):
