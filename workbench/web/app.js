@@ -812,3 +812,151 @@ function genDo() {
     })
     .catch(function (e) { document.getElementById("genModalHint").textContent = "生成失败：" + e.message; });
 }
+  // ---------- 文件夹批量上传（v0.1.22） ----------
+  var BATCH_SIZE = 20;
+  var batchFiles = [];          // 当前会话待传文件（File 对象）
+  var batchUploading = false;
+  var doneKey = "fanGongUploaded";   // localStorage：已成功 name+size 集合（断点续传用）
+
+  function loadDoneSet() {
+    try { return JSON.parse(localStorage.getItem(doneKey) || "[]"); } catch (e) { return []; }
+  }
+  function saveDoneSet(arr) { localStorage.setItem(doneKey, JSON.stringify(arr.slice(-2000))); }
+  function markDone(name, size) {
+    var s = loadDoneSet(); s.push(name + "|" + size); saveDoneSet(s);
+  }
+  function isDone(name, size) { return loadDoneSet().indexOf(name + "|" + size) >= 0; }
+
+  function setBatchMsg(html) { $("batchMsg").innerHTML = html; }
+
+  function collectDirFiles(entry, out, cb) {
+    // 递归收集目录下所有文件（webkitGetAsEntry）
+    var reader = entry.createReader();
+    var all = [];
+    function readBatch() {
+      reader.readEntries(function (entries) {
+        if (!entries.length) {
+          (function next(i) {
+            if (i >= all.length) { cb(); return; }
+            var e = all[i];
+            if (e.isFile) {
+              e.file(function (f) { out.push(f); next(i + 1); }, function () { next(i + 1); });
+            } else { collectDirFiles(e, out, function () { next(i + 1); }); }
+          })(0);
+          return;
+        }
+        all = all.concat(entries);
+        readBatch();
+      }, function () { cb(); });
+    }
+    readBatch();
+  }
+
+  function handleDropFiles(items, isDirMode) {
+    var entries = [];
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var ent = it.webkitGetAsEntry ? it.webkitGetAsEntry() : null;
+      if (ent) entries.push(ent);
+    }
+    var out = [];
+    var pend = entries.length || 1;
+    function done() {
+      batchFiles = batchFiles.concat(out);
+      var doneSet = loadDoneSet();
+      // 断点续传：过滤已传完的
+      var fresh = [];
+      for (var j = 0; j < out.length; j++) {
+        if (isDone(out[j].name, out[j].size)) continue;
+        fresh.push(out[j]);
+      }
+      batchFiles = batchFiles.concat(fresh);
+      var n = batchFiles.length;
+      $("btnBatchClear").style.display = n ? "" : "none";
+      $("batchSelInfo").textContent = "已选 " + n + " 个文件（本次新加入 " + fresh.length + "，已自动跳过已传 " + (out.length - fresh.length) + " 个）";
+      if (n) setBatchMsg("就绪：共 " + n + " 个文件，将分 " + Math.ceil(n / BATCH_SIZE) + " 批上传");
+    }
+    if (!entries.length) { done(); return; }
+    var remain = entries.length;
+    entries.forEach(function (e) {
+      if (e.isFile) { e.file(function (f) { out.push(f); if (--remain === 0) done(); }, function () { if (--remain === 0) done(); }); }
+      else collectDirFiles(e, out, function () { if (--remain === 0) done(); });
+    });
+  }
+
+  $("upfilesDir").addEventListener("change", function () {
+    var files = Array.prototype.slice.call(this.files || []);
+    var out = files.map(function (f) { return f; });
+    batchFiles = batchFiles.concat(out);
+    var doneSet = loadDoneSet();
+    var fresh = out.filter(function (f) { return !isDone(f.name, f.size); });
+    batchFiles = batchFiles.concat(fresh);
+    var n = batchFiles.length;
+    $("btnBatchClear").style.display = n ? "" : "none";
+    $("batchSelInfo").textContent = "已选 " + n + " 个文件（本次新加入 " + fresh.length + "，自动跳过已传 " + (out.length - fresh.length) + " 个）";
+    if (n) setBatchMsg("就绪：共 " + n + " 个文件，将分 " + Math.ceil(n / BATCH_SIZE) + " 批上传");
+    this.value = "";
+  });
+
+  var dz = $("dropZone");
+  dz.addEventListener("dragover", function (e) { e.preventDefault(); dz.style.borderColor = "#FF7A00"; });
+  dz.addEventListener("dragleave", function () { dz.style.borderColor = ""; });
+  dz.addEventListener("drop", function (e) {
+    e.preventDefault(); dz.style.borderColor = "";
+    if (batchUploading) { setBatchMsg("上传进行中，请先等待完成"); return; }
+    var items = Array.prototype.slice.call(e.dataTransfer.items || []);
+    handleDropFiles(items, true);
+  });
+
+  $("btnBatchClear").addEventListener("click", function () {
+    batchFiles = []; $("batchSelInfo").textContent = ""; this.style.display = "none";
+    setBatchMsg("未选择文件夹"); $("batchBar").style.width = "0%";
+  });
+
+  $("btnBatchStart").addEventListener("click", function () {
+    if (batchUploading) { setBatchMsg("已有批次在上传中…"); return; }
+    if (!batchFiles.length) { setBatchMsg("请先选择或拖入文件夹"); return; }
+    batchUploading = true;
+    var total = batchFiles.length;
+    var batches = Math.ceil(total / BATCH_SIZE);
+    var ok = 0, fail = 0;
+    $("btnBatchStart").disabled = true;
+    (function runBatch(bi) {
+      var slice = batchFiles.slice(bi * BATCH_SIZE, (bi + 1) * BATCH_SIZE);
+      setBatchMsg("第 " + (bi + 1) + "/" + batches + " 批 · 本批 " + slice.length + " 个文件上传解析中…（累计成功 " + ok + "，失败 " + fail + "）");
+      $("batchBar").style.width = Math.round(bi / batches * 100) + "%";
+      var fd = new FormData();
+      fd.append("uploader", $("uploader").value.trim() || "未署名");
+      for (var i = 0; i < slice.length; i++) fd.append("files", slice[i]);
+      fetch("/api/upload-files", { method: "POST", body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var res = d.results || [];
+          for (var j = 0; j < res.length; j++) {
+            var it = res[j];
+            if (it.status === "parsed" || it.status === "partial") { ok++; markDone(it.file, slice[j] ? slice[j].size : 0); }
+            else fail++;
+          }
+          if (bi + 1 < batches) runBatch(bi + 1);
+          else {
+            batchUploading = false; $("btnBatchStart").disabled = false;
+            $("batchBar").style.width = "100%";
+            setBatchMsg("全部完成：成功 " + ok + "，失败 " + fail + "（失败文件见上方失败清单，可重试）。已传文件在关页重开后自动跳过。");
+            refreshStatus(); loadFailList();
+            batchFiles = [];
+            $("btnBatchClear").style.display = "none";
+            $("batchSelInfo").textContent = "";
+          }
+        })
+        .catch(function (e) {
+          fail += slice.length;
+          if (bi + 1 < batches) runBatch(bi + 1);
+          else {
+            batchUploading = false; $("btnBatchStart").disabled = false;
+            setBatchMsg("批次中断（" + e.message + "）。已传批次已入库；重开页面重新选择文件夹会自动跳过已传文件，继续未传部分。");
+            batchFiles = [];
+            $("btnBatchClear").style.display = "none";
+          }
+        });
+    })(0);
+  });

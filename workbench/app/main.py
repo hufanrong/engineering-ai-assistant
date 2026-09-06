@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import datetime
+
 from . import config
 from . import scanner
 from .vector_store import VectorStore
@@ -23,7 +25,7 @@ from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.21")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.22")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -277,6 +279,11 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 results.append({"file": name, "status": "failed", "error": "空文件"})
                 continue
             sha = hashlib.sha256(raw).hexdigest()
+            # 去重（v0.1.22）：与解析库 index 比对，已入库则跳过（断点重传/重复选文件夹安全）
+            if sha in scanner._load_index():
+                results.append({"file": name, "status": "duplicate", "parser": "",
+                                "error": "已入库，自动跳过", "sha256": sha, "uploader": uploader})
+                continue
             saved = os.path.join(save_dir, f"{sha[:12]}_{name}")
             with open(saved, "wb") as fh:
                 fh.write(raw)
@@ -285,6 +292,16 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 _store.index_file(res)
                 upload_queue.enqueue(res)
                 scanner._save_parsed_cache(res)
+            # 登记索引（供去重/失败管理/统计共用，v0.1.22）
+            idx = scanner._load_index()
+            idx[res.sha256] = {
+                "file_name": res.file_name, "file_path": saved,
+                "status": res.status, "parser": res.parser,
+                "error": res.error, "entities": len(res.entities),
+                "retry_count": 0, "uploader": uploader,
+                "ts": datetime.datetime.now().isoformat(),
+            }
+            scanner._save_index(idx)
             results.append({
                 "file": name,
                 "status": res.status,
