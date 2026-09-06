@@ -415,6 +415,51 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 隐蔽工程验收记录专项（v0.1.53：设备数据联动——技术参数、隐蔽部位、检查要点、质量标准）
+    if doc_type == "隐蔽工程验收记录" and devices:
+        data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+        # 识别设备类型
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+        data["设备类型"] = eq_type
+        # 隐蔽部位（根据设备类型推断）
+        concealment_parts = _get_concealment_parts(eq_type)
+        data["隐蔽部位"] = "、".join(concealment_parts)
+        # 隐蔽检查要点
+        concealment_points = _get_concealment_points(eq_type)
+        data["隐蔽检查要点"] = "\n".join(f"{i+1}. {p}" for i, p in enumerate(concealment_points))
+        # 质量标准
+        quality_standards = _get_concealment_quality(eq_type)
+        data["质量标准"] = "\n".join(f"{i+1}. {q}" for i, q in enumerate(quality_standards))
+        # 检查情况默认
+        data["检查情况"] = "隐蔽内容与图纸相符，几何尺寸符合要求，预埋件位置准确固定牢靠，隐蔽前影像资料留存齐全（详见隐蔽检查要点和质量标准）"
+        # 验收结果默认
+        data["验收结果"] = "合格（隐蔽工程质量符合设计和规范要求）"
+        # v0.1.53：设备技术参数联动
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            tech_params = []
+            for d in devices[:5]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"安装车间: {sd['workshop']}")
+                if sd.get("x") is not None and sd.get("y") is not None:
+                    params.append(f"安装坐标: ({sd['x']}, {sd['y']})")
+                if sd.get("z") is not None:
+                    params.append(f"安装标高: {sd['z']}m")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+            if tech_params:
+                data["隐蔽设备参数"] = "\n".join(tech_params)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
@@ -604,6 +649,73 @@ def _get_random_docs(eq_type: str) -> list:
     docs.extend(type_docs.get(eq_type, ["按设备装箱单清点"]))
     return docs
 
+
+
+def _get_concealment_parts(eq_type: str) -> list:
+    """v0.1.53：根据设备类型生成隐蔽部位。"""
+    type_parts = {
+        "泵": ["泵基础预埋件", "泵地脚螺栓", "泵进出口管道连接", "泵底座灌浆"],
+        "压缩机": ["压缩机基础预埋件", "压缩机地脚螺栓", "压缩机管道连接", "润滑油管线"],
+        "塔器": ["塔器基础预埋件", "塔器地脚螺栓", "塔器接管连接", "塔器保温层"],
+        "换热器": ["换热器基础预埋件", "换热器地脚螺栓", "换热器管程壳程连接", "换热器保温层"],
+        "容器": ["容器基础预埋件", "容器地脚螺栓", "容器接管连接", "容器保温层"],
+        "风机": ["风机基础预埋件", "风机地脚螺栓", "风机进出口管道连接", "风机减振装置"],
+        "电机": ["电机基础预埋件", "电机地脚螺栓", "电机电缆接线", "电机接地装置"],
+        "阀门": ["阀门基础支架", "阀门法兰连接", "阀门保温层", "阀门传动装置"],
+        "储罐": ["储罐基础预埋件", "储罐底板焊接", "储罐接管连接", "储罐防腐层"],
+    }
+    return type_parts.get(eq_type, ["设备基础预埋件", "设备地脚螺栓", "设备管道连接"])
+
+
+def _get_concealment_points(eq_type: str) -> list:
+    """v0.1.53：根据设备类型生成隐蔽检查要点。"""
+    base = [
+        "核对隐蔽部位与图纸一致，几何尺寸符合设计要求",
+        "检查预埋件位置准确，固定牢靠，标高符合设计",
+        "检查地脚螺栓规格、数量、位置与基础一致",
+        "检查管道连接无应力，法兰平行度符合要求",
+        "隐蔽前拍摄影像资料，编号留存齐全",
+    ]
+    type_points = {
+        "泵": ["检查泵基础混凝土强度达到设计要求", "检查泵底座水平度偏差不大于0.05mm/m", "检查泵进出口管道法兰对中良好", "检查二次灌浆密实无空隙"],
+        "压缩机": ["检查压缩机基础混凝土强度达到设计要求", "检查压缩机底座水平度偏差不大于0.05mm/m", "检查气缸与滑道对中偏差符合规范", "检查润滑油管线清洁无杂物"],
+        "塔器": ["检查塔器基础混凝土强度达到设计要求", "检查塔器垂直度偏差不大于高度的1/1000", "检查塔器地脚螺栓紧固力矩符合要求", "检查塔器保温层厚度符合设计"],
+        "换热器": ["检查换热器基础混凝土强度达到设计要求", "检查换热器底座水平度符合要求", "检查换热器管程壳程法兰密封面完好", "检查换热器保温层厚度符合设计"],
+        "容器": ["检查容器基础混凝土强度达到设计要求", "检查容器垂直度偏差符合规范", "检查容器地脚螺栓紧固力矩符合要求", "检查容器保温层厚度符合设计"],
+        "风机": ["检查风机基础混凝土强度达到设计要求", "检查风机减振装置安装正确", "检查风机进出口管道软连接完好", "检查风机底座水平度符合要求"],
+        "电机": ["检查电机基础混凝土强度达到设计要求", "检查电机接地装置连接可靠", "检查电机电缆接线正确，绝缘合格", "检查电机底座水平度符合要求"],
+        "阀门": ["检查阀门支架安装牢固", "检查阀门法兰螺栓紧固均匀", "检查阀门保温层施工符合要求", "检查阀门传动装置操作灵活"],
+        "储罐": ["检查储罐基础混凝土强度达到设计要求", "检查储罐底板焊接质量合格", "检查储罐防腐层厚度符合设计", "检查储罐充水试验基础沉降合格"],
+    }
+    points = list(base)
+    points.extend(type_points.get(eq_type, ["按设备说明书和施工方案检查"]))
+    return points
+
+
+def _get_concealment_quality(eq_type: str) -> list:
+    """v0.1.53：根据设备类型生成隐蔽工程质量标准。"""
+    base = [
+        "隐蔽工程质量符合设计图纸和现行施工验收规范要求",
+        "预埋件位置偏差不大于±5mm，标高偏差不大于±3mm",
+        "地脚螺栓位置偏差不大于±2mm，垂直度偏差不大于1/100",
+        "管道法兰平行度偏差不大于法兰外径的1.5/1000且不大于2mm",
+        "隐蔽前影像资料齐全，编号清晰可追溯",
+    ]
+    type_quality = {
+        "泵": ["泵底座水平度偏差不大于0.05mm/m", "泵联轴器对中偏差径向≤0.05mm，端面≤0.03mm", "二次灌浆强度达到设计要求的75%以上方可紧固螺栓"],
+        "压缩机": ["压缩机底座水平度偏差不大于0.05mm/m", "气缸与滑道对中偏差符合设备技术文件要求", "润滑油管线冲洗合格，清洁度符合要求"],
+        "塔器": ["塔器垂直度偏差不大于高度的1/1000且不大于30mm", "塔器地脚螺栓紧固力矩符合设备技术文件要求", "塔器保温层厚度偏差不大于+10mm/-5mm"],
+        "换热器": ["换热器底座水平度偏差不大于0.05mm/m", "换热器管程壳程水压试验合格", "换热器保温层厚度偏差不大于+10mm/-5mm"],
+        "容器": ["容器垂直度偏差不大于高度的1/1000且不大于30mm", "容器地脚螺栓紧固力矩符合设备技术文件要求", "容器保温层厚度偏差不大于+10mm/-5mm"],
+        "风机": ["风机底座水平度偏差不大于0.05mm/m", "风机叶轮与机壳间隙均匀，偏差不大于设计值的±10%", "风机减振装置压缩量均匀，偏差不大于2mm"],
+        "电机": ["电机底座水平度偏差不大于0.05mm/m", "电机绝缘电阻不小于0.5MΩ", "电机接地电阻不大于4Ω"],
+        "阀门": ["阀门法兰螺栓紧固力矩符合规范要求", "阀门保温层厚度偏差不大于+10mm/-5mm", "阀门开关灵活，无卡涩"],
+        "储罐": ["储罐底板焊接无损检测合格", "储罐充水试验基础沉降差不大于设计允许值", "储罐防腐层厚度偏差不大于+10mm/-5mm"],
+    }
+    quality = list(base)
+    quality.extend(type_quality.get(eq_type, ["按设备说明书和施工验收规范执行"]))
+    return quality
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -708,6 +820,33 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         if data.get("随机资料清单"):
             add_h("四、随机资料清单")
             for line in str(data["随机资料清单"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+
+    # 隐蔽工程验收记录专项（v0.1.53：设备数据联动章节）
+    if doc_type == "隐蔽工程验收记录":
+        if data.get("隐蔽设备参数"):
+            add_h("二、隐蔽设备参数")
+            for line in str(data["隐蔽设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("隐蔽部位"):
+            add_h("三、隐蔽部位")
+            add_kv("隐蔽部位", data["隐蔽部位"])
+        if data.get("隐蔽检查要点"):
+            add_h("四、隐蔽检查要点")
+            for line in str(data["隐蔽检查要点"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("质量标准"):
+            add_h("五、质量标准")
+            for line in str(data["质量标准"]).split("\n"):
                 if line.strip():
                     p = doc.add_paragraph()
                     r = p.add_run(line.strip())
