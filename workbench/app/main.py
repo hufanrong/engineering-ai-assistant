@@ -29,9 +29,10 @@ from . import workshop_assign
 from . import device_workshop
 from . import tag_alias
 from . import version_manager
+from . import field_record
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.32")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.33")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -834,6 +835,40 @@ def versions_set_latest(req: VersionSetLatestReq):
         raise HTTPException(400, "需要 file_name 与 sha256")
     ok = version_manager.set_latest(req.file_name, req.sha256)
     return {"ok": ok, "file_name": req.file_name, "latest_sha256": req.sha256}
+
+
+class FieldRecordAnalyzeReq(BaseModel):
+    text: str = ""
+    ocr_text: str = ""
+    transcript: str = ""
+    metadata: dict = {}
+
+
+class FieldRecordGenerateReq(BaseModel):
+    doc_type: str
+    data: dict = {}
+
+
+@app.post("/api/field-record/analyze")
+def field_record_analyze(req: FieldRecordAnalyzeReq):
+    """现场记录快速分析（v0.1.33）：自动识别类型+提取字段+列出缺失。"""
+    return field_record.analyze(req.text, req.ocr_text, req.transcript, req.metadata)
+
+
+@app.post("/api/field-record/generate")
+def field_record_generate(req: FieldRecordGenerateReq):
+    """生成现场记录 Word。"""
+    if not req.doc_type:
+        raise HTTPException(400, "需要 doc_type")
+    try:
+        content, missing = field_record.generate(req.doc_type, req.data or {})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    import io
+    from urllib.parse import quote
+    fname = f"繁工AI_{req.doc_type}_{datetime_now()}.docx"
+    return StreamingResponse(io.BytesIO(content), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                             headers={"Content-Disposition": f'attachment; filename="field_record.docx"; filename*=UTF-8''' + quote(fname)})
 
 
 @app.get("/api/archive/status")

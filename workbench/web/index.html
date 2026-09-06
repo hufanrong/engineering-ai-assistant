@@ -247,6 +247,20 @@
   <!-- ⑥ 方案生成（工程资料 Word） -->
   <div class="panel" id="p-docgen">
     <h2>工程资料生成（施工方案 / 吊装方案 / 交底 / 验收记录）</h2>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 style="margin:0 0 6px;font-size:15px">现场记录快速生成（v0.1.33）</h3>
+      <div class="msg" style="margin-bottom:6px">粘贴手机端现场文字/OCR结果/语音转写，自动识别记录类型（开箱/隐蔽/施工日志等）+提取关键字段+列出缺失，补充后生成 Word。</div>
+      <textarea id="frText" placeholder="粘贴现场记录文字，如：2026年9月6日 1号车间 P-101离心泵开箱验收，箱单号BX-001，验收人张三，结果合格，设备外观完好…" style="width:100%;min-height:80px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;box-sizing:border-box;font-size:13px;resize:vertical"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button class="btn" id="btnFrAnalyze">自动分析</button>
+        <span id="frType" style="font-size:13px;color:var(--accent);font-weight:600"></span>
+        <span id="frMissing" style="font-size:12px;color:#C0392B"></span>
+      </div>
+      <div id="frForm" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn orange" id="btnFrGen" style="display:none">生成 Word 记录</button>
+      </div>
+    </div>
     <div class="msg" style="margin-bottom:8px">选择方案类型 → 自动从解析库预填车间设备 → 填写关键数据（缺项会提示）→ 生成 Word 下载，人工打印签字。规范依据内置，可人工补充。</div>
     <div class="row" style="margin-bottom:10px">
       <select id="dgType" style="max-width:200px"></select>

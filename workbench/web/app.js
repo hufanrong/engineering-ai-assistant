@@ -1444,3 +1444,77 @@ function genDo() {
   }
   $("btnVerRefresh").addEventListener("click", loadVersions);
   loadVersions();
+
+  // ---------- 现场记录快速生成（v0.1.33） ----------
+  var frCurrentType = "";
+  var frCurrentData = {};
+  $("btnFrAnalyze").addEventListener("click", function () {
+    var text = $("frText").value.trim();
+    if (!text) { alert("请先粘贴现场记录文字"); return; }
+    $("frType").textContent = "分析中…";
+    $("frMissing").textContent = "";
+    fetch("/api/field-record/analyze", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.doc_type) {
+          $("frType").textContent = "未能自动识别类型，请手动选择";
+          $("frForm").innerHTML = '<select id="frTypeSel" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px">' +
+            dgTypes.map(function (t) { return '<option value="' + esc(t.key) + '">' + esc(t.label) + "</option>"; }).join("") + "</select>";
+          frCurrentType = dgTypes[0].key;
+          frCurrentData = d.data || {};
+          $("btnFrGen").style.display = "inline-block";
+          return;
+        }
+        frCurrentType = d.doc_type;
+        frCurrentData = d.data || {};
+        $("frType").textContent = "识别为：" + d.doc_type + "（置信 " + Math.round((d.confidence || 0) * 100) + "%，关键词：" + (d.matched_keywords || []).join("、") + "）";
+        if (d.missing && d.missing.length) {
+          $("frMissing").textContent = "⚠ 缺失字段（生成时标红待补充）：" + d.missing.join("、");
+        } else {
+          $("frMissing").textContent = "✓ 必填字段齐全";
+          $("frMissing").style.color = "#52C41A";
+        }
+        // 渲染可编辑表单
+        var t = dgTypes.find(function (x) { return x.key === d.doc_type; });
+        var html = "";
+        if (t) {
+          var allFields = (t.required || []).concat((t.optional || []).filter(function (k) { return (t.required || []).indexOf(k) < 0; }));
+          allFields.forEach(function (k) {
+            var val = frCurrentData[k] || "";
+            var isMissing = (d.missing || []).indexOf(k) >= 0;
+            html += '<div style="margin-bottom:4px"><label style="font-size:12px;color:' + (isMissing ? "#C0392B" : "var(--text2)") + '">' + esc(k) + (isMissing ? " ⚠" : "") + "</label>" +
+              '<input class="fr-in" data-k="' + esc(k) + '" value="' + esc(val) + '" style="width:100%;padding:5px 8px;border:1px solid ' + (isMissing ? "#C0392B" : "var(--line)") + ';border-radius:6px;box-sizing:border-box;font-size:13px"></div>';
+          });
+        }
+        $("frForm").innerHTML = html;
+        $("btnFrGen").style.display = "inline-block";
+      })
+      .catch(function (e) { $("frType").textContent = "分析失败：" + e.message; });
+  });
+  $("btnFrGen").addEventListener("click", function () {
+    if (!frCurrentType) { alert("请先分析或选择记录类型"); return; }
+    // 收集表单输入
+    document.querySelectorAll(".fr-in").forEach(function (inp) {
+      frCurrentData[inp.getAttribute("data-k")] = inp.value.trim();
+    });
+    // 手动选择类型
+    var sel = document.getElementById("frTypeSel");
+    if (sel) frCurrentType = sel.value;
+    $("btnFrGen").textContent = "生成中…";
+    fetch("/api/field-record/generate", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_type: frCurrentType, data: frCurrentData }) })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || "生成失败"); });
+        return r.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = "繁工AI_" + frCurrentType + "_" + new Date().toISOString().slice(0, 10) + ".docx";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        $("btnFrGen").textContent = "生成 Word 记录";
+      })
+      .catch(function (e) { $("btnFrGen").textContent = "生成 Word 记录"; alert("生成失败：" + e.message); });
+  });
