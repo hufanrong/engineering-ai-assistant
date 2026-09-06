@@ -506,6 +506,52 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 货损报告专项（v0.1.56：设备数据联动——技术参数、损失情况、处理建议、索赔建议）
+    if doc_type == "货损报告" and devices:
+        first_dev = devices[0]
+        data["设备位号"] = first_dev["tag"]
+        data["设备名称"] = first_dev.get("name", "详见设备清单")
+        # 识别设备类型
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+        data["设备类型"] = eq_type
+        # 损失情况建议
+        damage_contents = _get_damage_content(eq_type)
+        data["损失情况建议"] = "\n".join(f"{i+1}. {c}" for i, c in enumerate(damage_contents))
+        data["损失情况"] = "开箱后发现设备外观有损伤（详见损失情况建议，需现场确认具体损失程度）"
+        data["损失程度"] = "待现场确认（轻微/一般/严重）"
+        # 处理建议
+        suggestions = _get_damage_suggestions(eq_type)
+        data["处理建议"] = "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions))
+        # 索赔建议
+        data["索赔建议"] = "1. 保留受损设备原始状态和影像资料\n2. 会同运输方/厂家共同确认损失程度\n3. 根据采购合同和运输保险条款提出索赔\n4. 要求厂家补发或维修受损部件"
+        # 责任方
+        data["责任方"] = "待确认（运输方/厂家/装卸方）"
+        # v0.1.56：设备技术参数联动
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            tech_params = []
+            for d in devices[:5]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"安装车间: {sd['workshop']}")
+                if sd.get("x") is not None and sd.get("y") is not None:
+                    params.append(f"安装坐标: ({sd['x']}, {sd['y']})")
+                if sd.get("z") is not None:
+                    params.append(f"安装标高: {sd['z']}m")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+            if tech_params:
+                data["货损设备参数"] = "\n".join(tech_params)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
@@ -859,6 +905,48 @@ def _get_change_suggestions(eq_type: str) -> list:
     suggestions.extend(type_suggestions.get(eq_type, ["变更后重新核对设备安装要求", "变更后重新进行相关专业设计"]))
     return suggestions
 
+
+
+def _get_damage_content(eq_type: str) -> list:
+    """v0.1.56：根据设备类型生成损失情况建议。"""
+    type_content = {
+        "泵": ["泵体外壳有无磕碰变形", "泵轴有无弯曲变形", "机械密封有无损坏泄漏", "联轴器有无变形损坏", "油漆涂层有无脱落锈蚀"],
+        "压缩机": ["压缩机机身有无磕碰变形", "曲轴有无弯曲变形", "气缸有无变形损伤", "气阀组件有无损坏", "润滑油系统有无泄漏"],
+        "塔器": ["塔器筒体有无凹陷变形", "塔器法兰密封面有无损伤", "塔器接管有无变形", "塔器内件有无损坏", "塔器防腐层有无脱落"],
+        "换热器": ["换热器壳体有无磕碰变形", "换热器管板有无损伤", "换热管有无变形堵塞", "换热器法兰密封面有无损伤", "换热器保温层有无损坏"],
+        "容器": ["容器筒体有无凹陷变形", "容器法兰密封面有无损伤", "容器接管有无变形", "容器内件有无损坏", "容器防腐层有无脱落"],
+        "风机": ["风机机壳有无磕碰变形", "风机叶轮有无变形损坏", "风机轴承有无损坏", "风机皮带轮有无变形", "风机防护罩有无损坏"],
+        "电机": ["电机外壳有无磕碰变形", "电机轴有无弯曲变形", "电机接线盒有无损坏", "电机风扇有无损坏", "电机油漆涂层有无脱落"],
+        "阀门": ["阀门阀体有无裂纹砂眼", "阀门法兰密封面有无损伤", "阀门阀杆有无弯曲变形", "阀门传动装置有无损坏", "阀门油漆涂层有无脱落"],
+        "储罐": ["储罐底板有无变形凹陷", "储罐壁板有无磕碰变形", "储罐接管有无变形", "储罐顶板有无损坏", "储罐防腐层有无脱落"],
+    }
+    return type_content.get(eq_type, ["设备外壳有无磕碰变形", "设备接口有无损伤", "设备油漆涂层有无脱落锈蚀"])
+
+
+def _get_damage_suggestions(eq_type: str) -> list:
+    """v0.1.56：根据设备类型生成货损处理建议。"""
+    base = [
+        "立即停止开箱，保护受损设备原始状态",
+        "对受损部位进行拍照和录像留存证据",
+        "会同运输方/厂家/监理共同确认损失程度",
+        "记录受损设备的位号、名称、数量、损失情况",
+        "根据损失程度确定维修、更换或退货方案",
+    ]
+    type_suggestions = {
+        "泵": ["泵轴弯曲需校直或更换", "机械密封损坏需更换密封组件", "泵体变形需厂家评估修复或更换", "联轴器损坏需更换"],
+        "压缩机": ["曲轴弯曲需校直或更换", "气缸变形需厂家评估修复", "气阀组件损坏需更换", "润滑油系统泄漏需修复"],
+        "塔器": ["筒体凹陷需整形修复或更换", "法兰密封面损伤需研磨修复", "接管变形需更换接管", "内件损坏需厂家更换"],
+        "换热器": ["壳体变形需整形修复", "管板损伤需厂家评估修复", "换热管变形需更换管束", "法兰密封面损伤需研磨修复"],
+        "容器": ["筒体凹陷需整形修复或更换", "法兰密封面损伤需研磨修复", "接管变形需更换接管", "内件损坏需厂家更换"],
+        "风机": ["机壳变形需整形修复", "叶轮变形需校动平衡或更换", "轴承损坏需更换轴承", "皮带轮变形需更换"],
+        "电机": ["外壳变形需整形修复", "轴弯曲需校直或更换", "接线盒损坏需更换", "绝缘受损需重新浸漆烘干"],
+        "阀门": ["阀体裂纹需更换阀门", "法兰密封面损伤需研磨修复", "阀杆弯曲需校直或更换", "传动装置损坏需更换"],
+        "储罐": ["底板变形需整形修复", "壁板凹陷需整形修复或更换", "接管变形需更换接管", "防腐层损坏需重新防腐"],
+    }
+    suggestions = list(base)
+    suggestions.extend(type_suggestions.get(eq_type, ["受损部件需厂家评估修复或更换"]))
+    return suggestions
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -1024,6 +1112,37 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         if data.get("处理建议"):
             add_h("五、处理建议")
             for line in str(data["处理建议"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+
+    # 货损报告专项（v0.1.56：设备数据联动章节）
+    if doc_type == "货损报告":
+        if data.get("货损设备参数"):
+            add_h("二、货损设备参数")
+            for line in str(data["货损设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("损失情况建议"):
+            add_h("三、损失情况检查")
+            for line in str(data["损失情况建议"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("处理建议"):
+            add_h("四、处理建议")
+            for line in str(data["处理建议"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("索赔建议"):
+            add_h("五、索赔建议")
+            for line in str(data["索赔建议"]).split("\n"):
                 if line.strip():
                     p = doc.add_paragraph()
                     r = p.add_run(line.strip())
