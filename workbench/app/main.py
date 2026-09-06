@@ -27,9 +27,10 @@ from . import archive
 from . import voice_transcribe
 from . import workshop_assign
 from . import device_workshop
+from . import tag_alias
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.30")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.31")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -773,6 +774,36 @@ def device_workshop_rebuild():
                     pass
     n = device_workshop.rebuild_from_excel(docs)
     return {"ok": True, "newly_assigned": n, "total": device_workshop.stats()["total"]}
+
+
+class TagAliasReq(BaseModel):
+    primary: str
+    alias: str
+
+
+@app.get("/api/tag-alias/list")
+def tag_alias_list():
+    """设计院编号↔厂家编号映射列表（v0.1.31）：已确认+待人工确认。"""
+    return {"confirmed": tag_alias.list_confirmed(), "pending": tag_alias.list_pending(),
+            "stats": tag_alias.stats()}
+
+
+@app.post("/api/tag-alias/confirm")
+def tag_alias_confirm(req: TagAliasReq):
+    """人工确认映射（待确认→已确认，重建图谱后生效）。"""
+    if not req.primary.strip() or not req.alias.strip():
+        raise HTTPException(400, "需要 primary 与 alias")
+    ok = tag_alias.confirm(req.primary, req.alias)
+    return {"ok": ok, "primary": req.primary, "alias": req.alias}
+
+
+@app.post("/api/tag-alias/reject")
+def tag_alias_reject(req: TagAliasReq):
+    """人工拒绝映射（从待确认移除）。"""
+    if not req.primary.strip() or not req.alias.strip():
+        raise HTTPException(400, "需要 primary 与 alias")
+    ok = tag_alias.reject(req.primary, req.alias)
+    return {"ok": ok}
 
 
 @app.get("/api/archive/status")

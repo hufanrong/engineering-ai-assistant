@@ -218,6 +218,16 @@
       </div>
       <div id="devWsList"></div>
     </div>
+    <div style="border-top:1px solid var(--line);margin:12px 0;padding-top:10px">
+      <h3 style="margin:0 0 6px">设计院编号↔厂家编号映射（v0.1.31）</h3>
+      <div class="msg" style="margin-bottom:6px">自动识别 CAD 块/台账行中同时标注的设计院位号与厂家编号，以设计院位号为主键合并；低置信映射进待人工确认，确认后重建图谱生效。</div>
+      <div class="row" style="margin-bottom:6px">
+        <button class="btn small" id="btnAliasRefresh">刷新映射</button>
+        <span style="font-size:12px;color:var(--text2)" id="aliasSummary"></span>
+      </div>
+      <div id="aliasPending" style="margin-bottom:8px"></div>
+      <div id="aliasConfirmed"></div>
+    </div>
     <div id="relDwgOut" style="margin-bottom:10px"></div>
     <select id="relWorkshop" style="max-width:260px;margin-bottom:8px">
       <option value="">— 选择车间查看详情 —</option>

@@ -152,6 +152,16 @@ def _equipment_from_cache(cache: dict) -> list:
             if tag:
                 out.append({"tag": tag, "where": "cad_block", "x": b.get("x"), "y": b.get("y"),
                             "block": b.get("block")})
+            # v0.1.31：CAD 块同时有位号+厂家编号 → 提取映射对
+            try:
+                from . import tag_alias
+                pair = tag_alias.detect_from_cad_block(attrs)
+                if pair:
+                    out.append({"tag": pair["primary"], "where": "cad_block",
+                                "x": b.get("x"), "y": b.get("y"), "block": b.get("block"),
+                                "_alias": pair["alias"], "_alias_source": "cad_block"})
+            except Exception:  # noqa: BLE001
+                pass
         # 图纸文本中的位号（标注/说明）；排除标题栏图号避免把图号当设备
         for m in _TAG_RE.finditer(text):
             if m.group(1) == title_no:
@@ -186,6 +196,19 @@ def _equipment_from_cache(cache: dict) -> list:
                     continue
                 row_ws = _norm_workshop(ws_hint) or ws
                 out.append({"tag": tag, "where": "excel_row", "workshop_hint": row_ws})
+                # v0.1.31：Excel 行同时有位号+厂家编号 → 提取映射对
+                try:
+                    from . import tag_alias
+                    if isinstance(row, dict):
+                        pair = tag_alias.detect_from_excel_row(row)
+                    else:
+                        pair = tag_alias.detect_from_excel_row(row, header)
+                    if pair:
+                        out.append({"tag": pair["primary"], "where": "excel_row",
+                                    "workshop_hint": row_ws, "_alias": pair["alias"],
+                                    "_alias_source": "excel_row"})
+                except Exception:  # noqa: BLE001
+                    pass
     else:
         for m in _TAG_RE.finditer(text):
             out.append({"tag": m.group(1), "where": "text"})
@@ -308,9 +331,26 @@ def build_relations(force: bool = False) -> dict:
     # ---- 设备汇总：位号 -> 出现的图纸/台账 + 车间 + 坐标 ----
     device_map = {}   # tag -> {...}
     human_confirm = []   # 跨车间/冲突待确认
+    # v0.1.31：收集别名对并登记（CAD/Excel 高置信直接确认，低置信待人工）
+    try:
+        from . import tag_alias
+        for _sha, _d in docs.items():
+            for _e in _d.get("equipments", []):
+                if _e.get("_alias"):
+                    tag_alias.add_alias(_e["tag"], _e["_alias"],
+                                         source=_e.get("_alias_source", "auto"),
+                                         confidence=0.8 if _e.get("_alias_source") == "cad_block" else 0.6,
+                                         evidence=f"{_d.get('file_name','')}")
+    except Exception:  # noqa: BLE001
+        pass
     for sha, d in docs.items():
         for e in d["equipments"]:
-            tag = e["tag"]
+            # v0.1.31：别名合并到主位号（以设计院位号为准）
+            try:
+                from . import tag_alias as _ta
+                tag = _ta.get_primary(e["tag"])
+            except Exception:  # noqa: BLE001
+                tag = e["tag"]
             dev = device_map.setdefault(tag, {
                 "tag": tag,
                 "in_files": [],        # [{file, workshop, where, x, y}]

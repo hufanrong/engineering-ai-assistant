@@ -1330,3 +1330,62 @@ function genDo() {
       .catch(function (e) { alert("失败：" + e.message); });
   });
   loadDeviceWorkshop();
+
+  // ---------- 设计院编号↔厂家编号映射（v0.1.31） ----------
+  function loadTagAlias() {
+    fetch("/api/tag-alias/list").then(function (r) { return r.json(); }).then(function (d) {
+      var st = d.stats || {};
+      $("aliasSummary").textContent = "已确认 " + (st.confirmed_primary || 0) + " 个主位号 / " +
+        (st.total_aliases || 0) + " 个别名 · 待确认 " + (st.pending || 0);
+      // 待确认
+      var pending = d.pending || [];
+      if (!pending.length) {
+        $("aliasPending").innerHTML = '<div class="empty">暂无待确认映射</div>';
+      } else {
+        var html = '<b style="color:#B45309">待人工确认（确认后重建图谱生效）</b><table><tr><th>设计院位号</th><th>厂家编号</th><th>来源</th><th>置信度</th><th>证据</th><th>操作</th></tr>';
+        pending.forEach(function (p) {
+          var src = { cad_block: "CAD块属性", excel_row: "台账行", auto: "自动" }[p.source] || p.source;
+          html += "<tr><td><b>" + esc(p.primary) + "</b></td><td>" + esc(p.alias) + "</td>" +
+            "<td>" + esc(src) + "</td><td>" + Math.round((p.confidence || 0) * 100) + "%</td>" +
+            "<td style='font-size:12px'>" + esc(p.evidence || "") + "</td>" +
+            '<td><button class="btn small aliasConfirm" data-p="' + esc(p.primary) + '" data-a="' + esc(p.alias) +
+            '" style="background:#52C41A;color:#fff">确认</button> ' +
+            '<button class="btn ghost small aliasReject" data-p="' + esc(p.primary) + '" data-a="' + esc(p.alias) + '">拒绝</button></td></tr>';
+        });
+        html += "</table>";
+        $("aliasPending").innerHTML = html;
+        Array.prototype.forEach.call(document.querySelectorAll(".aliasConfirm"), function (b) {
+          b.addEventListener("click", function () {
+            fetch("/api/tag-alias/confirm", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ primary: b.getAttribute("data-p"), alias: b.getAttribute("data-a") }) })
+              .then(function (r) { return r.json(); }).then(function () { loadTagAlias(); })
+              .catch(function (e) { alert("确认失败：" + e.message); });
+          });
+        });
+        Array.prototype.forEach.call(document.querySelectorAll(".aliasReject"), function (b) {
+          b.addEventListener("click", function () {
+            fetch("/api/tag-alias/reject", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ primary: b.getAttribute("data-p"), alias: b.getAttribute("data-a") }) })
+              .then(function (r) { return r.json(); }).then(function () { loadTagAlias(); })
+              .catch(function (e) { alert("拒绝失败：" + e.message); });
+          });
+        });
+      }
+      // 已确认
+      var confirmed = d.confirmed || [];
+      if (!confirmed.length) {
+        $("aliasConfirmed").innerHTML = "";
+      } else {
+        var html2 = '<b>已确认映射</b><table><tr><th>设计院位号（主）</th><th>厂家编号（别名）</th><th>来源</th></tr>';
+        confirmed.forEach(function (c) {
+          var src = { cad_block: "CAD块属性", excel_row: "台账行", manual: "人工", auto: "自动" }[c.source] || c.source;
+          html2 += "<tr><td><b>" + esc(c.primary) + "</b></td><td>" + (c.aliases || []).map(esc).join("、") + "</td>" +
+            "<td>" + esc(src) + "</td></tr>";
+        });
+        html2 += "</table>";
+        $("aliasConfirmed").innerHTML = html2;
+      }
+    }).catch(function (e) { $("aliasPending").innerHTML = '<div style="color:#C0392B">加载失败：' + esc(e.message) + "</div>"; });
+  }
+  $("btnAliasRefresh").addEventListener("click", loadTagAlias);
+  loadTagAlias();
