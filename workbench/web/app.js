@@ -2351,3 +2351,93 @@ document.addEventListener("DOMContentLoaded", function () {
   var b = document.getElementById("btn3dGenerate");
   if (b) b.addEventListener("click", view3dGenerate);
 });
+
+// v0.1.63：多电脑并库设备关系合并
+function relMergeFromFile() {
+  var path = document.getElementById("relMergeFilePath").value;
+  var node = document.getElementById("relMergeNodeName").value || "unknown";
+  var strategy = document.getElementById("relMergeStrategy").value;
+  if (!path) { alert("请输入关系图谱文件路径"); return; }
+  if (!confirm("确认从文件合并关系图谱？冲突策略：" + strategy)) return;
+  fetch("/api/relations-merge/merge-file", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({filepath: path, node_name: node, conflict_strategy: strategy})}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) {
+      var l = d.log;
+      alert("合并完成！\\n源设备: " + l.source_devices + "台\\n合并: " + l.merged_devices + "台\\n跳过: " + l.skipped_duplicate + "台\\n冲突: " + l.conflicts + "个\\n合并后设备: " + l.total_devices_after + "台");
+      relMergeLoadStats();
+      relMergeLoadPending();
+      relMergeLoadLog();
+    } else {
+      alert("合并失败：" + JSON.stringify(d));
+    }
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function relMergeLoadStats() {
+  fetch("/api/relations-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("relMergeStats");
+    el.style.display = "block";
+    el.innerHTML = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并' + d.total_devices_merged + '台 | 跳过' + d.total_devices_skipped + '台 | 冲突' + d.total_conflicts + '个 | 当前设备' + d.current_total_devices + '台 | 待处理' + d.pending_conflicts + '个';
+  }).catch(function(){});
+}
+function relMergeLoadPending() {
+  fetch("/api/relations-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("relMergePending");
+    var pending = d.pending || [];
+    var active = pending.filter(function(p){return p.status === "pending";});
+    if (active.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + active.length + '个）：</strong><br>';
+    active.forEach(function(p, i) {
+      html += '<div style="padding:4px;border-bottom:1px solid var(--line)">';
+      html += '设备: ' + esc(p.device_tag) + ' | 类型: ' + esc(p.conflict_type) + '（来源：' + esc(p.node) + '）<br>';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="relMergeResolve(' + i + ',\'use_source\')">用源数据</button> ';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="relMergeResolve(' + i + ',\'keep_existing\')">保留现有</button> ';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="relMergeResolve(' + i + ',\'skip\')">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function relMergeResolve(index, decision) {
+  fetch("/api/relations-merge/resolve", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({index: index, decision: decision})}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("处理完成：" + d.result); relMergeLoadPending(); relMergeLoadStats(); }
+    else { alert("处理失败：" + JSON.stringify(d)); }
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function relMergeCheckIntegrity() {
+  fetch("/api/relations-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("relMergeIntegrity");
+    el.style.display = "block";
+    var html = '<strong>完整性检查：</strong>设备' + d.total_devices + '台 | 问题' + d.issues_count + '个<br>';
+    html += '无文件设备: ' + d.devices_without_files + ' | 无车间设备: ' + d.devices_without_workshop + ' | 孤立设备: ' + d.isolated_devices + ' | 待人工确认: ' + d.pending_human_confirm;
+    if (d.issues && d.issues.length > 0) {
+      html += '<br><strong>问题详情：</strong><br>';
+      d.issues.forEach(function(issue) {
+        html += '- ' + esc(issue.type) + ': ' + (issue.devices ? issue.devices.join(', ') : issue.count || '') + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(e){ alert("检查失败：" + e.message); });
+}
+function relMergeLoadLog() {
+  fetch("/api/relations-merge/log?limit=10").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("relMergeLog");
+    var log = d.log || [];
+    if (log.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    var html = '<strong>最近合并记录：</strong><br>';
+    log.reverse().forEach(function(l) {
+      html += l.timestamp.substring(0,16) + ' | ' + esc(l.node_name) + ' | 源' + l.source_devices + '台 合并' + l.merged_devices + ' 跳过' + l.skipped_duplicate + ' 冲突' + l.conflicts + '<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnRelMergeFile");
+  if (b1) b1.addEventListener("click", relMergeFromFile);
+  var b2 = document.getElementById("btnRelMergeStats");
+  if (b2) b2.addEventListener("click", function() { relMergeLoadStats(); relMergeLoadPending(); relMergeLoadLog(); });
+  var b3 = document.getElementById("btnRelMergeIntegrity");
+  if (b3) b3.addEventListener("click", relMergeCheckIntegrity);
+});

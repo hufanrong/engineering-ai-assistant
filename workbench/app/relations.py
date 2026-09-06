@@ -785,3 +785,10 @@ def load_relations() -> dict:
         except Exception:  # noqa: BLE001
             return {"stats": {}, "workshops": [], "devices": [], "human_confirm": []}
     return {"stats": {}, "workshops": [], "devices": [], "human_confirm": []}
+
+
+def save_relations(relations: dict):
+    """v0.1.63：保存关系图谱到文件。"""
+    _ensure()
+    with open(RELATIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(relations, f, ensure_ascii=False, indent=2)

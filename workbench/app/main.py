@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.62")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.63")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1493,6 +1493,70 @@ def archive_merge_log(limit: int = 20):
     from . import archive_merge as _am
     return {"ok": True, "log": _am.list_merge_log(limit)}
 
+
+
+@app.post("/api/relations-merge/merge")
+def relations_merge_merge(body: dict):
+    """v0.1.63：合并源关系图谱到本地。"""
+    from . import relations_merge as _rm
+    source_relations = body.get("source_relations", {})
+    node_name = body.get("node_name", "unknown")
+    conflict_strategy = body.get("conflict_strategy", "latest")
+    if not source_relations:
+        raise HTTPException(status_code=400, detail="缺少source_relations")
+    return {"ok": True, **_rm.merge_relations(source_relations, node_name, conflict_strategy)}
+
+
+@app.post("/api/relations-merge/merge-file")
+def relations_merge_merge_file(body: dict):
+    """v0.1.63：从JSON文件合并关系图谱。"""
+    from . import relations_merge as _rm
+    filepath = body.get("filepath", "")
+    node_name = body.get("node_name", "unknown")
+    conflict_strategy = body.get("conflict_strategy", "latest")
+    if not filepath:
+        raise HTTPException(status_code=400, detail="缺少filepath")
+    source = _rm.load_relations_from_file(filepath)
+    if "error" in source:
+        return {"ok": False, **source}
+    return {"ok": True, **_rm.merge_relations(source, node_name, conflict_strategy)}
+
+
+@app.get("/api/relations-merge/pending")
+def relations_merge_pending():
+    """v0.1.63：列出待人工确认的冲突。"""
+    from . import relations_merge as _rm
+    return {"ok": True, "pending": _rm.list_pending()}
+
+
+@app.post("/api/relations-merge/resolve")
+def relations_merge_resolve(body: dict):
+    """v0.1.63：处理待人工确认的冲突。"""
+    from . import relations_merge as _rm
+    index = body.get("index", -1)
+    decision = body.get("decision", "")
+    return {"ok": True, **_rm.resolve_pending(index, decision)}
+
+
+@app.get("/api/relations-merge/log")
+def relations_merge_log(limit: int = 20):
+    """v0.1.63：列出合并日志。"""
+    from . import relations_merge as _rm
+    return {"ok": True, "log": _rm.list_merge_log(limit)}
+
+
+@app.get("/api/relations-merge/stats")
+def relations_merge_stats():
+    """v0.1.63：合并统计信息。"""
+    from . import relations_merge as _rm
+    return {"ok": True, **_rm.merge_stats()}
+
+
+@app.get("/api/relations-merge/integrity")
+def relations_merge_integrity():
+    """v0.1.63：检查关系图谱完整性。"""
+    from . import relations_merge as _rm
+    return {"ok": True, **_rm.check_relations_integrity()}
 
 @app.get("/api/archive-merge/stats")
 def archive_merge_stats():
