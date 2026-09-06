@@ -369,6 +369,52 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 开箱验收记录专项（v0.1.52：设备数据联动——技术参数、箱单信息、外观检查、随机资料）
+    if doc_type == "开箱验收记录" and devices:
+        data["涉及设备"] = "、".join(d["tag"] for d in devices[:10]) + (f" 等{len(devices)}台" if len(devices) > 10 else "")
+        # 识别设备类型
+        from . import equipment_types as _et
+        eq_type = _et.get_equipment_type_from_devices(devices)
+        data["设备类型"] = eq_type
+        # 设备名称和数量
+        first_dev = devices[0]
+        data["设备名称"] = first_dev.get("name", f"{eq_type}（详见设备清单）")
+        data["数量"] = str(len(devices)) + "台"
+        # 外观检查要点（根据设备类型）
+        inspection_points = _get_inspection_points(eq_type)
+        data["外观检查要点"] = "\n".join(f"{i+1}. {p}" for i, p in enumerate(inspection_points))
+        data["外观检查情况"] = "开箱后设备外观完好，无锈蚀、变形、损坏（详见外观检查要点）"
+        # 随机资料清单（根据设备类型）
+        random_docs = _get_random_docs(eq_type)
+        data["随机资料清单"] = "\n".join(f"{i+1}. {d}" for i, d in enumerate(random_docs))
+        data["随机资料"] = "、".join(random_docs[:5]) + ("等" if len(random_docs) > 5 else "")
+        # 验收结果默认
+        data["验收结果"] = "合格（设备型号规格符合设计，外观完好，随机资料齐全）"
+        # v0.1.52：设备技术参数联动
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            tech_params = []
+            for d in devices[:5]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"安装车间: {sd['workshop']}")
+                if sd.get("x") is not None and sd.get("y") is not None:
+                    params.append(f"安装坐标: ({sd['x']}, {sd['y']})")
+                if sd.get("z") is not None:
+                    params.append(f"安装标高: {sd['z']}m")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+            if tech_params:
+                data["验收设备参数"] = "\n".join(tech_params)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
         if devices:
@@ -508,6 +554,56 @@ def _get_quality_points(eq_type: str) -> list:
     points.extend(type_quality.get(eq_type, ["按设备说明书和施工方案执行质量控制"]))
     return points
 
+
+
+def _get_inspection_points(eq_type: str) -> list:
+    """v0.1.52：根据设备类型生成外观检查要点。"""
+    base = [
+        "检查设备外观有无锈蚀、变形、磕碰损伤",
+        "检查设备铭牌清晰，型号规格与设计一致",
+        "检查设备接口法兰有无损伤，密封面完好",
+        "检查设备地脚螺栓孔位置与基础一致",
+        "检查设备油漆涂层完好，无脱落",
+    ]
+    type_inspection = {
+        "泵": ["检查泵轴转动灵活，无卡涩", "检查机械密封完好，无泄漏", "检查联轴器对中良好", "检查泵进出口法兰密封面完好"],
+        "压缩机": ["检查压缩机曲轴转动灵活", "检查气缸内壁无锈蚀", "检查气阀组件完好", "检查润滑油系统清洁"],
+        "塔器": ["检查塔器筒体圆度和直线度", "检查塔盘支撑圈水平度", "检查人孔法兰密封面完好", "检查接管方位与图纸一致"],
+        "换热器": ["检查换热器管束抽芯检查", "检查管板和折流板完好", "检查壳程和管程法兰密封面", "检查换热管无变形堵塞"],
+        "容器": ["检查容器焊缝外观无缺陷", "检查容器法兰密封面完好", "检查接管方位与图纸一致", "检查内件安装牢固"],
+        "风机": ["检查风机叶轮转动灵活无摩擦", "检查风机机壳无变形", "检查皮带轮和联轴器完好", "检查轴承座无渗漏"],
+        "电机": ["检查电机轴转动灵活", "检查电机接线盒完好", "检查电机风扇和防护罩齐全", "检查电机绝缘电阻合格"],
+        "阀门": ["检查阀门阀体无裂纹砂眼", "检查阀门法兰密封面完好", "检查阀门开关灵活无卡涩", "检查阀门流向标识清晰"],
+        "储罐": ["检查储罐底板和壁板外观", "检查储罐焊缝外观无缺陷", "检查储罐接管方位正确", "检查储罐内防腐层完好"],
+    }
+    points = list(base)
+    points.extend(type_inspection.get(eq_type, ["按设备说明书和装箱单检查"]))
+    return points
+
+
+def _get_random_docs(eq_type: str) -> list:
+    """v0.1.52：根据设备类型生成随机资料清单。"""
+    base = [
+        "产品合格证",
+        "产品说明书",
+        "装箱单",
+        "出厂检验报告",
+    ]
+    type_docs = {
+        "泵": ["泵性能曲线图", "机械密封安装图", "泵安装尺寸图", "易损件清单"],
+        "压缩机": ["压缩机性能曲线图", "润滑油系统图", "气阀组件图", "安装运行维护手册"],
+        "塔器": ["塔器制造竣工图", "塔盘安装图", "水压试验报告", "无损检测报告"],
+        "换热器": ["换热器制造竣工图", "管束装配图", "水压试验报告", "换热管材质证明"],
+        "容器": ["容器制造竣工图", "水压试验报告", "无损检测报告", "材质证明书"],
+        "风机": ["风机性能曲线图", "风机安装图", "轴承润滑说明", "易损件清单"],
+        "电机": ["电机接线图", "电机性能参数表", "绝缘电阻测试报告", "安装维护说明"],
+        "阀门": ["阀门试压报告", "阀门安装说明书", "阀门材质证明", "易损件清单"],
+        "储罐": ["储罐制造竣工图", "焊缝检测报告", "充水试验报告", "防腐层检测报告"],
+    }
+    docs = list(base)
+    docs.extend(type_docs.get(eq_type, ["按设备装箱单清点"]))
+    return docs
+
 def fill_template(doc_type: str, data: dict) -> bytes:
     """按模板生成 .docx 并返回字节流。缺字段用『待补充』占位并标注。"""
     from docx import Document
@@ -588,6 +684,30 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         if data.get("质量控制要点"):
             add_h("五、质量控制要点")
             for line in str(data["质量控制要点"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+
+    # 开箱验收记录专项（v0.1.52：设备数据联动章节）
+    if doc_type == "开箱验收记录":
+        if data.get("验收设备参数"):
+            add_h("二、验收设备参数")
+            for line in str(data["验收设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("外观检查要点"):
+            add_h("三、外观检查要点")
+            for line in str(data["外观检查要点"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("随机资料清单"):
+            add_h("四、随机资料清单")
+            for line in str(data["随机资料清单"]).split("\n"):
                 if line.strip():
                     p = doc.add_paragraph()
                     r = p.add_run(line.strip())
