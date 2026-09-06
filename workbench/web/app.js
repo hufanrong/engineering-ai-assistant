@@ -1166,3 +1166,80 @@ function genDo() {
     });
   }
 
+
+  // ---------- 车间资料自动划分（v0.1.27） ----------
+  function loadWorkshopList() {
+    fetch("/api/workshop/list").then(function (r) { return r.json(); }).then(function (d) {
+      var groups = d.groups || {};
+      var keys = Object.keys(groups).sort(function (a, b) {
+        if (a === "未归车间") return 1; if (b === "未归车间") return -1;
+        return a.localeCompare(b);
+      });
+      var total = 0, unassigned = 0;
+      keys.forEach(function (k) { total += groups[k].length; if (k === "未归车间") unassigned = groups[k].length; });
+      $("wsSummary").textContent = "共 " + total + " 个文件 · 已归 " + (total - unassigned) + " · 未归 " + unassigned;
+      // 下拉车间选项
+      var sel = $("wsBatchSel");
+      var cur = sel.value;
+      sel.innerHTML = '<option value="">选择目标车间</option>' +
+        keys.filter(function (k) { return k !== "未归车间"; }).map(function (k) { return '<option value="' + esc(k) + '">' + esc(k) + "</option>"; }).join("") +
+        '<option value="__new">+ 新建车间</option>';
+      sel.value = cur;
+      var html = "";
+      keys.forEach(function (k) {
+        var items = groups[k];
+        var st = k === "未归车间" ? '<span class="st failed">未归车间</span>' : '<span class="st parsed">' + esc(k) + "</span>";
+        html += '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px">' +
+          "<b>" + st + " · " + items.length + " 个文件</b>" +
+          (k === "未归车间" ? '<button class="btn small btnWsAssignAll" data-ws="__unassigned">全部指定车间</button>' : "") +
+          "</div>";
+        html += '<table><tr><th style="width:24px"></th><th>文件</th><th>识别来源</th><th>置信度</th><th>候选</th><th>操作</th></tr>';
+        items.slice(0, 30).forEach(function (it) {
+          var src = { manual: "人工", cad_title: "CAD标题栏", filename: "文件名", content: "正文", content_multi: "正文(多车间)", none: "未识别" }[it.source] || it.source;
+          var conf = Math.round((it.confidence || 0) * 100) + "%";
+          var cands = (it.candidates || []).join("、") || "—";
+          html += '<tr><td><input type="checkbox" class="wsCheck" value="' + esc(it.sha256) + '"></td>' +
+            '<td style="font-size:12px">' + esc(it.file_name) + "</td>" +
+            '<td style="font-size:12px">' + esc(src) + "</td>" +
+            '<td style="font-size:12px">' + conf + "</td>" +
+            '<td style="font-size:12px">' + esc(cands) + "</td>" +
+            '<td><button class="btn small btnWsAssign" data-sha="' + esc(it.sha256) + '" data-name="' + esc(it.file_name) + '">指定车间</button></td></tr>';
+        });
+        if (items.length > 30) html += '<tr><td colspan="6" style="font-size:12px;color:var(--text2)">仅显示前 30 个，共 ' + items.length + " 个</td></tr>";
+        html += "</table></div>";
+      });
+      $("wsList").innerHTML = html;
+      Array.prototype.forEach.call(document.querySelectorAll(".btnWsAssign"), function (b) {
+        b.addEventListener("click", function () {
+          var ws = prompt("指定车间（如：3号车间）：");
+          if (!ws) return;
+          fetch("/api/workshop/assign", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sha: b.getAttribute("data-sha"), workshop: ws }) })
+            .then(function (r) { return r.json(); }).then(function () { loadWorkshopList(); })
+            .catch(function (e) { alert("指定失败：" + e.message); });
+        });
+      });
+    }).catch(function (e) { $("wsList").innerHTML = '<div style="color:#C0392B">读取失败：' + esc(e.message) + "</div>"; });
+  }
+  $("btnWsRefresh").addEventListener("click", loadWorkshopList);
+  $("btnWsReAuto").addEventListener("click", function () {
+    fetch("/api/workshop/re-auto", { method: "POST" }).then(function (r) { return r.json(); }).then(function (d) {
+      alert("重新识别完成，新归车间 " + d.newly_assigned + " 个");
+      loadWorkshopList();
+    });
+  });
+  $("btnWsBatch").addEventListener("click", function () {
+    var shas = Array.prototype.slice.call(document.querySelectorAll(".wsCheck:checked")).map(function (c) { return c.value; });
+    if (!shas.length) { alert("请先勾选文件"); return; }
+    var ws = $("wsBatchSel").value;
+    if (ws === "__new") { ws = prompt("输入新车间名（如：3号车间）"); }
+    if (!ws) { alert("请选择目标车间"); return; }
+    fetch("/api/workshop/batch-assign", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shas: shas, workshop: ws }) })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        alert("已批量指定 " + d.assigned + " 个文件到 " + ws + "（重建图谱后生效）");
+        loadWorkshopList();
+      });
+  });
+  loadWorkshopList();

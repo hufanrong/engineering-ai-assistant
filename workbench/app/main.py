@@ -25,9 +25,10 @@ from . import platform_store
 from . import docplan
 from . import archive
 from . import voice_transcribe
+from . import workshop_assign
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.26")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.27")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -695,6 +696,46 @@ async def library_import(file: UploadFile = File(...)):
 
 
 # ---------- 平台级规范库（v0.1.10） ----------
+
+class WorkshopAssignReq(BaseModel):
+    sha: str
+    workshop: str
+
+
+class WorkshopBatchReq(BaseModel):
+    shas: list
+    workshop: str
+
+
+@app.get("/api/workshop/list")
+def workshop_list():
+    """车间资料划分：按车间分组 + 未归车间清单（v0.1.27）。"""
+    return {"groups": workshop_assign.list_by_workshop()}
+
+
+@app.post("/api/workshop/assign")
+def workshop_assign_one(req: WorkshopAssignReq):
+    """单文件人工指定车间（重建图谱后生效）。"""
+    if not req.sha.strip() or not req.workshop.strip():
+        raise HTTPException(400, "需要 sha 与车间")
+    return {"ok": True, "assigned": workshop_assign.manual_assign(req.sha, req.workshop)}
+
+
+@app.post("/api/workshop/batch-assign")
+def workshop_batch_assign(req: WorkshopBatchReq):
+    """批量指定车间。"""
+    if not req.shas or not req.workshop.strip():
+        raise HTTPException(400, "需要 shas 与车间")
+    n = workshop_assign.batch_assign(req.shas, req.workshop)
+    return {"ok": True, "assigned": n}
+
+
+@app.post("/api/workshop/re-auto")
+def workshop_re_auto():
+    """对未归车间的文件重新自动识别。"""
+    n = workshop_assign.re_auto_unassigned()
+    return {"ok": True, "newly_assigned": n}
+
 
 @app.get("/api/archive/status")
 def archive_status():

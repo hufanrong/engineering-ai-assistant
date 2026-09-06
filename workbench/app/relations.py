@@ -264,6 +264,14 @@ def build_relations(force: bool = False) -> dict:
                 ws = cands[0] if cands else None
 
         doc_type = _classify(fname, tb, text)
+        # v0.1.27：车间登记优先（人工 > CAD标题栏 > 文件名 > 正文）
+        try:
+            from . import workshop_assign
+            _assigned = workshop_assign.get_workshop(sha)
+            if _assigned:
+                ws = _assigned
+        except Exception:  # noqa: BLE001
+            pass
         eqs = _equipment_from_cache(cache)
         sp = (cache.get("structure") or {}).get("spatial") or {}
         docs[sha] = {

@@ -101,6 +101,13 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 # 无论是否成功向量化都进上传队列（云端合并保留原文+解析）
                 upload_queue.enqueue(res)
                 _save_parsed_cache(res)
+                # v0.1.27：解析后自动归车间（人工登记不覆盖）
+                try:
+                    from . import workshop_assign
+                    workshop_assign.assign_workshop(res.sha256, res.file_name, res.text or "",
+                                                    res.structure or {})
+                except Exception:  # noqa: BLE001
+                    pass
             else:
                 stats["skipped" if res.status == "skipped" else "failed"] += 1
 

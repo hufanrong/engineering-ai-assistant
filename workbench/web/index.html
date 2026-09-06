@@ -118,6 +118,18 @@
       <div class="msg" id="uploadFilesMsg"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2>车间资料自动划分（v0.1.27）</h2>
+      <div class="msg" style="margin-bottom:8px">上传/扫描后自动识别车间（CAD标题栏＞文件名＞正文关键词），无法确认的进『未归车间』；可单文件或批量人工指定车间，重建图谱后生效。</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" id="btnWsRefresh">刷新车间划分</button>
+        <button class="btn ghost" id="btnWsReAuto">重新自动识别未归车间</button>
+        <button class="btn orange" id="btnWsBatch">批量指定所选车间</button>
+        <select id="wsBatchSel" style="max-width:180px"><option value="">选择目标车间</option></select>
+        <span style="font-size:12px;color:var(--text2)" id="wsSummary"></span>
+      </div>
+      <div id="wsList"></div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
       <h2>文件夹批量上传（v0.1.22）</h2>
       <label>选择多个文件夹，或把文件夹直接拖到下面区域。自动分批次后台上传（每批 20 个），切换页面不断；关掉页面后已传完的文件已入库，重开后重新选择文件夹会自动跳过已传的。</label>
       <div id="dropZone" style="border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--text2);margin-top:8px;cursor:pointer">
