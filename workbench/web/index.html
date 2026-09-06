@@ -514,6 +514,21 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.70：设备安装位置与技术交底联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与技术交底联动（v0.1.70）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成技术交底六要素：工程概况、施工准备、施工工艺、质量标准、安全注意事项、环保要求。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="disclosureDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnDisclosureGenerate" style="background:#1E5AA8">生成技术交底</button>
+    <button class="btn" id="btnDisclosureList">交底列表</button>
+    <button class="btn" id="btnDisclosureStats">统计</button>
+  </div>
+  <div id="disclosureStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="disclosureList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="disclosureDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.69：多电脑并库施工进度合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库施工进度合并（v0.1.69）</h3>

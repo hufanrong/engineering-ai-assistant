@@ -2911,3 +2911,65 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnScheduleMergeIntegrity");
   if (b4) b4.addEventListener("click", scheduleMergeLoadIntegrity);
 });
+
+// v0.1.70：设备安装位置与技术交底联动
+function disclosureGenerate() {
+  var tag = document.getElementById("disclosureDeviceTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  fetch("/api/technical-disclosure/generate?tag=" + encodeURIComponent(tag)).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("disclosureDetail");
+    el.style.display = "block";
+    var html = '<strong>技术交底 - ' + esc(d.tag) + ' ' + esc(d.name || '') + '</strong><br>';
+    html += '类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配');
+    if (d.elevation != null) html += ' | 标高: ' + d.elevation + 'm';
+    html += '<br>';
+    html += '<hr style="margin:6px 0"><strong>一、工程概况</strong><br>';
+    (d.project_overview || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>二、施工准备</strong><br>';
+    (d.construction_preparation || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>三、施工工艺</strong><br>';
+    (d.construction_process || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>四、质量标准</strong><br>';
+    (d.quality_standards || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>五、安全注意事项</strong><br>';
+    (d.safety_points || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>六、环保要求</strong><br>';
+    (d.environmental_points || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function disclosureLoadList() {
+  fetch("/api/technical-disclosure/list").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("disclosureList");
+    var list = d.disclosures || [];
+    if (list.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无已生成的交底</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>已生成交底（' + list.length + '个）：</strong><br>';
+    list.forEach(function(item) {
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'disclosureDeviceTag\').value=\'' + item.tag + '\';disclosureGenerate();" style="color:#1E5AA8">' + item.tag + '</a> ' + esc(item.name || '') + ' (' + esc(item.type || '') + '/' + esc(item.workshop || '') + ')<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function disclosureLoadStats() {
+  fetch("/api/technical-disclosure/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("disclosureStats");
+    el.style.display = "block";
+    if (d.total_disclosures === 0) { el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    var html = '<strong>交底统计：</strong>已生成' + d.total_disclosures + '个 / 总设备' + d.total_devices + '台（覆盖率' + d.coverage_percent + '%）<br>';
+    if (d.type_count) {
+      html += '<strong>按类型：</strong>';
+      for (var k in d.type_count) { html += esc(k) + ':' + d.type_count[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnDisclosureGenerate");
+  if (b1) b1.addEventListener("click", disclosureGenerate);
+  var b2 = document.getElementById("btnDisclosureList");
+  if (b2) b2.addEventListener("click", disclosureLoadList);
+  var b3 = document.getElementById("btnDisclosureStats");
+  if (b3) b3.addEventListener("click", disclosureLoadStats);
+});

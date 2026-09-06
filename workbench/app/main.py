@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.69")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.70")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1798,6 +1798,34 @@ def schedule_merge_stats():
     from . import schedule_merge as _sm
     return {"ok": True, **_sm.merge_stats()}
 
+
+
+@app.get("/api/technical-disclosure/generate")
+def technical_disclosure_generate(tag: str):
+    """v0.1.70：生成设备技术交底。"""
+    from . import technical_disclosure as _td
+    return {"ok": True, **_td.generate_technical_disclosure(tag)}
+
+
+@app.get("/api/technical-disclosure/list")
+def technical_disclosure_list():
+    """v0.1.70：列出已生成的技术交底。"""
+    from . import technical_disclosure as _td
+    return {"ok": True, "disclosures": _td.list_disclosures()}
+
+
+@app.get("/api/technical-disclosure/stats")
+def technical_disclosure_stats():
+    """v0.1.70：获取技术交底统计。"""
+    from . import technical_disclosure as _td
+    return {"ok": True, **_td.get_disclosure_stats()}
+
+
+@app.get("/api/technical-disclosure/template")
+def technical_disclosure_template(type: str = ""):
+    """v0.1.70：获取设备类型技术交底模板。"""
+    from . import technical_disclosure as _td
+    return {"ok": True, "template": _td.get_disclosure_template(type)}
 
 @app.get("/api/schedule-merge/integrity")
 def schedule_merge_integrity():
