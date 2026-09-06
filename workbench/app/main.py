@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.65")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.66")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1618,6 +1618,70 @@ def installation_plan_list():
     from . import installation_plan as _ip
     return {"ok": True, "plans": _ip.list_installation_plans()}
 
+
+
+@app.post("/api/spatial-merge/merge")
+def spatial_merge_merge(body: dict):
+    """v0.1.66：合并源空间模型到本地。"""
+    from . import spatial_merge as _sm
+    source_spatial = body.get("source_spatial", {})
+    node_name = body.get("node_name", "unknown")
+    conflict_strategy = body.get("conflict_strategy", "latest")
+    if not source_spatial:
+        raise HTTPException(status_code=400, detail="缺少source_spatial")
+    return {"ok": True, **_sm.merge_spatial(source_spatial, node_name, conflict_strategy)}
+
+
+@app.post("/api/spatial-merge/merge-file")
+def spatial_merge_merge_file(body: dict):
+    """v0.1.66：从JSON文件合并空间模型。"""
+    from . import spatial_merge as _sm
+    filepath = body.get("filepath", "")
+    node_name = body.get("node_name", "unknown")
+    conflict_strategy = body.get("conflict_strategy", "latest")
+    if not filepath:
+        raise HTTPException(status_code=400, detail="缺少filepath")
+    source = _sm.load_spatial_from_file(filepath)
+    if "error" in source:
+        return {"ok": False, **source}
+    return {"ok": True, **_sm.merge_spatial(source, node_name, conflict_strategy)}
+
+
+@app.get("/api/spatial-merge/pending")
+def spatial_merge_pending():
+    """v0.1.66：列出待人工确认的冲突。"""
+    from . import spatial_merge as _sm
+    return {"ok": True, "pending": _sm.list_pending()}
+
+
+@app.post("/api/spatial-merge/resolve")
+def spatial_merge_resolve(body: dict):
+    """v0.1.66：处理待人工确认的冲突。"""
+    from . import spatial_merge as _sm
+    index = body.get("index", -1)
+    decision = body.get("decision", "")
+    return {"ok": True, **_sm.resolve_pending(index, decision)}
+
+
+@app.get("/api/spatial-merge/log")
+def spatial_merge_log(limit: int = 20):
+    """v0.1.66：列出合并日志。"""
+    from . import spatial_merge as _sm
+    return {"ok": True, "log": _sm.list_merge_log(limit)}
+
+
+@app.get("/api/spatial-merge/stats")
+def spatial_merge_stats():
+    """v0.1.66：合并统计信息。"""
+    from . import spatial_merge as _sm
+    return {"ok": True, **_sm.merge_stats()}
+
+
+@app.get("/api/spatial-merge/integrity")
+def spatial_merge_integrity():
+    """v0.1.66：检查空间模型完整性。"""
+    from . import spatial_merge as _sm
+    return {"ok": True, **_sm.check_spatial_integrity()}
 
 @app.get("/api/installation-plan/stats")
 def installation_plan_stats():

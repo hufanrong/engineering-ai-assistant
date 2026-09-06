@@ -2576,3 +2576,99 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnPlanStats");
   if (b3) b3.addEventListener("click", planLoadStats);
 });
+
+// v0.1.66：多电脑并库空间模型合并
+function spatialMergeFromFile() {
+  var path = document.getElementById("spatialMergeFilePath").value;
+  var node = document.getElementById("spatialMergeNodeName").value || "unknown";
+  var strategy = document.getElementById("spatialMergeStrategy").value;
+  if (!path) { alert("请输入空间模型文件路径"); return; }
+  if (!confirm("确认从文件合并空间模型？冲突策略：" + strategy)) return;
+  fetch("/api/spatial-merge/merge-file", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({filepath: path, node_name: node, conflict_strategy: strategy})}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) {
+      var l = d.log;
+      alert("合并完成！\\n源设备: " + l.source_devices + "台\\n合并: " + l.merged_devices + "台\\n跳过: " + l.skipped_duplicate + "台\\n冲突: " + l.conflicts + "个\\n坐标更新: " + l.coord_updated + "台\\n标高更新: " + l.elevation_updated + "台\\n合并后设备: " + l.total_devices_after + "台");
+      spatialMergeLoadStats();
+      spatialMergeLoadPending();
+      spatialMergeLoadLog();
+    } else {
+      alert("合并失败：" + JSON.stringify(d));
+    }
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function spatialMergeLoadStats() {
+  fetch("/api/spatial-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("spatialMergeStats");
+    el.style.display = "block";
+    el.innerHTML = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并' + d.total_devices_merged + '台 | 跳过' + d.total_devices_skipped + '台 | 冲突' + d.total_conflicts + '个 | 当前设备' + d.current_total_devices + '台 | 有坐标' + d.current_devices_with_coords + '台 | 有标高' + d.current_devices_with_elevation + '台 | 待处理' + d.pending_conflicts + '个';
+  }).catch(function(){});
+}
+function spatialMergeLoadPending() {
+  fetch("/api/spatial-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("spatialMergePending");
+    var pending = d.pending || [];
+    var active = pending.filter(function(p){return p.status === "pending";});
+    if (active.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + active.length + '个）：</strong><br>';
+    active.forEach(function(p, i) {
+      html += '<div style="padding:4px;border-bottom:1px solid var(--line)">';
+      html += '设备: ' + esc(p.device_tag) + ' | 冲突: ' + esc(p.conflict_type) + '（来源：' + esc(p.node) + '）<br>';
+      if (p.details) {
+        for (var k in p.details) {
+          var det = p.details[k];
+          html += '- ' + k + ': 源[' + (det.source ? JSON.stringify(det.source) : '') + '] vs 现[' + (det.current ? JSON.stringify(det.current) : '') + ']<br>';
+        }
+      }
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="spatialMergeResolve(' + i + ',\'use_source\')">用源数据</button> ';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="spatialMergeResolve(' + i + ',\'keep_existing\')">保留现有</button> ';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="spatialMergeResolve(' + i + ',\'skip\')">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function spatialMergeResolve(index, decision) {
+  fetch("/api/spatial-merge/resolve", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({index: index, decision: decision})}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("处理完成：" + d.result); spatialMergeLoadPending(); spatialMergeLoadStats(); }
+    else { alert("处理失败：" + JSON.stringify(d)); }
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function spatialMergeCheckIntegrity() {
+  fetch("/api/spatial-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("spatialMergeIntegrity");
+    el.style.display = "block";
+    var html = '<strong>空间完整性：</strong>设备' + d.total_devices + '台 | 坐标覆盖率' + d.coord_coverage_percent + '% | 标高覆盖率' + d.elevation_coverage_percent + '% | 问题' + d.issues_count + '个<br>';
+    if (d.issues && d.issues.length > 0) {
+      d.issues.forEach(function(issue) {
+        html += '- ' + esc(issue.type) + ': ' + issue.count + '个';
+        if (issue.devices) html += ' (' + issue.devices.slice(0,5).join(',') + (issue.devices.length > 5 ? '...' : '') + ')';
+        html += '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(e){ alert("检查失败：" + e.message); });
+}
+function spatialMergeLoadLog() {
+  fetch("/api/spatial-merge/log?limit=10").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("spatialMergeLog");
+    var log = d.log || [];
+    if (log.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    var html = '<strong>最近合并记录：</strong><br>';
+    log.reverse().forEach(function(l) {
+      html += l.timestamp.substring(0,16) + ' | ' + esc(l.node_name) + ' | 源' + l.source_devices + '台 合并' + l.merged_devices + ' 跳过' + l.skipped_duplicate + ' 冲突' + l.conflicts + '<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnSpatialMergeFile");
+  if (b1) b1.addEventListener("click", spatialMergeFromFile);
+  var b2 = document.getElementById("btnSpatialMergeStats");
+  if (b2) b2.addEventListener("click", function() { spatialMergeLoadStats(); spatialMergeLoadPending(); spatialMergeLoadLog(); });
+  var b3 = document.getElementById("btnSpatialMergeIntegrity");
+  if (b3) b3.addEventListener("click", spatialMergeCheckIntegrity);
+});
