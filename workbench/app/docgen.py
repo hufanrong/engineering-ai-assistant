@@ -257,6 +257,75 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
                     data["吊索具"] = f"{int(w*0.8)}t以上钢丝绳（安全系数≥6，需专项计算）"
             else:
                 data["吊索具"] = "钢丝绳/吊带（根据设备重量选择，安全系数≥6）"
+        # v0.1.50：吊装方案设备数据联动——技术参数、吊装环境、空间限制、相邻设备、相关管线
+        try:
+            from . import relations as _rel
+            from . import spatial_model as _sm
+            g = _rel.load_relations()
+            spatial = _sm.build_spatial_model(g)
+            spatial_devs = {d["tag"]: d for d in spatial.get("devices", [])}
+            # 设备技术参数（吊装用）
+            tech_params = []
+            lifting_env = []
+            for d in devices[:5]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                params = []
+                if sd.get("workshop"):
+                    params.append(f"车间: {sd['workshop']}")
+                if sd.get("x") is not None and sd.get("y") is not None:
+                    params.append(f"坐标: ({sd['x']}, {sd['y']})")
+                if sd.get("z") is not None:
+                    params.append(f"安装标高: {sd['z']}m")
+                    lifting_env.append(f"{tag}安装标高{sd['z']}m")
+                if sd.get("coord_status"):
+                    params.append(f"位置状态: {sd['coord_status']}")
+                if params:
+                    tech_params.append(f"{tag}: {'; '.join(params)}")
+                if sd.get("workshop"):
+                    lifting_env.append(f"{tag}位于{sd['workshop']}")
+            if tech_params:
+                data["吊装设备参数"] = "\n".join(tech_params)
+            if lifting_env:
+                data["吊装环境"] = "; ".join(lifting_env)
+            # 空间限制（从标高和楼层推断）
+            space_limits = []
+            for d in devices[:3]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                if sd.get("z") is not None and sd["z"] > 10:
+                    space_limits.append(f"{tag}高位吊装（标高{sd['z']}m），需考虑高空作业防护和风速限制")
+                if sd.get("workshop"):
+                    space_limits.append(f"{tag}在{sd['workshop']}内吊装，需确认车间内空间和吊车通道")
+            if space_limits:
+                data["空间限制"] = "\n".join(space_limits)
+            # 相邻设备（吊装时需注意的相邻设备）
+            neighbors = []
+            for d in devices[:3]:
+                tag = d["tag"]
+                sd = spatial_devs.get(tag, {})
+                if sd.get("neighbors"):
+                    nb = [n.get("tag", "") for n in sd["neighbors"][:3] if n.get("tag")]
+                    if nb:
+                        neighbors.append(f"{tag}相邻: {', '.join(nb)}（吊装时需做好成品保护）")
+            if neighbors:
+                data["吊装相邻设备"] = "; ".join(neighbors)
+            # 相关管线（吊装时需注意的管线）
+            try:
+                from . import piping_network as _pn
+                pipe_info = []
+                for d in devices[:3]:
+                    tag = d["tag"]
+                    pipes = _pn.get_device_pipes(tag)
+                    if pipes:
+                        p_info = [f"{p['pipe_no']}({p['medium']})" for p in pipes[:3]]
+                        pipe_info.append(f"{tag}连接管线: {', '.join(p_info)}（吊装前需确认管线断开或保护）")
+                if pipe_info:
+                    data["吊装相关管线"] = "\n".join(pipe_info)
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception:  # noqa: BLE001
+            pass
 
     # 施工方案专项（v0.1.42设备类型+v0.1.49设备数据联动）
     if doc_type == "施工方案":
@@ -414,6 +483,35 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         r = p.add_run("注：吊装半径、吊装高度需现场实测后填入；吊车型号应根据吊装重量与半径经吊装计算确定，本方案仅为建议。")
         r.font.size = Pt(10)
         r.font.color.rgb = __import__("docx.shared", fromlist=["RGBColor"]).RGBColor(0x66, 0x66, 0x66)
+        # v0.1.50：吊装方案设备数据联动章节
+        if data.get("吊装设备参数"):
+            add_h("三、吊装设备参数")
+            for line in str(data["吊装设备参数"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("吊装环境"):
+            add_h("四、吊装环境")
+            add_kv("作业位置", data["吊装环境"])
+        if data.get("空间限制"):
+            add_h("五、空间限制与特殊要求")
+            for line in str(data["空间限制"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
+        if data.get("吊装相邻设备"):
+            add_h("六、相邻设备与成品保护")
+            add_kv("相邻设备", data["吊装相邻设备"])
+            add_kv("成品保护", "吊装前对相邻设备进行覆盖保护，设置警戒区，严禁碰撞已安装设备和管道")
+        if data.get("吊装相关管线"):
+            add_h("七、相关管线与保护")
+            for line in str(data["吊装相关管线"]).split("\n"):
+                if line.strip():
+                    p = doc.add_paragraph()
+                    r = p.add_run(line.strip())
+                    r.font.size = Pt(11)
 
     # 设备清单（吊装方案/开箱验收自动带出）
     devices = data.get("_devices") or []
