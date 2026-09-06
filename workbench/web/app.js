@@ -2197,3 +2197,94 @@ document.addEventListener("DOMContentLoaded", function () {
   });
   loadSpatialVizStats();
 });
+
+// v0.1.59：多电脑并库竣工资料合并
+function mergeScan() {
+  var path = document.getElementById("mergeSourcePath").value;
+  if (!path) { alert("请输入源文件夹路径"); return; }
+  fetch("/api/archive-merge/scan", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({source_path: path})}).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergeScanResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#C0392B">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>扫描结果：</strong>' + d.total_files + '个文件，' + (d.total_size/1024/1024).toFixed(1) + 'MB';
+    if (d.type_count) {
+      html += '<br>类型：';
+      for (var ext in d.type_count) { html += ext + ':' + d.type_count[ext] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(e){ alert("扫描失败：" + e.message); });
+}
+function mergeRun() {
+  var path = document.getElementById("mergeSourcePath").value;
+  var node = document.getElementById("mergeNodeName").value || "unknown";
+  var strategy = document.getElementById("mergeStrategy").value;
+  if (!path) { alert("请输入源文件夹路径"); return; }
+  if (!confirm("确认开始合并？冲突策略：" + strategy)) return;
+  fetch("/api/archive-merge/merge", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({source_path: path, node_name: node, conflict_strategy: strategy})}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) {
+      var l = d.log;
+      alert("合并完成！\\n扫描：" + l.total_scanned + "个\\n合并：" + l.merged + "个\\n跳过重复：" + l.skipped_duplicate + "个\\n冲突：" + l.conflicts + "个\\n错误：" + l.errors + "个");
+      mergeLoadStats();
+      mergeLoadPending();
+      mergeLoadLog();
+    } else {
+      alert("合并失败：" + JSON.stringify(d));
+    }
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function mergeLoadStats() {
+  fetch("/api/archive-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergeStats");
+    el.style.display = "block";
+    el.innerHTML = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并' + d.total_files_merged + '个 | 跳过' + d.total_files_skipped + '个 | 待处理冲突' + d.pending_conflicts + '个 | 当前库' + d.current_archive_files + '个文件';
+  }).catch(function(){});
+}
+function mergeLoadPending() {
+  fetch("/api/archive-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergePending");
+    var pending = d.pending || [];
+    var active = pending.filter(function(p){return p.status === "pending";});
+    if (active.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + active.length + '个）：</strong><br>';
+    active.forEach(function(p, i) {
+      html += '<div style="padding:4px;border-bottom:1px solid var(--line)">';
+      html += esc(p.file) + '（来源：' + esc(p.node) + '）<br>';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="mergeResolve(' + i + ',\'use_source\')">用源文件</button> ';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="mergeResolve(' + i + ',\'keep_existing\')">保留现有</button> ';
+      html += '<button class="btn" style="padding:2px 6px;font-size:10px" onclick="mergeResolve(' + i + ',\'skip\')">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function mergeResolve(index, decision) {
+  fetch("/api/archive-merge/resolve", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({index: index, decision: decision})}).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("处理完成：" + d.result); mergeLoadPending(); mergeLoadStats(); }
+    else { alert("处理失败：" + JSON.stringify(d)); }
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function mergeLoadLog() {
+  fetch("/api/archive-merge/log?limit=10").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergeLog");
+    var log = d.log || [];
+    if (log.length === 0) { el.style.display = "none"; return; }
+    el.style.display = "block";
+    var html = '<strong>最近合并记录：</strong><br>';
+    log.reverse().forEach(function(l) {
+      html += l.timestamp.substring(0,16) + ' | ' + esc(l.node_name) + ' | 扫描' + l.total_scanned + ' 合并' + l.merged + ' 跳过' + l.skipped_duplicate + ' 冲突' + l.conflicts + '<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnMergeScan");
+  if (b1) b1.addEventListener("click", mergeScan);
+  var b2 = document.getElementById("btnMergeRun");
+  if (b2) b2.addEventListener("click", mergeRun);
+  var b3 = document.getElementById("btnMergeStats");
+  if (b3) b3.addEventListener("click", function() { mergeLoadStats(); mergeLoadPending(); mergeLoadLog(); });
+});

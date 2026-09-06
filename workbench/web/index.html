@@ -514,6 +514,28 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.59：多电脑并库竣工资料合并 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库竣工资料合并（v0.1.59）</h3>
+  <div class="msg" style="margin-bottom:6px">将其他电脑解析的竣工资料合并到本地库，自动去重、版本冲突处理、合并日志记录。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="mergeSourcePath" placeholder="源文件夹路径（如 D:\项目资料\电脑B解析结果）" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="mergeNodeName" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="mergeStrategy" style="padding:4px 8px;font-size:12px">
+      <option value="latest">最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">人工确认</option>
+    </select>
+    <button class="btn" id="btnMergeScan">扫描</button>
+    <button class="btn" id="btnMergeRun" style="background:#52C41A">开始合并</button>
+    <button class="btn" id="btnMergeStats">统计</button>
+  </div>
+  <div id="mergeScanResult" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="mergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="mergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="mergeLog" style="font-size:11px;max-height:150px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.41：设备位置人工确认弹窗 -->
 <div id="spatialEditModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:12px;width:min(420px,92vw);padding:16px;box-sizing:border-box;">

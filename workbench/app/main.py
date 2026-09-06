@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.58")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.59")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1402,6 +1402,58 @@ def spatial_visualization_stats():
     """v0.1.58：可视化统计信息。"""
     from . import spatial_visualization as _sv
     return {"ok": True, **_sv.get_stats()}
+
+
+@app.post("/api/archive-merge/scan")
+def archive_merge_scan(body: dict):
+    """v0.1.59：扫描源文件夹中的竣工资料。"""
+    from . import archive_merge as _am
+    source_path = body.get("source_path", "")
+    if not source_path:
+        raise HTTPException(status_code=400, detail="缺少source_path")
+    return {"ok": True, **_am.scan_source_folder(source_path)}
+
+
+@app.post("/api/archive-merge/merge")
+def archive_merge_merge(body: dict):
+    """v0.1.59：合并源文件夹中的竣工资料到本地库。"""
+    from . import archive_merge as _am
+    source_path = body.get("source_path", "")
+    node_name = body.get("node_name", "unknown")
+    conflict_strategy = body.get("conflict_strategy", "latest")
+    if not source_path:
+        raise HTTPException(status_code=400, detail="缺少source_path")
+    return {"ok": True, **_am.merge_archive(source_path, node_name, conflict_strategy)}
+
+
+@app.get("/api/archive-merge/pending")
+def archive_merge_pending():
+    """v0.1.59：列出待人工确认的冲突。"""
+    from . import archive_merge as _am
+    return {"ok": True, "pending": _am.list_pending()}
+
+
+@app.post("/api/archive-merge/resolve")
+def archive_merge_resolve(body: dict):
+    """v0.1.59：处理待人工确认的冲突。"""
+    from . import archive_merge as _am
+    index = body.get("index", -1)
+    decision = body.get("decision", "")
+    return {"ok": True, **_am.resolve_pending(index, decision)}
+
+
+@app.get("/api/archive-merge/log")
+def archive_merge_log(limit: int = 20):
+    """v0.1.59：列出合并日志。"""
+    from . import archive_merge as _am
+    return {"ok": True, "log": _am.list_merge_log(limit)}
+
+
+@app.get("/api/archive-merge/stats")
+def archive_merge_stats():
+    """v0.1.59：合并统计信息。"""
+    from . import archive_merge as _am
+    return {"ok": True, **_am.merge_stats()}
 
 @app.get("/api/piping/stats")
 def piping_stats():
