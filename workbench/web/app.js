@@ -688,11 +688,17 @@
       var box = $("clFieldList");
       var items = d.items || [];
       if (!items.length) { box.innerHTML = '<div class="empty">暂无现场上传</div>'; return; }
-      var html = "<table><tr><th>时间</th><th>项目</th><th>上传人</th><th>类型</th><th>文件</th><th>说明</th></tr>";
+      var html = "<table><tr><th>时间</th><th>项目</th><th>上传人</th><th>类型</th><th>文件</th><th>说明/转写</th></tr>";
       items.slice(0, 50).forEach(function (it) {
+        var extra = esc(it.note || "");
+        if (it.kind === "voice" || it.transcript) {
+          extra = it.transcript
+            ? '<span class="st parsed">已转写</span> <span style="color:var(--text2)">' + esc(String(it.transcript).slice(0, 120)) + "</span>"
+            : '<span class="st failed">待转写</span>';
+        }
         html += "<tr><td>" + esc((it.ts || "").slice(0, 16).replace("T", " ")) + "</td><td>" + esc(it.project) +
           "</td><td>" + esc(it.uploader) + "</td><td>" + esc(it.kind) + "</td><td>" + esc(it.file_name) +
-          '</td><td style="font-size:12px">' + esc(it.note || "") + "</td></tr>";
+          '</td><td style="font-size:12px">' + extra + "</td></tr>";
       });
       html += "</table>";
       box.innerHTML = html;

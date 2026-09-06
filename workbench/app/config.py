@@ -84,3 +84,9 @@ TEMPLATE_SEARCH_ENDPOINT = ""    # 联网核验/搜索最新版端点（预留�
 
 # ============ 其它 ============
 LOG_FILE = os.path.join(DATA_DIR, "workbench.log")
+
+# 手机语音转写（v0.1.26）：auto=本机装了 whisper/faster-whisper 则本地转写，
+# gateway=调 AI 网关 /transcribe 接口；未装且未配置 → 待转写清单人工补录
+VOICE_TRANSCRIBE_MODE = "auto"
+VOICE_GATEWAY_ENDPOINT = ""
+VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".opus")

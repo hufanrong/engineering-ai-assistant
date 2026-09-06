@@ -24,9 +24,10 @@ from . import packager
 from . import platform_store
 from . import docplan
 from . import archive
+from . import voice_transcribe
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.25")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.26")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -521,6 +522,30 @@ def cloud_pull_field():
             n += 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"{it.get('file_name')}: {e}")
+    # v0.1.26：语音文件自动转写 → 现场文字记录入资料库（回写云库供手机端查看）
+    transcribe_ok, transcribe_pending = 0, 0
+    for it in items:
+        fname = it.get("file_name") or ""
+        sha = it.get("sha256") or ""
+        if not (voice_transcribe.is_voice_file(fname) or it.get("kind") == "voice"):
+            continue
+        tgt = os.path.join(pull_dir, f"{sha[:12]}{os.path.splitext(fname)[1] or '.bin'}")
+        if not os.path.exists(tgt):
+            continue
+        text, mode = voice_transcribe.transcribe_audio(tgt)
+        if text:
+            tf = os.path.join(pull_dir, f"语音转写_{sha[:8]}.txt")
+            with open(tf, "w", encoding="utf-8") as fh:
+                fh.write(f"项目：{it.get('project', '')}\n上传人：{it.get('uploader', '')}\n时间：{it.get('ts', '')}\n语音转写（{mode}）：\n{text}\n")
+            transcribe_ok += 1
+            try:
+                requests.post(f"{base}/api/cloud/field-transcribe",
+                              headers=_cloud_headers(),
+                              json={"sha256": sha, "text": text, "mode": mode}, timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            transcribe_pending += 1
     # 自动解析入库（幂等去重）
     scan_stat = {}
     if n:
@@ -548,7 +573,9 @@ def cloud_pull_field():
     return {"pulled": n, "errors": errors[:20],
             "parsed": scan_stat.get("parsed", 0), "duplicate": scan_stat.get("duplicate", 0),
             "failed": scan_stat.get("failed", 0),
-            "plate_back": plate_back}
+            "plate_back": plate_back,
+            "voice_transcribed": transcribe_ok,
+            "voice_pending": transcribe_pending}
 
 
 @app.get("/api/docplan/status")

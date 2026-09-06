@@ -276,6 +276,21 @@ def field_plate(payload: dict = Body(...)):
     return {"ok": True, "updated": None}
 
 
+@app.post("/api/cloud/field-transcribe")
+def field_transcribe(payload: dict = Body(...)):
+    """工作台语音转写回写（v0.1.26）：手机端清单可见转写文本。"""
+    sha = payload.get("sha256", "")
+    text = payload.get("text") or ""
+    mode = payload.get("mode") or ""
+    fidx = _load_field_index()
+    if sha and sha in fidx:
+        fidx[sha]["transcript"] = text
+        fidx[sha]["transcribe_mode"] = mode
+        _save_field_index(fidx)
+        return {"ok": True, "updated": sha}
+    return {"ok": True, "updated": None}
+
+
 @app.get("/api/cloud/field-list")
 def field_list(project: str = "", uploader: str = ""):
     """电脑端拉取现场上传清单；可按项目/上传人过滤。"""
