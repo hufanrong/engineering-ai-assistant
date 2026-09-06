@@ -35,6 +35,44 @@ def _ensure():
         os.makedirs(config.DATA_DIR, exist_ok=True)
 
 
+CONFIRM_FILE = None  # v0.1.23 人工确认持久化
+
+
+def _ensure_confirm():
+    global CONFIRM_FILE
+    if CONFIRM_FILE is None:
+        CONFIRM_FILE = os.path.join(config.DATA_DIR, "confirmed_relations.json")
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+
+
+def _load_confirmed() -> dict:
+    """人工确认记录：tag -> {workshop, note, ts}（v0.1.23）"""
+    _ensure_confirm()
+    if os.path.exists(CONFIRM_FILE):
+        try:
+            with open(CONFIRM_FILE, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def _save_confirmed(m: dict):
+    _ensure_confirm()
+    with open(CONFIRM_FILE, "w", encoding="utf-8") as f:
+        json.dump(m, f, ensure_ascii=False, indent=1)
+
+
+def confirm_candidate(tag: str, workshop: str, note: str = "") -> dict:
+    """人工确认候选设备归属车间（v0.1.23）：写入持久化并重建图谱。"""
+    m = _load_confirmed()
+    m[tag.strip()] = {"workshop": workshop.strip(), "note": note or "",
+                      "ts": datetime.datetime.now().isoformat()}
+    _save_confirmed(m)
+    build_relations(force=True)
+    return m[tag.strip()]
+
+
 def _load_index():
     idx_file = os.path.join(config.DATA_DIR, "index.json")
     if os.path.exists(idx_file):
@@ -236,6 +274,7 @@ def build_relations(force: bool = False) -> dict:
             "title_block": tb,
             "frame": sp.get("frame"),
             "dimensions": sp.get("dimensions"),
+            "structure": cache.get("structure") or {},
         }
 
     # ---- 全场布置图：车间区域坐标 ----
@@ -292,6 +331,36 @@ def build_relations(force: bool = False) -> dict:
         elif not ws_set:
             human_confirm.append({"type": "车间未确认", "tag": tag,
                                   "files": [f["file"] for f in dev["in_files"]]})
+
+    # ---- v0.1.23：OCR/文本铭牌候选设备（未出现在图纸与台账，可能为新到货/待入台账）----
+    plate_by_tag = {}
+    for _sha, d in docs.items():
+        _pl = (d.get("structure") or {}).get("plate") or {}
+        for _t in _pl.get("tags", []):
+            plate_by_tag.setdefault(_t, []).append({
+                "params": _pl.get("params", [])[:6],
+                "manufacturers": _pl.get("manufacturers", []),
+                "workshops": _pl.get("workshops", []),
+                "file": d["file_name"],
+            })
+    confirmed_map = _load_confirmed()
+    _seen_conflict = set()
+    for c in human_confirm:
+        _seen_conflict.add(c["tag"])
+    for tag, dev in sorted(device_map.items()):
+        if tag in confirmed_map or tag in _seen_conflict:
+            continue
+        if dev["sources"]["cad"] or dev["sources"]["excel"]:
+            continue
+        if not (dev["sources"]["ocr"] or dev["sources"]["text"]):
+            continue
+        _pl = plate_by_tag.get(tag, [])
+        human_confirm.append({
+            "type": "铭牌未在台账（候选设备）", "tag": tag,
+            "evidence": [f["file"] for f in dev["in_files"]][:8],
+            "plate": _pl[0] if _pl else {},
+            "workshop_hint": [f.get("workshop_hint") for f in dev["in_files"] if f.get("workshop_hint")][:3],
+        })
 
     # ---- 图纸网络（v0.1.13）：图号/图名/车间/覆盖设备/图纸间互引 ----
     drawings = []
@@ -368,6 +437,18 @@ def build_relations(force: bool = False) -> dict:
             human_confirm.append({"type": "跨车间冲突(平票)", "tag": row["tag"],
                                   "workshops": [v["workshop"] for v in row["votes"]],
                                   "files": [f["file"] for f in device_map[row["tag"]]["in_files"]]})
+
+    # v0.1.23：人工确认结果覆盖/挂载到 layout（设计院图纸为准，人工仲裁兜底）
+    for tag, c in confirmed_map.items():
+        row = next((r for r in layout if r["tag"] == tag), None)
+        if row:
+            row["workshop"] = c["workshop"]; row["confirmed"] = True
+            row["confirmed_note"] = c.get("note", "")
+            row["votes"] = row["votes"] or [{"workshop": c["workshop"], "weight": 0, "manual": True}]
+        else:
+            layout.append({"tag": tag, "workshop": c["workshop"], "votes": [],
+                           "files": 0, "confirmed": True, "confirmed_note": c.get("note", ""),
+                           "cross_drawings": 0})
 
     # ---- 车间聚合 ----
     workshops = {}

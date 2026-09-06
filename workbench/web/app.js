@@ -276,6 +276,45 @@
         return '<span class="chip">' + c[0] + " <b>" + c[1] + "</b></span>";
       }).join("");
 
+      // v0.1.23：铭牌候选设备人工确认
+      var hc = g.human_confirm || [];
+      var cand = hc.filter(function (c) { return (c.type || "").indexOf("铭牌未在台账") >= 0; });
+      var candHtml = "";
+      if (cand.length) {
+        candHtml = '<h3>铭牌候选设备（现场照片识别，未在图纸/台账中，请确认归属车间）</h3><table><tr><th>位号</th><th>铭牌信息</th><th>来源照片</th><th>车间</th><th>操作</th></tr>';
+        cand.forEach(function (c) {
+          var pl = c.plate || {};
+          var info = [ (pl.params || []).join("；"), (pl.manufacturers || []).join("、") ].filter(Boolean).join(" · ") || "—";
+          var opts = '<option value="">选择车间</option>';
+          (g.workshops || []).forEach(function (w) { opts += '<option value="' + esc(w.workshop) + '">' + esc(w.workshop) + "</option>"; });
+          opts += '<option value="__new">+ 新建车间</option>';
+          candHtml += '<tr><td><b>' + esc(c.tag) + '</b></td><td style="font-size:12px">' + esc(info) +
+            '</td><td style="font-size:12px">' + esc((c.evidence || []).join("、")) +
+            '</td><td><select class="candWs">' + opts + '</select></td>' +
+            '<td><button class="btn small btnCandOk" data-tag="' + esc(c.tag) + '">确认</button></td></tr>';
+        });
+        candHtml += "</table>";
+      }
+      var candBox = $("relCand");
+      if (candBox) candBox.innerHTML = candHtml;
+      Array.prototype.forEach.call(document.querySelectorAll(".btnCandOk"), function (b) {
+        b.addEventListener("click", function () {
+          var tag = b.getAttribute("data-tag");
+          var sel = b.closest("tr").querySelector(".candWs");
+          var ws = sel.value;
+          if (!ws) { alert("请选择车间"); return; }
+          if (ws === "__new") {
+            ws = prompt("输入新车间名（如：3号车间）");
+            if (!ws) return;
+          }
+          fetch("/api/relations/confirm-candidate", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tag: tag, workshop: ws, note: "现场铭牌人工确认" })
+          }).then(function (r) { return r.json(); }).then(function () { loadRelations(); })
+            .catch(function (e) { alert("确认失败：" + e.message); });
+        });
+      });
+
       // 图纸网络 + 设备-车间映射（v0.1.13）
       var dwgs = g.drawings || [];
       var lay = g.layout || [];

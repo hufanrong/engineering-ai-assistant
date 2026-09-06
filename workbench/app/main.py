@@ -25,7 +25,7 @@ from . import platform_store
 from . import docplan
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.22")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.23")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -338,6 +338,21 @@ def relations_rebuild():
     return {"ok": True, "msg": "关联图谱重建已开始（后台）"}
 
 
+class ConfirmCandidateReq(BaseModel):
+    tag: str
+    workshop: str
+    note: str = ""
+
+
+@app.post("/api/relations/confirm-candidate")
+def relations_confirm(req: ConfirmCandidateReq):
+    """人工确认候选设备（铭牌未在台账）归属车间（v0.1.23）。"""
+    if not req.tag.strip() or not req.workshop.strip():
+        raise HTTPException(400, "需要位号与车间")
+    info = relations.confirm_candidate(req.tag, req.workshop, req.note)
+    return {"ok": True, "confirmed": info}
+
+
 @app.get("/api/relations/drawings")
 def relations_drawings():
     """图纸网络：图号/图名/车间/覆盖设备/图纸间互引（v0.1.13）。"""
@@ -509,9 +524,30 @@ def cloud_pull_field():
     scan_stat = {}
     if n:
         scan_stat = scanner.scan_folder(pull_dir)
+    # v0.1.23：OCR 铭牌摘要回写云端现场记录（手机端清单可见识别结果）
+    plate_back = 0
+    for cache in os.listdir(os.path.join(config.DATA_DIR, "parsed_cache")):
+        if not cache.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(config.DATA_DIR, "parsed_cache", cache), encoding="utf-8") as f:
+                pc = json.load(f)
+        except Exception:  # noqa: BLE001
+            continue
+        if pc.get("parser") == "ocr":
+            pl = (pc.get("structure") or {}).get("plate") or {}
+            if pl.get("tags") or pl.get("params"):
+                try:
+                    requests.post(f"{base}/api/cloud/field-plate",
+                                  headers=_cloud_headers(),
+                                  json={"sha256": pc.get("sha256", ""), "plate": pl}, timeout=10)
+                    plate_back += 1
+                except Exception:  # noqa: BLE001
+                    pass
     return {"pulled": n, "errors": errors[:20],
             "parsed": scan_stat.get("parsed", 0), "duplicate": scan_stat.get("duplicate", 0),
-            "failed": scan_stat.get("failed", 0)}
+            "failed": scan_stat.get("failed", 0),
+            "plate_back": plate_back}
 
 
 @app.get("/api/docplan/status")

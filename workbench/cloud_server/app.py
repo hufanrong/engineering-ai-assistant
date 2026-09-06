@@ -14,7 +14,7 @@ import hashlib
 import datetime
 import requests
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Form, Body
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -261,6 +261,19 @@ async def field_upload(project: str = Form("默认项目"), uploader: str = Form
                  "ts": datetime.datetime.now().isoformat()}
     _save_field_index(fidx)
     return {"ok": True, "status": "added", "sha256": sha, "uploader": uploader, "file": fname}
+
+
+@app.post("/api/cloud/field-plate")
+def field_plate(payload: dict = Body(...)):
+    """工作台解析现场照片后回写铭牌识别摘要（v0.1.23），手机端清单可见。"""
+    sha = payload.get("sha256", "")
+    pl = payload.get("plate") or {}
+    fidx = _load_field_index()
+    if sha and sha in fidx:
+        fidx[sha]["plate"] = pl
+        _save_field_index(fidx)
+        return {"ok": True, "updated": sha}
+    return {"ok": True, "updated": None}
 
 
 @app.get("/api/cloud/field-list")
