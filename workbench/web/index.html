@@ -514,6 +514,30 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.72：多电脑并库竣工资料合并增强 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库竣工资料合并增强（v0.1.72）</h3>
+  <div class="msg" style="margin-bottom:6px">按设备维度合并竣工资料，自动去重，资料冲突处理，合并后自动触发完整性检查，支持按车间/标高分组。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="archiveMergeFile" placeholder="源竣工资料JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="archiveMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="archiveMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnArchiveMergeFile" style="background:#1E5AA8">从文件合并</button>
+    <button class="btn" id="btnArchiveMergeStats">统计</button>
+    <button class="btn" id="btnArchiveMergePending">待处理冲突</button>
+    <button class="btn" id="btnArchiveMergeIntegrity">完整性检查</button>
+    <button class="btn" id="btnArchiveMergeGroupWS">按车间分组</button>
+  </div>
+  <div id="archiveMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="archiveMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="archiveMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="archiveMergeGroupWS" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.71：设备安装位置与施工日志联动 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工日志联动（v0.1.71）</h3>

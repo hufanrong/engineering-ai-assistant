@@ -3041,3 +3041,111 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnSiteLogStats");
   if (b3) b3.addEventListener("click", siteLogLoadStats);
 });
+
+// v0.1.72：多电脑并库竣工资料合并增强
+function archiveMergeFile() {
+  var file = document.getElementById("archiveMergeFile").value.trim();
+  var pc = document.getElementById("archiveMergePC").value.trim();
+  var strategy = document.getElementById("archiveMergeStrategy").value;
+  if (!file) { alert("请输入源竣工资料JSON文件路径"); return; }
+  fetch("/api/archive-merge-enhanced/merge-file", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({file_path: file, source_pc: pc, conflict_strategy: strategy})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.detail) { alert("合并失败：" + d.detail); return; }
+    var log = d.log || {};
+    var msg = "合并完成！源设备:" + log.source_devices + " 合并:" + log.merged_devices + " 跳过:" + log.skipped_duplicate + " 冲突:" + log.conflicts + " 资料合并:" + (log.docs_merged || 0);
+    if (d.integrity_after_merge) {
+      var integ = d.integrity_after_merge;
+      msg += "\n合并后完整性：覆盖" + integ.archive_coverage_percent + "% 平均完整度" + integ.avg_completeness_percent + "% 问题" + integ.issues_count + "个";
+    }
+    alert(msg);
+    archiveMergeLoadStats();
+    archiveMergeLoadIntegrity();
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function archiveMergeLoadStats() {
+  fetch("/api/archive-merge-enhanced/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveMergeStats");
+    el.style.display = "block";
+    var html = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并设备' + d.total_devices_merged + '台 | 合并资料' + d.total_docs_merged + '项 | 冲突' + d.total_conflicts + '次<br>';
+    html += '待处理冲突:' + d.pending_conflicts + ' | 已解决:' + d.resolved_conflicts + ' | 当前设备:' + d.current_total_devices + '台<br>';
+    if (d.current_by_completeness) {
+      var c = d.current_by_completeness;
+      html += '<strong>完整度分布：</strong>完整' + (c.complete || 0) + '台 | 部分' + (c.partial || 0) + '台 | 空白' + (c.empty || 0) + '台';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function archiveMergeLoadPending() {
+  fetch("/api/archive-merge-enhanced/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveMergePending");
+    var pending = d.pending || [];
+    if (pending.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#27ae60">无待处理冲突</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + pending.length + '个）：</strong><br>';
+    pending.slice(0, 10).forEach(function(p, i) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(231,76,60,0.05);border-radius:4px">';
+      html += '<strong>' + esc(p.tag) + '</strong> 来源:' + esc(p.source_pc || '') + '<br>';
+      html += '源完整度:' + p.source_completeness + '%(' + p.source_completed_docs + '项) vs 当前:' + p.current_completeness + '%(' + p.current_completed_docs + '项)<br>';
+      html += '<button onclick="archiveMergeResolve(' + i + ',\'use_source\')" style="font-size:11px;padding:2px 6px;margin-right:4px">用源数据</button>';
+      html += '<button onclick="archiveMergeResolve(' + i + ',\'keep_existing\')" style="font-size:11px;padding:2px 6px;margin-right:4px">保留现有</button>';
+      html += '<button onclick="archiveMergeResolve(' + i + ',\'skip\')" style="font-size:11px;padding:2px 6px">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function archiveMergeResolve(index, decision) {
+  fetch("/api/archive-merge-enhanced/resolve", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({index: index, decision: decision})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("已处理：" + d.decision); archiveMergeLoadPending(); archiveMergeLoadStats(); }
+    else alert("处理失败：" + (d.error || ""));
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function archiveMergeLoadIntegrity() {
+  fetch("/api/archive-merge-enhanced/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveMergeIntegrity");
+    el.style.display = "block";
+    var html = '<strong>竣工资料完整性：</strong>总设备' + d.total_devices + '台 | 有资料' + d.devices_with_archive + '台 | 完整' + d.complete_devices + '台 | 不完整' + d.incomplete_devices + '台<br>';
+    html += '覆盖率:' + d.archive_coverage_percent + '% | 平均完整度:' + d.avg_completeness_percent + '% | 问题:' + d.issues_count + '个<br>';
+    if (d.issues && d.issues.length > 0) {
+      d.issues.forEach(function(iss) {
+        html += '- ' + esc(iss.type) + ': ' + iss.count + '台' + (iss.devices ? ' (' + (iss.devices.length > 0 ? (typeof iss.devices[0] === 'string' ? iss.devices.slice(0,5).join(',') : iss.devices.slice(0,5).map(function(x){return x.tag;}).join(',')) : '') + '...)' : '') + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function archiveMergeLoadGroupWS() {
+  fetch("/api/archive-merge-enhanced/group-workshop").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveMergeGroupWS");
+    var groups = d.groups || {};
+    if (Object.keys(groups).length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>按车间分组：</strong><br>';
+    for (var ws in groups) {
+      var g = groups[ws];
+      html += '<strong>' + esc(ws) + '</strong>：' + g.total + '台（完整' + g.complete + '台，平均完整度' + g.avg_completeness + '%）<br>';
+      g.devices.slice(0, 5).forEach(function(dev) {
+        html += '&nbsp;&nbsp;- ' + esc(dev.tag) + ' ' + esc(dev.name || '') + '：' + dev.completeness_percent + '%（缺' + dev.missing_count + '项）<br>';
+      });
+      if (g.devices.length > 5) html += '&nbsp;&nbsp;... 还有 ' + (g.devices.length - 5) + ' 台<br>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnArchiveMergeFile");
+  if (b1) b1.addEventListener("click", archiveMergeFile);
+  var b2 = document.getElementById("btnArchiveMergeStats");
+  if (b2) b2.addEventListener("click", archiveMergeLoadStats);
+  var b3 = document.getElementById("btnArchiveMergePending");
+  if (b3) b3.addEventListener("click", archiveMergeLoadPending);
+  var b4 = document.getElementById("btnArchiveMergeIntegrity");
+  if (b4) b4.addEventListener("click", archiveMergeLoadIntegrity);
+  var b5 = document.getElementById("btnArchiveMergeGroupWS");
+  if (b5) b5.addEventListener("click", archiveMergeLoadGroupWS);
+});

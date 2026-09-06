@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.71")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.72")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1842,6 +1842,84 @@ def site_log_stats():
     from . import site_log as _sl
     return {"ok": True, **_sl.get_site_log_stats()}
 
+
+
+@app.post("/api/archive-merge-enhanced/merge")
+def archive_merge_enhanced_merge(body: dict):
+    """v0.1.72：按设备维度合并竣工资料。"""
+    from . import archive_merge_enhanced as _ame
+    source = body.get("source_archive", {})
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    return {"ok": True, **_ame.merge_archive_by_device(source, source_pc, strategy)}
+
+
+@app.post("/api/archive-merge-enhanced/merge-file")
+def archive_merge_enhanced_merge_file(body: dict):
+    """v0.1.72：从文件合并竣工资料。"""
+    from . import archive_merge_enhanced as _ame
+    file_path = body.get("file_path", "")
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    source = _ame.load_archive_from_file(file_path)
+    if "error" in source:
+        raise HTTPException(status_code=400, detail=source["error"])
+    return {"ok": True, **_ame.merge_archive_by_device(source, source_pc, strategy)}
+
+
+@app.get("/api/archive-merge-enhanced/pending")
+def archive_merge_enhanced_pending():
+    """v0.1.72：列出待人工确认的竣工资料冲突。"""
+    from . import archive_merge_enhanced as _ame
+    return {"ok": True, "pending": _ame.list_pending()}
+
+
+@app.post("/api/archive-merge-enhanced/resolve")
+def archive_merge_enhanced_resolve(body: dict):
+    """v0.1.72：处理待人工确认的竣工资料冲突。"""
+    from . import archive_merge_enhanced as _ame
+    index = body.get("index", 0)
+    decision = body.get("decision", "")
+    if decision not in ["use_source", "keep_existing", "skip"]:
+        raise HTTPException(status_code=400, detail="decision必须是use_source/keep_existing/skip")
+    return {"ok": True, **_ame.resolve_pending(index, decision)}
+
+
+@app.get("/api/archive-merge-enhanced/log")
+def archive_merge_enhanced_log():
+    """v0.1.72：列出合并日志。"""
+    from . import archive_merge_enhanced as _ame
+    return {"ok": True, "log": _ame.list_merge_log()}
+
+
+@app.get("/api/archive-merge-enhanced/stats")
+def archive_merge_enhanced_stats():
+    """v0.1.72：获取合并统计信息。"""
+    from . import archive_merge_enhanced as _ame
+    return {"ok": True, **_ame.merge_stats()}
+
+
+@app.get("/api/archive-merge-enhanced/integrity")
+def archive_merge_enhanced_integrity():
+    """v0.1.72：检查竣工资料完整性。"""
+    from . import archive_merge_enhanced as _ame
+    return {"ok": True, **_ame.check_archive_integrity()}
+
+
+@app.get("/api/archive-merge-enhanced/group-workshop")
+def archive_merge_enhanced_group_workshop():
+    """v0.1.72：按车间分组竣工资料。"""
+    from . import archive_merge_enhanced as _ame
+    return {"ok": True, "groups": _ame.group_by_workshop()}
+
+
+@app.get("/api/archive-merge-enhanced/group-elevation")
+def archive_merge_enhanced_group_elevation():
+    """v0.1.72：按标高分组竣工资料。"""
+    from . import archive_merge_enhanced as _ame
+    return {"ok": True, "groups": _ame.group_by_elevation()}
 
 @app.get("/api/site-log/template")
 def site_log_template(type: str = ""):
