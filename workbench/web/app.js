@@ -3217,3 +3217,72 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnUnboxingStats");
   if (b3) b3.addEventListener("click", unboxingLoadStats);
 });
+
+// v0.1.74：设备安装位置与隐蔽工程验收记录联动
+function concealmentGenerate() {
+  var tag = document.getElementById("concealmentDeviceTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  var date = document.getElementById("concealmentDate").value.trim();
+  var url = "/api/concealment-record/generate?tag=" + encodeURIComponent(tag);
+  if (date) url += "&date=" + encodeURIComponent(date);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("concealmentDetail");
+    el.style.display = "block";
+    var html = '<strong>隐蔽工程验收记录 - ' + esc(d.tag) + ' ' + esc(d.name || '') + '</strong><br>';
+    html += '类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配');
+    if (d.elevation != null) html += ' | 标高: ' + d.elevation + 'm';
+    html += '<br>';
+    html += '隐蔽日期: ' + esc(d.concealment_date) + ' | 隐蔽部位: ' + esc(d.concealment_location) + '<br>';
+    html += '<strong>一、隐蔽内容：</strong>' + (d.concealment_parts || []).map(esc).join('、') + '<br>';
+    html += '<strong>二、检查项目：</strong><br>';
+    (d.inspection_items || []).forEach(function(item, i){ html += (i+1) + '. ' + esc(item) + '<br>'; });
+    html += '<strong>三、质量标准：</strong><br>';
+    (d.quality_standards || []).forEach(function(s, i){ html += (i+1) + '. ' + esc(s) + '<br>'; });
+    html += '<strong>四、验收依据：</strong>' + (d.acceptance_basis || []).map(esc).join('；') + '<br>';
+    if (d.environment_notes && d.environment_notes.length > 0) {
+      html += '<strong>五、环境注意事项：</strong><br>';
+      d.environment_notes.forEach(function(n, i){ html += (i+1) + '. ' + esc(n) + '<br>'; });
+    }
+    html += '<strong>六、验收结果：</strong><span style="color:#f39c12">' + esc(d.inspection_result) + '</span><br>';
+    html += '<strong>七、参加人员：</strong><br>';
+    (d.participants || []).forEach(function(p){ html += '- ' + esc(p.role) + ': ' + (p.name ? esc(p.name) : '______') + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function concealmentLoadList() {
+  var tag = document.getElementById("concealmentDeviceTag").value.trim();
+  var url = "/api/concealment-record/list" + (tag ? "?tag=" + encodeURIComponent(tag) : "");
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("concealmentList");
+    var records = d.records || [];
+    if (records.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无隐蔽记录</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>隐蔽记录（' + records.length + '条）：</strong><br>';
+    records.slice(0, 15).forEach(function(rec) {
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'concealmentDeviceTag\').value=\'' + rec.tag + '\';document.getElementById(\'concealmentDate\').value=\'' + rec.concealment_date + '\';concealmentGenerate();" style="color:#1E5AA8">' + rec.concealment_date + '</a> ' + esc(rec.tag) + ' ' + esc(rec.name || '') + ' (' + esc(rec.type || '') + '/' + esc(rec.workshop || '') + '/' + esc(rec.inspection_result || '') + ')<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function concealmentLoadStats() {
+  fetch("/api/concealment-record/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("concealmentStats");
+    el.style.display = "block";
+    if (d.total_records === 0) { el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    var html = '<strong>隐蔽统计：</strong>共' + d.total_records + '条 / 覆盖' + d.devices_with_records + '台设备 / 总设备' + d.total_devices + '台（覆盖率' + d.coverage_percent + '%）<br>';
+    if (d.by_result) {
+      html += '<strong>按结果：</strong>';
+      for (var k in d.by_result) { html += esc(k) + ':' + d.by_result[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnConcealmentGenerate");
+  if (b1) b1.addEventListener("click", concealmentGenerate);
+  var b2 = document.getElementById("btnConcealmentList");
+  if (b2) b2.addEventListener("click", concealmentLoadList);
+  var b3 = document.getElementById("btnConcealmentStats");
+  if (b3) b3.addEventListener("click", concealmentLoadStats);
+});

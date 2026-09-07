@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.73")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.74")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1948,6 +1948,46 @@ def unboxing_record_stats():
     from . import unboxing_record as _ur
     return {"ok": True, **_ur.get_unboxing_stats()}
 
+
+
+@app.get("/api/concealment-record/generate")
+def concealment_record_generate(tag: str, date: str = None, location: str = None):
+    """v0.1.74：生成设备隐蔽工程验收记录。"""
+    from . import concealment_record as _cr
+    return {"ok": True, **_cr.generate_concealment_record(tag, date, location)}
+
+
+@app.post("/api/concealment-record/update")
+def concealment_record_update(body: dict):
+    """v0.1.74：更新隐蔽工程验收记录。"""
+    from . import concealment_record as _cr
+    tag = body.get("tag", "")
+    date = body.get("date", "")
+    updates = body.get("updates", {})
+    if not tag or not date:
+        raise HTTPException(status_code=400, detail="缺少tag或date")
+    return {"ok": True, **_cr.update_concealment_record(tag, date, updates)}
+
+
+@app.get("/api/concealment-record/list")
+def concealment_record_list(tag: str = None):
+    """v0.1.74：列出生成的隐蔽工程验收记录。"""
+    from . import concealment_record as _cr
+    return {"ok": True, "records": _cr.list_concealment_records(tag)}
+
+
+@app.get("/api/concealment-record/stats")
+def concealment_record_stats():
+    """v0.1.74：获取隐蔽工程验收统计。"""
+    from . import concealment_record as _cr
+    return {"ok": True, **_cr.get_concealment_stats()}
+
+
+@app.get("/api/concealment-record/content")
+def concealment_record_content(type: str = ""):
+    """v0.1.74：获取设备类型隐蔽工程内容。"""
+    from . import concealment_record as _cr
+    return {"ok": True, "content": _cr.get_concealment_content(type)}
 
 @app.get("/api/unboxing-record/points")
 def unboxing_record_points(type: str = ""):
