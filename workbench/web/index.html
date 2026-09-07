@@ -107,6 +107,214 @@
     transition: width 0.3s;
 }
 </style>
+
+<style>
+/* ===== v0.1.115 优化布局：左侧导航 + 主内容区 ===== */
+:root {
+    --sidebar-width: 220px;
+    --sidebar-bg: #1a2332;
+    --sidebar-text: #a0aec0;
+    --sidebar-active: #1E5AA8;
+    --sidebar-hover: rgba(255,255,255,0.08);
+}
+
+.app-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* 左侧导航 */
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    overflow-y: auto;
+    z-index: 100;
+    padding: 0;
+}
+
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+.sidebar-logo {
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.sidebar-logo .logo-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #1E5AA8, #FF7A00);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    font-size: 18px;
+}
+
+.sidebar-logo .logo-text {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.sidebar-logo .logo-sub {
+    font-size: 10px;
+    color: #718096;
+}
+
+.sidebar-section {
+    padding: 12px 16px 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #4a5568;
+    font-weight: 600;
+}
+
+.sidebar-nav {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar-nav li a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 20px;
+    color: var(--sidebar-text);
+    text-decoration: none;
+    font-size: 13px;
+    transition: all 0.15s;
+    border-left: 3px solid transparent;
+}
+
+.sidebar-nav li a:hover {
+    background: var(--sidebar-hover);
+    color: #fff;
+}
+
+.sidebar-nav li a.active {
+    background: rgba(30,90,168,0.3);
+    color: #fff;
+    border-left-color: #FF7A00;
+}
+
+.sidebar-nav li a .nav-icon {
+    font-size: 15px;
+    width: 20px;
+    text-align: center;
+}
+
+.sidebar-nav li a .nav-badge {
+    margin-left: auto;
+    background: #FF7A00;
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+}
+
+.sidebar-footer {
+    padding: 12px 20px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 11px;
+    color: #4a5568;
+    margin-top: auto;
+}
+
+/* 主内容区 */
+.main-content {
+    margin-left: var(--sidebar-width);
+    flex: 1;
+    min-width: 0;
+}
+
+.main-content .wrap {
+    max-width: 1200px;
+    padding: 20px 24px;
+}
+
+/* 内容区块 */
+.content-section {
+    scroll-margin-top: 16px;
+    margin-bottom: 24px;
+}
+
+.content-section > h2 {
+    position: sticky;
+    top: 0;
+    background: #f4f3ee;
+    z-index: 10;
+    padding: 8px 0;
+    margin: 0 0 12px;
+}
+
+/* 项目信息栏优化 */
+.project-bar {
+    background: linear-gradient(135deg, rgba(30,90,168,0.08), rgba(255,122,0,0.05));
+    border: 1px solid rgba(30,90,168,0.15);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+}
+
+/* 响应式 */
+@media (max-width: 900px) {
+    .sidebar { transform: translateX(-100%); transition: transform 0.3s; }
+    .sidebar.open { transform: translateX(0); }
+    .main-content { margin-left: 0; }
+    .mobile-menu-btn { display: block !important; }
+}
+
+.mobile-menu-btn {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 200;
+    background: #1E5AA8;
+    color: #fff;
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+/* 回到顶部 */
+.back-to-top {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 44px;
+    height: 44px;
+    background: #1E5AA8;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    font-size: 18px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    display: none;
+    z-index: 99;
+    transition: transform 0.2s;
+}
+.back-to-top:hover { transform: translateY(-2px); }
+.back-to-top.show { display: block; }
+</style>
 </head>
 <body>
 <div class="update-banner" id="updateBanner">
@@ -122,7 +330,77 @@
     <button class="btn-close" onclick="hideUpdateBanner()">×</button>
 </div>
 
-<div class="wrap">
+
+<button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+
+<div class="app-layout">
+  <!-- 左侧导航 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">繁</div>
+      <div>
+        <div class="logo-text">繁工AI</div>
+        <div class="logo-sub">本地解析工作台</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">项目管理</div>
+    <ul class="sidebar-nav">
+      <li><a href="#project-bar" onclick="navTo('project-bar')"><span class="nav-icon">📁</span>项目概览</a></li>
+      <li><a href="#project-backup" onclick="navTo('project-backup')"><span class="nav-icon">💾</span>备份与合并</a></li>
+    </ul>
+
+    <div class="sidebar-section">文件上传</div>
+    <ul class="sidebar-nav">
+      <li><a href="#scan-parse" onclick="navTo('scan-parse')"><span class="nav-icon">📂</span>扫描解析</a></li>
+      <li><a href="#manual-upload" onclick="navTo('manual-upload')"><span class="nav-icon">📤</span>手动上传</a></li>
+      <li><a href="#batch-upload" onclick="navTo('batch-upload')"><span class="nav-icon">📦</span>批量上传</a></li>
+      <li><a href="#failed-files" onclick="navTo('failed-files')"><span class="nav-icon">⚠️</span>失败待处理</a></li>
+    </ul>
+
+    <div class="sidebar-section">解析结果</div>
+    <ul class="sidebar-nav">
+      <li><a href="#parsed-list" onclick="navTo('parsed-list')"><span class="nav-icon">📋</span>已解析文件</a></li>
+      <li><a href="#vector-search" onclick="navTo('vector-search')"><span class="nav-icon">🔍</span>向量检索</a></li>
+      <li><a href="#workshop-auto" onclick="navTo('workshop-auto')"><span class="nav-icon">🏭</span>车间划分</a></li>
+      <li><a href="#version-merge" onclick="navTo('version-merge')"><span class="nav-icon">🔀</span>版本对照</a></li>
+    </ul>
+
+    <div class="sidebar-section">关系与空间</div>
+    <ul class="sidebar-nav">
+      <li><a href="#cad-linkage" onclick="navTo('cad-linkage')"><span class="nav-icon">🗺️</span>多图纸联动</a></li>
+      <li><a href="#spatial-model" onclick="navTo('spatial-model')"><span class="nav-icon">📐</span>空间结构</a></li>
+      <li><a href="#device-workshop" onclick="navTo('device-workshop')"><span class="nav-icon">🏗️</span>设备车间归属</a></li>
+      <li><a href="#tag-alias" onclick="navTo('tag-alias')"><span class="nav-icon">🔗</span>编号映射</a></li>
+    </ul>
+
+    <div class="sidebar-section">工程资料</div>
+    <ul class="sidebar-nav">
+      <li><a href="#doc-gen" onclick="navTo('doc-gen')"><span class="nav-icon">📝</span>资料生成</a></li>
+      <li><a href="#smart-gen" onclick="navTo('smart-gen')"><span class="nav-icon">🤖</span>智能生成</a></li>
+      <li><a href="#template-mgr" onclick="navTo('template-mgr')"><span class="nav-icon">📋</span>模板管理</a></li>
+      <li><a href="#doc-plan" onclick="navTo('doc-plan')"><span class="nav-icon">📅</span>生成计划</a></li>
+      <li><a href="#completion-archive" onclick="navTo('completion-archive')"><span class="nav-icon">📚</span>竣工组卷</a></li>
+    </ul>
+
+    <div class="sidebar-section">平台与云端</div>
+    <ul class="sidebar-nav">
+      <li><a href="#platform-lib" onclick="navTo('platform-lib')"><span class="nav-icon">📖</span>平台规范库</a></li>
+      <li><a href="#cloud-library" onclick="navTo('cloud-library')"><span class="nav-icon">☁️</span>云库</a></li>
+      <li><a href="#cloud-queue" onclick="navTo('cloud-queue')"><span class="nav-icon">🔄</span>云端合并队列</a></li>
+      <li><a href="#export-merge" onclick="navTo('export-merge')"><span class="nav-icon">📤</span>导出合并</a></li>
+    </ul>
+
+    <div class="sidebar-footer">
+      © 2026 胡繁荣<br>
+      繁工AI v0.1.115
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main class="main-content">
+
+  <div class="wrap">
   <header>
     <div class="logo">繁</div>
     <div class="brand">
@@ -131,7 +409,7 @@
     </div>
   </header>
   <!-- v0.1.107：项目选择器 -->
-  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:linear-gradient(135deg,rgba(30,90,168,0.05),rgba(255,122,0,0.03))">
+  <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:linear-gradient(135deg,rgba(30,90,168,0.05),rgba(255,122,0,0.03))">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <strong style="font-size:14px">📁 当前项目：</strong>
       <span id="currentProjectName" style="color:#1E5AA8;font-weight:600">加载中...</span>
@@ -154,11 +432,11 @@
       <button class="btn" id="btnCreateProject" style="background:#52C41A;font-size:12px;padding:4px 12px">确认创建</button>
       <button class="btn" id="btnCancelNewProject" style="background:#999;font-size:12px;padding:4px 12px">取消</button>
     </div>
-    <div id="projectDataDirInfo" style="display:none;margin-top:8px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px;font-size:11px;font-family:monospace;word-break:break-all"></div>
+    <div id="project-backup" style="display:none;margin-top:8px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px;font-size:11px;font-family:monospace;word-break:break-all"></div>
   </div>
 
   <!-- v0.1.107：智能工程文件生成 -->
-  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <div id="smart-gen" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
     <h3 style="margin:0 0 6px;font-size:15px">🤖 智能工程文件生成（v0.1.107）</h3>
     <div class="msg" style="margin-bottom:6px">用自然语言描述要生成的文件，系统自动识别类型、读取项目数据填充、列出缺失项。例如："生成球磨机安装的安全技术交底"、"制作高压釜基础验收记录"</div>
     <div class="row" style="margin-bottom:6px">
@@ -172,13 +450,13 @@
       支持类型：<span id="smartDocTypes"></span>
     </div>
   <!-- v0.1.108：模板管理 -->
-  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
+  <div id="template-mgr" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
     <h3 style="margin:0 0 6px;font-size:15px">📋 模板管理 - 基于模板生成文件（v0.1.108）</h3>
     <div class="msg" style="margin-bottom:6px">上传Word模板（.docx），模板中使用 {{字段名}} 作为占位符，系统自动用项目数据库数据填充生成文件。支持字段：设备名称、项目名称、车间、施工单位、日期、供货厂家、设备型号、安装位置等28种。</div>
     
     
   <!-- v0.1.110：项目备份与合并 -->
-  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(82,196,26,0.03)">
+  <div id="project-backup" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(82,196,26,0.03)">
     <h3 style="margin:0 0 6px;font-size:15px">💾 项目备份与合并（v0.1.110）</h3>
     
     <!-- 备份导入导出 -->
@@ -308,7 +586,7 @@
 
   <!-- ① 扫描 -->
   <div class="panel on" id="p-scan">
-    <h2>扫描文件夹 → 深度解析 → 向量化 → 待上传</h2>
+    <h2 id="scan-parse">扫描文件夹 → 深度解析 → 向量化 → 待上传</h2>
     <label>文件夹路径（支持多个：每行一个路径；可输入 D:\资料 形式，自动递归处理全部支持的文件）</label>
     <textarea id="folder" rows="3" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;box-sizing:border-box;resize:vertical" placeholder="例如：&#10;D:\工程资料\XX项目\施工图纸&#10;D:\工程资料\XX项目\设备台账"></textarea>
     <div class="row" style="margin-top:8px">
@@ -321,7 +599,7 @@
     <div class="msg" id="scanMsg">等待扫描…</div>
     <div class="qr" id="scanStats"></div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      <h2>失败 / 待处理文件（v0.1.21）</h2>
+      <h2 id="failed-files">失败 / 待处理文件（v0.1.21）</h2>
       <div class="row" style="margin-bottom:6px">
         <button class="btn ghost" id="btnFailRefresh">刷新清单</button>
         <button class="btn ghost" id="btnFailClear">清空失败记录</button>
@@ -330,7 +608,7 @@
       <div class="msg" id="failList" style="font-size:13px">暂无失败文件</div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      <h2>手动上传文件（手机端/浏览器直传）</h2>
+      <h2 id="manual-upload">手动上传文件（手机端/浏览器直传）</h2>
       <label>上传人姓名（现场记录必填，方便溯源）</label>
       <div class="row">
         <input type="text" id="uploader" style="max-width:220px" placeholder="例如：胡繁荣">
@@ -340,7 +618,7 @@
       <div class="msg" id="uploadFilesMsg"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      <h2>车间资料自动划分（v0.1.27）</h2>
+      <h2 id="workshop-auto">车间资料自动划分（v0.1.27）</h2>
       <div class="msg" style="margin-bottom:8px">上传/扫描后自动识别车间（CAD标题栏＞文件名＞正文关键词），无法确认的进『未归车间』；可单文件或批量人工指定车间，重建图谱后生效。</div>
       <div class="row" style="margin-bottom:8px">
         <button class="btn" id="btnWsRefresh">刷新车间划分</button>
@@ -352,7 +630,7 @@
       <div id="wsList"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      <h2>文件版本对照与冲突合并（v0.1.32）</h2>
+      <h2 id="version-merge">文件版本对照与冲突合并（v0.1.32）</h2>
       <div class="msg" style="margin-bottom:8px">多电脑并库时，同名不同内容文件自动建立版本对照表，按时间戳以最新版为准；时间戳相同或缺失进待人工确认。同 SHA256 文件自动去重。</div>
       <div class="row" style="margin-bottom:8px">
         <button class="btn" id="btnVerRefresh">刷新版本</button>
@@ -362,7 +640,7 @@
       <div id="verList"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      <h2>文件夹批量上传（v0.1.22）</h2>
+      <h2 id="batch-upload">文件夹批量上传（v0.1.22）</h2>
       <label>选择多个文件夹，或把文件夹直接拖到下面区域。自动分批次后台上传（每批 20 个），切换页面不断；关掉页面后已传完的文件已入库，重开后重新选择文件夹会自动跳过已传的。</label>
       <div id="dropZone" style="border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--text2);margin-top:8px;cursor:pointer">
         拖入文件夹到此，或 <button type="button" onclick="document.getElementById('upfilesDir').click()">选择文件夹</button>
@@ -377,7 +655,7 @@
       <div class="msg" id="batchMsg">未选择文件夹</div>
     </div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      <h2>解析库导出 / 多机合并（.fglib）</h2>
+      <h2 id="export-merge">解析库导出 / 多机合并（.fglib）</h2>
       <div class="msg" style="margin-bottom:8px">多台电脑各自解析后：A 机点"导出库包"生成 .fglib → 传到 B 机点"导入库包合并"。SHA256 相同自动去重，不同版本全部保留（最新时间戳为准），合并后自动重建关联图谱。</div>
       <div class="row">
         <button class="btn ghost" id="btnLibExport">导出库包 (.fglib)</button>
@@ -390,7 +668,7 @@
 
   <!-- ② 结果库 -->
   <div class="panel" id="p-results">
-    <h2>已解析文件清单（点击查看结构化详情）</h2>
+    <h2 id="parsed-list">已解析文件清单（点击查看结构化详情）</h2>
     <div class="row" style="margin-bottom:8px">
       <select id="filter" style="max-width:200px">
         <option value="">全部状态</option>
@@ -407,7 +685,7 @@
 
   <!-- ③ AI 检索 -->
   <div class="panel" id="p-search">
-    <h2>向量检索（验证解析库已可被 AI/Agent 读取）</h2>
+    <h2 id="vector-search">向量检索（验证解析库已可被 AI/Agent 读取）</h2>
     <label>输入查询，例如"1号车间离心泵 P-101 安装位置"</label>
     <div class="row">
       <input type="text" id="query" placeholder="输入检索内容…">
@@ -421,7 +699,7 @@
 
   <!-- ④ 上传队列 -->
   <div class="panel" id="p-queue">
-    <h2>云端合并上传队列</h2>
+    <h2 id="cloud-queue">云端合并上传队列</h2>
     <div class="msg" style="margin-bottom:8px">解析完成的文件已打包在此队列。配置好 app/config.py 的 CLOUD_ENDPOINT 后，点"上传到云端"完成合并（SHA256 自动去重）。未配置时文件安全保留在本机。</div>
     <button class="btn" id="btnUpload">上传到云端</button>
     <button class="btn ghost" id="btnQueueRefresh">刷新队列</button>
@@ -431,8 +709,8 @@
 
   <!-- ⑤ 关联图谱（多图纸联动） -->
   <div class="panel" id="p-relations">
-    <h2>多图纸联动图谱（全场布置图 ↔ 车间图 ↔ 设备台账）</h2>
-    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+    <h2 id="cad-linkage">多图纸联动图谱（全场布置图 ↔ 车间图 ↔ 设备台账）</h2>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
       <h3 style="margin:0 0 6px;font-size:15px">群聊文件关联（v0.1.34）</h3>
       <div class="msg" style="margin-bottom:6px">上传微信群/QQ群聊天记录导出文件（TXT/HTML/CSV），自动解析每条消息，提取涉及的设备位号、车间、事项，关联到项目图谱。群聊提及但不在台账中的设备进入人工确认。</div>
       <div class="row">
@@ -450,8 +728,8 @@
         <div id="chatCandidates" style="font-size:12px"></div>
       </div>
     </div>
-    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
-      <h3 style="margin:0 0 6px;font-size:15px">设备空间结构（v0.1.35）</h3>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 id="spatial-model" style="margin:0 0 6px;font-size:15px">设备空间结构（v0.1.35）</h3>
       <div class="msg" style="margin-bottom:6px">基于 CAD 坐标+设备台账+车间划分，建立 AI 可读的类3D空间结构。设备按车间分组、按坐标排序，自动计算相邻设备（15米内）。台账有但图纸未标注的设备单独标记。</div>
       <div class="row">
         <button class="btn" id="btnSpatialLoad">加载空间结构</button>
@@ -481,7 +759,7 @@
     <div id="relCand" style="margin-bottom:10px"></div>
     <div id="relNet" style="margin-bottom:10px"></div>
     <div style="border-top:1px solid var(--line);margin:12px 0;padding-top:10px">
-      <h3 style="margin:0 0 6px">设备级车间归属（v0.1.29）</h3>
+      <h3 id="device-workshop" style="margin:0 0 6px">设备级车间归属（v0.1.29）</h3>
       <div class="msg" style="margin-bottom:6px">跨车间箱单/台账中的设备按台账行"车间"列或位号前缀自动分到各车间；人工指定最高优先，重建图谱后生效。</div>
       <div class="row" style="margin-bottom:6px">
         <button class="btn small" id="btnDevWsRefresh">刷新设备车间</button>
@@ -491,7 +769,7 @@
       <div id="devWsList"></div>
     </div>
     <div style="border-top:1px solid var(--line);margin:12px 0;padding-top:10px">
-      <h3 style="margin:0 0 6px">设计院编号↔厂家编号映射（v0.1.31）</h3>
+      <h3 id="tag-alias" style="margin:0 0 6px">设计院编号↔厂家编号映射（v0.1.31）</h3>
       <div class="msg" style="margin-bottom:6px">自动识别 CAD 块/台账行中同时标注的设计院位号与厂家编号，以设计院位号为主键合并；低置信映射进待人工确认，确认后重建图谱生效。</div>
       <div class="row" style="margin-bottom:6px">
         <button class="btn small" id="btnAliasRefresh">刷新映射</button>
@@ -508,8 +786,8 @@
   </div>
   <!-- ⑥ 方案生成（工程资料 Word） -->
   <div class="panel" id="p-docgen">
-    <h2>工程资料生成（施工方案 / 吊装方案 / 交底 / 验收记录）</h2>
-    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+    <h2 id="doc-gen">工程资料生成（施工方案 / 吊装方案 / 交底 / 验收记录）</h2>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
       <h3 style="margin:0 0 6px;font-size:15px">现场记录快速生成（v0.1.33）</h3>
       <div class="msg" style="margin-bottom:6px">粘贴手机端现场文字/OCR结果/语音转写，自动识别记录类型（开箱/隐蔽/施工日志等）+提取关键字段+列出缺失，补充后生成 Word。</div>
       <textarea id="frText" placeholder="粘贴现场记录文字，如：2026年9月6日 1号车间 P-101离心泵开箱验收，箱单号BX-001，验收人张三，结果合格，设备外观完好…" style="width:100%;min-height:80px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;box-sizing:border-box;font-size:13px;resize:vertical"></textarea>
@@ -540,7 +818,7 @@
 
   <!-- ⑦ 平台规范库（多项目共享的国标/规范/通用文件） -->
   <div class="panel" id="p-platform">
-    <h2>平台级规范库（国标/规范/通用文件，独立于子项目库）</h2>
+    <h2 id="platform-lib">平台级规范库（国标/规范/通用文件，独立于子项目库）</h2>
     <div class="msg" style="margin-bottom:8px">规范/标准在此单独建库，所有项目共享；AI 检索项目库时可同时读取平台库（引用规范正文内容而非名称）。上传时立即登记有效期，每 6 个月自动提醒核验；配置联网端点后可自动搜索最新版替换。新电脑安装时导出 .fpglib 导入即可复用。</div>
     <div class="row" style="margin-bottom:10px">
       <input type="file" id="platFiles" multiple style="flex:1;min-width:200px;font-size:13px">
@@ -558,8 +836,8 @@
 
   <!-- ⑧ 工程资料生成计划（v0.1.12） -->
   <div class="panel" id="p-docplan">
-    <h2>工程资料生成计划（按项目进度，缺项进待办）</h2>
-    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+    <h2 id="doc-plan">工程资料生成计划（按项目进度，缺项进待办）</h2>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
       <h3 style="margin:0 0 6px;font-size:15px">资料完整性检查（v0.1.36）</h3>
       <div class="msg" style="margin-bottom:6px">按工程6个阶段（施工准备/设备到货/施工过程/吊装作业/设计变更/竣工验收）自动检查资料完整性，区分项目级/车间级/设备级，缺失项按优先级列出待补充清单。</div>
       <div class="row">
@@ -589,7 +867,7 @@
     <div class="msg" id="docplanMsg"></div>
     <div id="docplanList"></div>
     <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
-      <h2>竣工资料自动组卷（v0.1.24）</h2>
+      <h2 id="completion-archive">竣工资料自动组卷（v0.1.24）</h2>
       <div class="msg" style="margin-bottom:8px">生成的资料自动存档归档；按竣工归档卷宗归卷，缺失项列出待补，补齐后可整卷导出（zip 含卷内目录.xlsx）。</div>
       <div class="row" style="margin-bottom:8px">
         <button class="btn" id="btnArchiveRefresh">刷新组卷状态</button>
@@ -602,7 +880,7 @@
 
   <!-- ⑨ 云库（手机端对接 v0.1.14） -->
   <div class="panel" id="p-cloud">
-    <h2>云库（多电脑合并 + 手机端现场上传）</h2>
+    <h2 id="cloud-library">云库（多电脑合并 + 手机端现场上传）</h2>
     <div class="msg" style="margin-bottom:8px">云库把多台电脑的解析结果合并为一个完整库，手机端配置云库地址即可户外读取；手机端上传的现场照片/语音/文字会先到云端"现场区"，点"拉取现场资料"即可自动下载并解析进本地项目库。连接配置在 app/config.py 的 CLOUD_ENDPOINT / CLOUD_API_KEY。</div>
     <div class="row" style="margin-bottom:10px;gap:8px;flex-wrap:wrap">
       <span class="chip" id="clConn">连接状态 —</span>
@@ -634,7 +912,7 @@
 
 
 <!-- v0.1.45：设备台账多版本合并去重 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备台账合并去重（v0.1.45）</h3>
   <div class="msg" style="margin-bottom:6px">自动识别同一设备在不同版本台账中的重复记录（位号匹配>名称+型号匹配），合并去重，最新版为准。名称相似但无法确认的留人工确认。</div>
   <div class="row" style="margin-bottom:6px">
@@ -650,7 +928,7 @@
 </div>
 
 <!-- v0.1.46：施工日志自动生成 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">施工日志自动生成（v0.1.46）</h3>
   <div class="msg" style="margin-bottom:6px">从现场记录（手机端照片/语音/文字）按日期汇总，自动提取施工内容、设备、人员、材料、机械、质量安全，生成Word施工日志。缺失字段提示补充，支持人工修改后导出。</div>
   <div class="row" style="margin-bottom:6px">
@@ -685,7 +963,7 @@
 </div>
 
 <!-- v0.1.47：设备间管线/连接关系 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备间管线/连接关系（v0.1.47）</h3>
   <div class="msg" style="margin-bottom:6px">从CAD/PID图纸提取管线编号和介质，通过空间位置关联管线两端连接的设备，构建设备-管线-设备连接网络。</div>
   <div class="row" style="margin-bottom:6px">
@@ -706,7 +984,7 @@
 </div>
 
 <!-- v0.1.48：竣工资料自动组卷增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">竣工资料自动组卷（增强版 v0.1.48）</h3>
   <div class="msg" style="margin-bottom:6px">多级分类组卷（卷→专业→车间→设备），自动检查完整性，生成详细卷内目录，导出多级文件夹结构归档包。</div>
   <div class="row" style="margin-bottom:6px">
@@ -723,7 +1001,7 @@
 </div>
 
 <!-- v0.1.58：设备安装位置与管线联动可视化 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与管线联动可视化（v0.1.58）</h3>
   <div class="msg" style="margin-bottom:6px">展示设备在车间中的位置分布和设备间的管线连接关系，支持按车间和设备类型筛选。</div>
   <div class="row" style="margin-bottom:6px">
@@ -737,7 +1015,7 @@
 </div>
 
 <!-- v0.1.104：技术交底生成 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">技术交底自动生成（v0.1.104）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成技术交底记录（8个标准章节，含精度要求和签字栏）。</div>
   <div class="row" style="margin-bottom:6px">
@@ -754,7 +1032,7 @@
 </div>
 
 <!-- v0.1.105：安全交底生成 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
   <h3 style="margin:0 0 6px;font-size:15px">安全交底自动生成（v0.1.105）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库和危险源库自动生成安全交底记录（8个标准章节，含危险源辨识和应急预案）。</div>
   <div class="row" style="margin-bottom:6px">
@@ -774,7 +1052,7 @@
 </div>
 
 <!-- v0.1.106：竣工资料组卷增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">竣工资料自动组卷增强（v0.1.106）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成竣工资料组卷目录（8卷80+项资料，根据设备类型自动调整）。</div>
   <div class="row" style="margin-bottom:6px">
@@ -795,7 +1073,7 @@
 </div>
 
 <!-- v0.1.101：施工方案增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">施工方案自动生成增强（v0.1.101）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成完整施工方案（11个标准章节）。</div>
   <div class="row" style="margin-bottom:6px">
@@ -812,7 +1090,7 @@
 </div>
 
 <!-- v0.1.102：吊装方案增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
   <h3 style="margin:0 0 6px;font-size:15px">吊装方案自动生成增强（v0.1.102）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细参数和吊装参数库自动生成完整吊装方案（12个标准章节，含吊车选型和吊装计算）。</div>
   <div class="row" style="margin-bottom:6px">
@@ -834,7 +1112,7 @@
 </div>
 
 <!-- v0.1.103：故障诊断AI助手 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">故障诊断AI助手（v0.1.103）</h3>
   <div class="msg" style="margin-bottom:6px">基于常见故障库进行智能故障诊断，支持症状匹配、原因排查、处理建议、预防措施。</div>
   <div class="row" style="margin-bottom:6px">
@@ -854,7 +1132,7 @@
 </div>
 
 <!-- v0.1.98：多电脑并库现场记录合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库现场记录合并（v0.1.98）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑上传的现场记录合并，自动去重，冲突处理，待人工确认。</div>
   <div class="row" style="margin-bottom:6px">
@@ -878,7 +1156,7 @@
 </div>
 
 <!-- v0.1.99：移动端APP界面 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
   <h3 style="margin:0 0 6px;font-size:15px">移动端APP界面（v0.1.99）</h3>
   <div class="msg" style="margin-bottom:6px">移动端专用界面，自适应手机屏幕，底部Tab导航。</div>
   <div class="row" style="margin-bottom:6px">
@@ -891,7 +1169,7 @@
 </div>
 
 <!-- v0.1.100：设备详细知识库 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备详细知识库（v0.1.100）</h3>
   <div class="msg" style="margin-bottom:6px">8种典型设备详细参数、施工要点、质量标准、常见故障、验收项目。</div>
   <div class="row" style="margin-bottom:6px">
@@ -919,7 +1197,7 @@
 </div>
 
 <!-- v0.1.96：施工进度资料联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">施工进度与资料生成联动（v0.1.96）</h3>
   <div class="msg" style="margin-bottom:6px">根据施工进度自动检查对应阶段资料完整性，生成需要的资料清单。</div>
   <div class="row" style="margin-bottom:6px">
@@ -948,7 +1226,7 @@
 </div>
 
 <!-- v0.1.97：移动端上传联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">移动端资料上传与解析联动（v0.1.97）</h3>
   <div class="msg" style="margin-bottom:6px">移动端上传资料后自动解析，自动识别资料类型，自动归类到项目/车间/设备。</div>
   <div class="row" style="margin-bottom:6px">
@@ -968,7 +1246,7 @@
 </div>
 
 <!-- v0.1.94：Word文档导出 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">Word文档导出（v0.1.94）</h3>
   <div class="msg" style="margin-bottom:6px">将现场记录导出为标准Word文档，含数据表格、设备专用要点、签字栏。</div>
   <div class="row" style="margin-bottom:6px">
@@ -989,7 +1267,7 @@
 </div>
 
 <!-- v0.1.95：AI知识库联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">AI助手与资料库联动（v0.1.95）</h3>
   <div class="msg" style="margin-bottom:6px">AI助手深度访问项目资料库，多库联合检索，生成专业问答上下文。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1010,7 +1288,7 @@
 </div>
 
 <!-- v0.1.93：资料记录联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">资料生成与现场记录联动（v0.1.93）</h3>
   <div class="msg" style="margin-bottom:6px">根据现场记录自动生成工程资料，现场数据自动填充到资料模板。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1037,7 +1315,7 @@
 </div>
 
 <!-- v0.1.91：矿山现场记录 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山现场记录（v0.1.91）</h3>
   <div class="msg" style="margin-bottom:6px">针对矿山设备特点优化现场记录模板，8种记录类型，自动填充设备信息和专用要点。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1065,7 +1343,7 @@
 </div>
 
 <!-- v0.1.90：矿山AI助手优化 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山AI助手优化（v0.1.90）</h3>
   <div class="msg" style="margin-bottom:6px">针对矿山设备特点优化问答提示词，支持7种专业问答模式和设备专用提示词。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1092,7 +1370,7 @@
 </div>
 
 <!-- v0.1.89：矿山资料完整性检查 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山资料完整性检查（v0.1.89）</h3>
   <div class="msg" style="margin-bottom:6px">按工艺流程（破碎/磨矿/选别/脱水/火法/湿法/公用辅助）检查各系统资料完整性，生成待补充清单。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1106,7 +1384,7 @@
 </div>
 
 <!-- v0.1.88：矿山施工进度计划 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山施工进度计划（v0.1.88）</h3>
   <div class="msg" style="margin-bottom:6px">按工艺流程（破碎→磨矿→选别→脱水→冶炼）自动生成施工进度计划和甘特图。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1124,7 +1402,7 @@
 </div>
 
 <!-- v0.1.87：多电脑并库矿山设备合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库矿山设备合并（v0.1.87）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑解析同一矿山项目设备数据的合并，支持设计院/厂家编号映射、跨车间合并、空间位置合并。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1140,7 +1418,7 @@
 </div>
 
 <!-- v0.1.86：矿山竣工资料组卷管理 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山竣工资料组卷管理（v0.1.86）</h3>
   <div class="msg" style="margin-bottom:6px">按矿山工艺流程（破碎→磨矿→选别→脱水→冶炼）组卷竣工资料。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1154,7 +1432,7 @@
 </div>
 
 <!-- v0.1.85：矿山设备施工方案/吊装方案生成 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山设备施工方案/吊装方案生成（v0.1.85）</h3>
   <div class="msg" style="margin-bottom:6px">针对矿山设备重量大、尺寸大、安装要求特殊的特点，生成专用施工方案和吊装方案。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1178,7 +1456,7 @@
 </div>
 
 <!-- v0.1.84：矿山/选矿/冶炼设备知识库 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山/选矿/冶炼设备知识库（v0.1.84）</h3>
   <div class="msg" style="margin-bottom:6px">矿山设备、选厂设备、湿法/火法冶炼设备分类清单，吊装参数、技术交底、隐蔽工程、开箱验收、设计变更、货损、施工日志要点。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1193,7 +1471,7 @@
 </div>
 
 <!-- v0.1.83：设备安装位置与竣工资料联动增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与竣工资料联动增强（v0.1.83）</h3>
   <div class="msg" style="margin-bottom:6px">竣工资料清单自动生成、完整性检查、组卷优化、资料总览。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1209,7 +1487,7 @@
 </div>
 
 <!-- v0.1.82：设备安装位置与施工进度联动增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动增强（v0.1.82）</h3>
   <div class="msg" style="margin-bottom:6px">施工顺序优化、施工冲突识别、关键路径分析、施工进度预警、资源优化配置。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1228,7 +1506,7 @@
 </div>
 
 <!-- v0.1.82：设备安装位置与施工进度联动增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动增强（v0.1.82）</h3>
   <div class="msg" style="margin-bottom:6px">关键路径分析、施工进度预警、施工顺序优化、施工进度总览。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1252,7 +1530,7 @@
 </div>
 
 <!-- v0.1.81：多电脑并库货损报告合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库货损报告合并（v0.1.81）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑解析的货损报告数据合并，自动去重，报告冲突处理，合并后自动触发完整性检查。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1274,7 +1552,7 @@
 </div>
 
 <!-- v0.1.80：多电脑并库设计变更合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库设计变更合并（v0.1.80）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑解析的设计变更数据合并，自动去重，变更冲突处理，合并后自动触发完整性检查。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1296,7 +1574,7 @@
 </div>
 
 <!-- v0.1.79：多电脑并库隐蔽工程验收记录合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库隐蔽工程验收记录合并（v0.1.79）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑解析的隐蔽工程验收记录数据合并，自动去重，记录冲突处理，合并后自动触发完整性检查。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1318,7 +1596,7 @@
 </div>
 
 <!-- v0.1.78：多电脑并库开箱验收记录合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库开箱验收记录合并（v0.1.78）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑解析的开箱验收记录数据合并，自动去重，记录冲突处理，合并后自动触发完整性检查。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1340,7 +1618,7 @@
 </div>
 
 <!-- v0.1.77：设备安装位置与货损报告联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与货损报告联动（v0.1.77）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成货损报告，包含报告编号、货损情况、损坏部位、原因分析、处理措施、索赔要求等完整要素。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1357,7 +1635,7 @@
 </div>
 
 <!-- v0.1.76：设备安装位置与设计变更联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与设计变更联动（v0.1.76）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成设计变更，包含变更编号、变更原因、影响分析、处理措施、验收要求等完整要素。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1374,7 +1652,7 @@
 </div>
 
 <!-- v0.1.75：多电脑并库施工日志合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库施工日志合并（v0.1.75）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑解析的施工日志数据合并，自动去重，日志冲突处理，合并后自动触发完整性检查。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1396,7 +1674,7 @@
 </div>
 
 <!-- v0.1.74：设备安装位置与隐蔽工程验收记录联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与隐蔽工程验收记录联动（v0.1.74）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成隐蔽工程验收记录，包含隐蔽部位、隐蔽内容、检查项目、质量标准、验收依据、验收结论等完整要素。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1412,7 +1690,7 @@
 </div>
 
 <!-- v0.1.73：设备安装位置与开箱验收记录联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与开箱验收记录联动（v0.1.73）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成开箱验收记录，包含设备基本信息、包装情况、外观检查、附件清单、随机文件、验收结论等完整要素。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1428,7 +1706,7 @@
 </div>
 
 <!-- v0.1.72：多电脑并库竣工资料合并增强 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库竣工资料合并增强（v0.1.72）</h3>
   <div class="msg" style="margin-bottom:6px">按设备维度合并竣工资料，自动去重，资料冲突处理，合并后自动触发完整性检查，支持按车间/标高分组。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1452,7 +1730,7 @@
 </div>
 
 <!-- v0.1.71：设备安装位置与施工日志联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工日志联动（v0.1.71）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成施工日志，包含施工部位、施工内容、人员配置、机具设备、材料使用、质量检查、安全情况、问题及处理、明日计划。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1469,7 +1747,7 @@
 </div>
 
 <!-- v0.1.70：设备安装位置与技术交底联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与技术交底联动（v0.1.70）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成技术交底六要素：工程概况、施工准备、施工工艺、质量标准、安全注意事项、环保要求。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1484,7 +1762,7 @@
 </div>
 
 <!-- v0.1.69：多电脑并库施工进度合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库施工进度合并（v0.1.69）</h3>
   <div class="msg" style="margin-bottom:6px">多台电脑解析的施工进度数据合并，自动去重，进度冲突处理，合并后写回施工进度。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1506,7 +1784,7 @@
 </div>
 
 <!-- v0.1.68：设备安装位置与吊装方案联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与吊装方案联动（v0.1.68）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成吊装方案要点，包括吊装环境分析、吊装参数建议、吊装顺序、安全注意事项。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1521,7 +1799,7 @@
 </div>
 
 <!-- v0.1.67：设备安装位置与竣工资料联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与竣工资料联动（v0.1.67）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成竣工资料清单，完整性检查，资料缺失提醒。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1537,7 +1815,7 @@
 </div>
 
 <!-- v0.1.66：多电脑并库空间模型合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库空间模型合并（v0.1.66）</h3>
   <div class="msg" style="margin-bottom:6px">将其他电脑解析的空间模型合并到本地，自动去重、坐标/标高/车间冲突处理、完整性检查。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1559,7 +1837,7 @@
 </div>
 
 <!-- v0.1.65：设备安装位置与施工方案联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工方案联动（v0.1.65）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置自动生成施工方案要点，包括施工环境分析、施工顺序建议、安全注意事项、质量控制要点。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1574,7 +1852,7 @@
 </div>
 
 <!-- v0.1.64：设备安装位置与施工进度联动 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动（v0.1.64）</h3>
   <div class="msg" style="margin-bottom:6px">根据设备位置（车间、标高、坐标）自动安排施工顺序，生成甘特图，管理设备施工状态。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1600,7 +1878,7 @@
 </div>
 
 <!-- v0.1.63：多电脑并库设备关系合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库设备关系合并（v0.1.63）</h3>
   <div class="msg" style="margin-bottom:6px">将其他电脑解析的设备关系图谱合并到本地，自动去重、冲突处理、完整性检查。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1622,7 +1900,7 @@
 </div>
 
 <!-- v0.1.62：设备安装位置三维可视化（等轴测视图） -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置三维可视化（v0.1.62）</h3>
   <div class="msg" style="margin-bottom:6px">等轴测视图展示设备三维空间位置，支持视角切换（等轴测/正视图/侧视图/俯视图）。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1641,7 +1919,7 @@
 </div>
 
 <!-- v0.1.61：设备位置按标高分层可视化 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备位置按标高分层可视化（v0.1.61）</h3>
   <div class="msg" style="margin-bottom:6px">按标高z坐标分层展示设备位置，支持切换不同标高层、分层堆叠视图。</div>
   <div class="row" style="margin-bottom:6px">
@@ -1656,7 +1934,7 @@
 </div>
 
 <!-- v0.1.59：多电脑并库竣工资料合并 -->
-<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库竣工资料合并（v0.1.59）</h3>
   <div class="msg" style="margin-bottom:6px">将其他电脑解析的竣工资料合并到本地库，自动去重、版本冲突处理、合并日志记录。</div>
   <div class="row" style="margin-bottom:6px">
@@ -2020,5 +2298,69 @@ function deleteProject(projectId) {
     .catch(e => alert('删除请求失败：' + e.message));
 }
 </script>
+
+<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+
+<script>
+// 导航功能
+function navTo(id) {
+    var el = document.getElementById(id);
+    if (el) {
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+    // 移动端关闭侧边栏
+    document.getElementById('sidebar').classList.remove('open');
+    // 更新激活状态
+    updateActiveNav(id);
+}
+
+function updateActiveNav(activeId) {
+    document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+        a.classList.remove('active');
+        if (a.getAttribute('href') === '#' + activeId) {
+            a.classList.add('active');
+        }
+    });
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+}
+
+// 滚动监听：高亮当前区块 + 显示回到顶部
+var sections = document.querySelectorAll('[id]');
+var backToTop = document.getElementById('backToTop');
+
+window.addEventListener('scroll', function() {
+    var scrollPos = window.scrollY + 100;
+    
+    // 回到顶部按钮
+    if (window.scrollY > 400) {
+        backToTop.classList.add('show');
+    } else {
+        backToTop.classList.remove('show');
+    }
+    
+    // 高亮当前导航
+    var currentId = '';
+    document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+        var id = a.getAttribute('href').substring(1);
+        var el = document.getElementById(id);
+        if (el && el.offsetTop <= scrollPos) {
+            currentId = id;
+        }
+    });
+    if (currentId) {
+        updateActiveNav(currentId);
+    }
+});
+
+// 点击主内容区关闭移动端侧边栏
+document.querySelector('.main-content').addEventListener('click', function() {
+    document.getElementById('sidebar').classList.remove('open');
+});
+</script>
+  </main>
+</div>
 </body>
 </html>
