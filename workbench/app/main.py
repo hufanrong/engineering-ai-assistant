@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.79")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.80")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2224,6 +2224,70 @@ def concealment_merge_stats():
     from . import concealment_merge as _cm
     return {"ok": True, **_cm.merge_stats()}
 
+
+
+@app.post("/api/design-change-merge/merge")
+def design_change_merge_merge(body: dict):
+    """v0.1.80：合并源设计变更数据。"""
+    from . import design_change_merge as _dcm
+    source = body.get("source_changes", {})
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    return {"ok": True, **_dcm.merge_design_changes(source, source_pc, strategy)}
+
+
+@app.post("/api/design-change-merge/merge-file")
+def design_change_merge_merge_file(body: dict):
+    """v0.1.80：从文件合并设计变更。"""
+    from . import design_change_merge as _dcm
+    file_path = body.get("file_path", "")
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    source = _dcm.load_changes_from_file(file_path)
+    if "error" in source:
+        raise HTTPException(status_code=400, detail=source["error"])
+    return {"ok": True, **_dcm.merge_design_changes(source, source_pc, strategy)}
+
+
+@app.get("/api/design-change-merge/pending")
+def design_change_merge_pending():
+    """v0.1.80：列出待人工确认的变更冲突。"""
+    from . import design_change_merge as _dcm
+    return {"ok": True, "pending": _dcm.list_pending()}
+
+
+@app.post("/api/design-change-merge/resolve")
+def design_change_merge_resolve(body: dict):
+    """v0.1.80：处理待人工确认的变更冲突。"""
+    from . import design_change_merge as _dcm
+    index = body.get("index", 0)
+    decision = body.get("decision", "")
+    if decision not in ["use_source", "keep_existing", "skip"]:
+        raise HTTPException(status_code=400, detail="decision必须是use_source/keep_existing/skip")
+    return {"ok": True, **_dcm.resolve_pending(index, decision)}
+
+
+@app.get("/api/design-change-merge/log")
+def design_change_merge_log():
+    """v0.1.80：列出合并日志。"""
+    from . import design_change_merge as _dcm
+    return {"ok": True, "log": _dcm.list_merge_log()}
+
+
+@app.get("/api/design-change-merge/stats")
+def design_change_merge_stats():
+    """v0.1.80：获取合并统计信息。"""
+    from . import design_change_merge as _dcm
+    return {"ok": True, **_dcm.merge_stats()}
+
+
+@app.get("/api/design-change-merge/integrity")
+def design_change_merge_integrity():
+    """v0.1.80：检查设计变更完整性。"""
+    from . import design_change_merge as _dcm
+    return {"ok": True, **_dcm.check_design_change_integrity()}
 
 @app.get("/api/concealment-merge/integrity")
 def concealment_merge_integrity():
