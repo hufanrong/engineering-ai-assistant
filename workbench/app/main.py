@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.117")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.118")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 app.add_middleware(
@@ -3266,6 +3266,79 @@ def restore_backup(data: dict):
     """从备份恢复。"""
     from . import auto_updater as _au
     return _au.restore_backup(data.get("backup_name", ""))
+
+
+# ========== v0.1.118：手机端语音+文字+图片组合上传 ==========
+@app.post("/api/mobile/combined-upload")
+async def mobile_combined_upload(request):
+    """接收手机端组合上传（语音+文字+图片同步），自动归入当前项目解析。"""
+    from . import project_manager as _pm
+    from . import scanner as _scanner
+    import tempfile
+    
+    form = await request.form()
+    
+    uploader = form.get("uploader", "")
+    workshop = form.get("workshop", "")
+    text = form.get("text", "")
+    record_type = form.get("record_type", "combined")
+    
+    results = {"ok": True, "uploader": uploader, "workshop": workshop, "voice": False, "images": 0, "text": bool(text)}
+    
+    # 创建临时目录保存上传文件
+    tmp_dir = tempfile.mkdtemp(prefix="combined_upload_")
+    saved_files = []
+    
+    try:
+        # 保存语音文件
+        voice_file = form.get("voice")
+        if voice_file and hasattr(voice_file, 'read'):
+            voice_path = os.path.join(tmp_dir, voice_file.filename if hasattr(voice_file, 'filename') else "voice.webm")
+            content = await voice_file.read()
+            with open(voice_path, "wb") as f:
+                f.write(content)
+            saved_files.append(voice_path)
+            results["voice"] = True
+        
+        # 保存图片文件
+        images = form.getlist("images")
+        for img in images:
+            if hasattr(img, 'read'):
+                img_path = os.path.join(tmp_dir, img.filename if hasattr(img, 'filename') else f"image_{len(saved_files)}.jpg")
+                content = await img.read()
+                with open(img_path, "wb") as f:
+                    f.write(content)
+                saved_files.append(img_path)
+                results["images"] += 1
+        
+        # 保存文字记录
+        if text:
+            text_path = os.path.join(tmp_dir, f"record_{int(datetime.datetime.now().timestamp())}.txt")
+            with open(text_path, "w", encoding="utf-8") as f:
+                f.write(f"上传人: {uploader}\n")
+                f.write(f"车间: {workshop}\n")
+                f.write(f"类型: {record_type}\n")
+                f.write(f"时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("="*50 + "\n\n")
+                f.write(text)
+            saved_files.append(text_path)
+        
+        # 扫描解析所有文件
+        if saved_files:
+            stats = _scanner.scan_folder(tmp_dir, force=True)
+            results["parsed"] = stats.get("parsed", 0)
+            results["total_files"] = len(saved_files)
+        
+        results["message"] = f"组合上传成功：语音{'' if results['voice'] else '无'}，图片{results['images']}张，文字{'' if results['text'] else '无'}"
+        return results
+        
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        # 清理临时文件
+        import shutil
+        if os.path.isdir(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 @app.post("/api/mobile/offline-batch-upload")
 async def mobile_offline_batch_upload(request: Request):
