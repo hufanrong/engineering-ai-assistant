@@ -315,6 +315,98 @@
 .back-to-top:hover { transform: translateY(-2px); }
 .back-to-top.show { display: block; }
 </style>
+
+<style>
+/* ===== v0.1.116 精简布局：7大模块 + 可折叠区块 ===== */
+.module-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    background: #fff;
+    border-bottom: 2px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex-wrap: wrap;
+}
+.module-tab {
+    padding: 8px 14px;
+    border: none;
+    background: transparent;
+    color: #666;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.module-tab:hover { background: #f0f0f0; color: #333; }
+.module-tab.active { background: #1E5AA8; color: #fff; font-weight: 500; }
+
+/* 区块折叠 */
+.collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.collapsible-header::before {
+    content: "▼";
+    font-size: 10px;
+    transition: transform 0.2s;
+    color: #999;
+}
+.collapsible-header.collapsed::before {
+    transform: rotate(-90deg);
+}
+.collapsible-content {
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+.collapsible-content.collapsed {
+    display: none;
+}
+
+/* 统一上传区域 */
+.unified-upload {
+    background: linear-gradient(135deg, rgba(30,90,168,0.06), rgba(255,122,0,0.04));
+    border: 2px dashed rgba(30,90,168,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 16px;
+}
+.unified-upload h3 { margin: 0 0 8px; color: #1E5AA8; }
+.unified-upload p { margin: 0 0 12px; color: #666; font-size: 13px; }
+.unified-upload .upload-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+.unified-upload .upload-actions button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.unified-upload .upload-actions button:hover { transform: translateY(-1px); }
+.btn-scan { background: #1E5AA8; color: #fff; }
+.btn-manual { background: #FF7A00; color: #fff; }
+.btn-batch { background: #52C41A; color: #fff; }
+.btn-failed { background: #EA6668; color: #fff; }
+
+/* 模块内容区域 */
+.module-content { display: none; }
+.module-content.active { display: block; }
+
+/* 隐藏旧的sidebar导航中多余的项 */
+.sidebar-section + .sidebar-nav { display: none; }
+.sidebar-nav.show { display: block; }
+</style>
 </head>
 <body>
 <div class="update-banner" id="updateBanner">
@@ -344,63 +436,50 @@
       </div>
     </div>
 
-    <div class="sidebar-section">项目管理</div>
+    <div class="sidebar-section">功能模块</div>
     <ul class="sidebar-nav">
-      <li><a href="#project-bar" onclick="navTo('project-bar')"><span class="nav-icon">📁</span>项目概览</a></li>
-      <li><a href="#project-backup" onclick="navTo('project-backup')"><span class="nav-icon">💾</span>备份与合并</a></li>
-    </ul>
-
-    <div class="sidebar-section">文件上传</div>
-    <ul class="sidebar-nav">
-      <li><a href="#scan-parse" onclick="navTo('scan-parse')"><span class="nav-icon">📂</span>扫描解析</a></li>
-      <li><a href="#manual-upload" onclick="navTo('manual-upload')"><span class="nav-icon">📤</span>手动上传</a></li>
-      <li><a href="#batch-upload" onclick="navTo('batch-upload')"><span class="nav-icon">📦</span>批量上传</a></li>
-      <li><a href="#failed-files" onclick="navTo('failed-files')"><span class="nav-icon">⚠️</span>失败待处理</a></li>
-    </ul>
-
-    <div class="sidebar-section">解析结果</div>
-    <ul class="sidebar-nav">
-      <li><a href="#parsed-list" onclick="navTo('parsed-list')"><span class="nav-icon">📋</span>已解析文件</a></li>
-      <li><a href="#vector-search" onclick="navTo('vector-search')"><span class="nav-icon">🔍</span>向量检索</a></li>
-      <li><a href="#workshop-auto" onclick="navTo('workshop-auto')"><span class="nav-icon">🏭</span>车间划分</a></li>
-      <li><a href="#version-merge" onclick="navTo('version-merge')"><span class="nav-icon">🔀</span>版本对照</a></li>
-    </ul>
-
-    <div class="sidebar-section">关系与空间</div>
-    <ul class="sidebar-nav">
-      <li><a href="#cad-linkage" onclick="navTo('cad-linkage')"><span class="nav-icon">🗺️</span>多图纸联动</a></li>
-      <li><a href="#spatial-model" onclick="navTo('spatial-model')"><span class="nav-icon">📐</span>空间结构</a></li>
-      <li><a href="#device-workshop" onclick="navTo('device-workshop')"><span class="nav-icon">🏗️</span>设备车间归属</a></li>
-      <li><a href="#tag-alias" onclick="navTo('tag-alias')"><span class="nav-icon">🔗</span>编号映射</a></li>
-    </ul>
-
-    <div class="sidebar-section">工程资料</div>
-    <ul class="sidebar-nav">
-      <li><a href="#doc-gen" onclick="navTo('doc-gen')"><span class="nav-icon">📝</span>资料生成</a></li>
-      <li><a href="#smart-gen" onclick="navTo('smart-gen')"><span class="nav-icon">🤖</span>智能生成</a></li>
-      <li><a href="#template-mgr" onclick="navTo('template-mgr')"><span class="nav-icon">📋</span>模板管理</a></li>
-      <li><a href="#doc-plan" onclick="navTo('doc-plan')"><span class="nav-icon">📅</span>生成计划</a></li>
-      <li><a href="#completion-archive" onclick="navTo('completion-archive')"><span class="nav-icon">📚</span>竣工组卷</a></li>
-    </ul>
-
-    <div class="sidebar-section">平台与云端</div>
-    <ul class="sidebar-nav">
-      <li><a href="#platform-lib" onclick="navTo('platform-lib')"><span class="nav-icon">📖</span>平台规范库</a></li>
-      <li><a href="#cloud-library" onclick="navTo('cloud-library')"><span class="nav-icon">☁️</span>云库</a></li>
-      <li><a href="#cloud-queue" onclick="navTo('cloud-queue')"><span class="nav-icon">🔄</span>云端合并队列</a></li>
-      <li><a href="#export-merge" onclick="navTo('export-merge')"><span class="nav-icon">📤</span>导出合并</a></li>
+      <li><a href="#" onclick="switchModule('project');return false;"><span class="nav-icon">📁</span>项目管理</a></li>
+      <li><a href="#" onclick="switchModule('upload');return false;"><span class="nav-icon">📤</span>文件上传解析</a></li>
+      <li><a href="#" onclick="switchModule('result');return false;"><span class="nav-icon">📋</span>解析结果</a></li>
+      <li><a href="#" onclick="switchModule('relation');return false;"><span class="nav-icon">🔗</span>关系与空间</a></li>
+      <li><a href="#" onclick="switchModule('docgen');return false;"><span class="nav-icon">📝</span>工程资料生成</a></li>
+      <li><a href="#" onclick="switchModule('platform');return false;"><span class="nav-icon">📖</span>平台规范库</a></li>
+      <li><a href="#" onclick="switchModule('cloud');return false;"><span class="nav-icon">☁️</span>云端与多机</a></li>
     </ul>
 
     <div class="sidebar-footer">
       © 2026 胡繁荣<br>
-      繁工AI v0.1.115
+      繁工AI v0.1.116
     </div>
   </aside>
 
   <!-- 主内容区 -->
   <main class="main-content">
+    <!-- 模块Tab栏 -->
+    <div class="module-tabs" id="moduleTabs">
+      <button class="module-tab active" onclick="switchModule('project')">📁 项目管理</button>
+      <button class="module-tab" onclick="switchModule('upload')">📤 文件上传解析</button>
+      <button class="module-tab" onclick="switchModule('result')">📋 解析结果</button>
+      <button class="module-tab" onclick="switchModule('relation')">🔗 关系与空间</button>
+      <button class="module-tab" onclick="switchModule('docgen')">📝 工程资料生成</button>
+      <button class="module-tab" onclick="switchModule('platform')">📖 平台规范库</button>
+      <button class="module-tab" onclick="switchModule('cloud')">☁️ 云端与多机</button>
+    </div>
+
 
   <div class="wrap">
+    <!-- 统一上传区域（文件上传模块默认显示） -->
+    <div class="unified-upload" id="unifiedUpload" style="display:none">
+      <h3>📤 文件上传与自动解析</h3>
+      <p>选择上传方式，文件上传后自动解析分类（图纸/箱单/工程资料/台账等），向量化入库，按需调用</p>
+      <div class="upload-actions">
+        <button class="btn-scan" onclick="scrollToSection('scan-parse')">📂 扫描文件夹</button>
+        <button class="btn-manual" onclick="scrollToSection('manual-upload')">📄 手动上传文件</button>
+        <button class="btn-batch" onclick="scrollToSection('batch-upload')">📦 批量上传</button>
+        <button class="btn-failed" onclick="scrollToSection('failed-files')">⚠️ 失败重试</button>
+      </div>
+    </div>
+
   <header>
     <div class="logo">繁</div>
     <div class="brand">
@@ -2362,5 +2441,125 @@ document.querySelector('.main-content').addEventListener('click', function() {
 </script>
   </main>
 </div>
+
+<script>
+// ===== v0.1.116 精简布局：模块切换 + 区块折叠 =====
+var currentModule = 'project';
+
+// 模块定义：每个模块包含哪些区块ID（按顺序）
+var moduleSections = {
+    project: ['project-bar', 'smart-gen', 'template-mgr', 'project-backup'],
+    upload: ['scan-parse', 'failed-files', 'manual-upload', 'batch-upload'],
+    result: ['parsed-list', 'vector-search', 'workshop-auto', 'version-merge', 'export-merge'],
+    relation: ['cad-linkage', 'spatial-model', 'device-workshop', 'tag-alias'],
+    docgen: ['doc-gen', 'doc-plan', 'completion-archive'],
+    platform: ['platform-lib'],
+    cloud: ['cloud-library', 'cloud-queue']
+};
+
+// 所有需要被模块控制显隐的区块选择器
+var allControlledSections = [];
+for (var mod in moduleSections) {
+    allControlledSections = allControlledSections.concat(moduleSections[mod]);
+}
+
+function switchModule(moduleName) {
+    currentModule = moduleName;
+    
+    // 更新Tab激活状态
+    document.querySelectorAll('.module-tab').forEach(function(tab) {
+        tab.classList.remove('active');
+        if (tab.textContent.indexOf(moduleName === 'project' ? '项目管理' : 
+            moduleName === 'upload' ? '文件上传' :
+            moduleName === 'result' ? '解析结果' :
+            moduleName === 'relation' ? '关系与空间' :
+            moduleName === 'docgen' ? '工程资料' :
+            moduleName === 'platform' ? '平台规范' : '云端') >= 0) {
+            tab.classList.add('active');
+        }
+    });
+    
+    // 更新侧边栏激活状态
+    document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+        a.classList.remove('active');
+    });
+    
+    // 显示/隐藏统一上传区域
+    var unifiedUpload = document.getElementById('unifiedUpload');
+    if (unifiedUpload) {
+        unifiedUpload.style.display = moduleName === 'upload' ? 'block' : 'none';
+    }
+    
+    // 显示当前模块的区块，隐藏其他模块的区块
+    allControlledSections.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) {
+            // 找到该区块的容器（h2或div的父级）
+            var container = el.closest('div') || el;
+            if (moduleSections[moduleName].indexOf(id) >= 0) {
+                container.style.display = '';
+                // 同时显示该区块后面的兄弟内容直到下一个区块
+                showFollowingContent(el);
+            } else {
+                container.style.display = 'none';
+            }
+        }
+    });
+    
+    // 滚动到顶部
+    window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function showFollowingContent(startEl) {
+    // 显示从startEl开始到下一个有id的区块之间的所有内容
+    var el = startEl;
+    var count = 0;
+    while (el && count < 50) {
+        el = el.nextElementSibling;
+        if (!el) break;
+        // 如果遇到下一个有id的主要区块，停止
+        if (el.id && allControlledSections.indexOf(el.id) >= 0) break;
+        if (el.querySelector && el.querySelector('[id]')) {
+            var innerId = el.querySelector('[id]').id;
+            if (allControlledSections.indexOf(innerId) >= 0) break;
+        }
+        el.style.display = '';
+        count++;
+    }
+}
+
+function scrollToSection(id) {
+    var el = document.getElementById(id);
+    if (el) {
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+}
+
+// 初始化：默认显示项目管理模块
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+        switchModule('project');
+        initCollapsible();
+    }, 500);
+});
+
+// 区块折叠功能
+function initCollapsible() {
+    // 给所有h2添加折叠功能
+    document.querySelectorAll('h2[id]').forEach(function(h2) {
+        h2.classList.add('collapsible-header');
+        h2.onclick = function() {
+            this.classList.toggle('collapsed');
+            // 折叠后面的内容
+            var el = this.nextElementSibling;
+            while (el) {
+                if (el.tagName === 'H2' || (el.id && allControlledSections.indexOf(el.id) >= 0)) break;
+                el.classList.toggle('collapsed');
+                el = el.nextElementSibling;
+            }
+        };
+    });
+}
+</script>
 </body>
 </html>
