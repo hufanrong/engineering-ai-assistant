@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.106）
+# 繁工AI · 本地解析工作台（MVP v0.1.107）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.107**：**项目管理 + 智能工程文件生成**（新增app/project_manager.py项目管理模块：新建/选择/删除/列表项目，每个项目数据独立存储在data/projects/{id}/目录下，包含index.json/relations.json/向量库/解析缓存/上传文件/导出文件；新增app/smart_doc_generator.py智能文件生成器：输入自然语言如'生成球磨机安装的安全技术交底'自动识别文件类型和设备名称，从项目数据库读取已有数据自动填充，列出缺失数据提示人工补充，支持14种文件类型（安全交底/技术交底/施工方案/吊装方案/基础验收/开箱检验/隐蔽工程/施工日志/竣工资料/设计变更/货损报告/安装记录/试运转）；analyze_input实时分析输入识别文件类型和设备；get_supported_types获取支持的文件类型；新增/api/projects/{list,create,switch,current,delete,data-dir}项目管理端点；新增/api/smart-doc/{types,analyze,generate}智能生成端点；前端新增项目选择器和智能生成入口）
 - **v0.1.106**：**矿山设备竣工资料自动组卷增强（基于详细知识库）**（新增app/mining_completion_archive_enhanced.py；基于设备详细知识库自动生成竣工资料组卷目录；8个标准卷册综合管理/设备技术/安装施工/管道安装/电气仪表/试运转/质量保证/竣工图及移交共80+项资料；每卷含资料名称/是否必备/说明；根据设备类型自动调整资料清单（压力容器增加耐压试验/气密试验/安全阀校验等，磨机增加轴瓦刮研/大齿圈检测/齿轮啮合/衬板安装等，炉类增加焊接检测/铜水套试验/耐火砌筑/烘炉记录等）；无管道设备自动标记第四卷不适用；check_archive_completeness检查竣工资料完整性按卷统计必备资料完成率95%以上可组卷；generate_transmittal生成竣工资料移交单含卷册清单/移交物品/签字栏；6项组卷要求（格式/装订/编号/签字/盖章/保存期限）；get_archive_template获取组卷模板；新增/api/mining-archive-enhanced/{template,generate,check-completeness,transmittal}端点；前端新增竣工资料组卷增强区）
 - **v0.1.105**：**矿山设备安全交底自动生成**（新增app/mining_safety_disclosure.py；基于设备详细知识库和危险源库自动生成安全交底记录；8个标准章节工程概况/危险源辨识与风险评估/安全技术措施/安全操作规程/个人防护要求/应急预案/安全检查要求/交底签字；10种通用危险源含风险等级/后果/控制措施；4类设备专用危险源（磨机/高压釜/炉/破碎）；12条通用安全措施+设备专用安全措施+4类高风险控制；6条通用操作规程+设备专用操作规程；10种个人防护用品含要求和检查方法；7类应急预案含应急组织/联系人/应急物资；4类安全检查（日常/每周/专项/隐患整改）；LEC风险评估方法；get_safety_disclosure_template/get_general_hazards查询接口；新增/api/mining-safety-disclosure/{template,generate,hazards}端点；前端新增安全交底生成区）
 - **v0.1.104**：**矿山设备技术交底自动生成**（新增app/mining_technical_disclosure_enhanced.py；基于mining_equipment_detail设备详细知识库自动生成技术交底记录；8个标准章节工程概况/施工准备/施工工艺流程/施工方法及技术要求/质量标准及验收要求/安全注意事项/文明施工及环保要求/交底签字；设备参数/部件/施工要点/质量标准/验收项目自动填充；分阶段施工要点自动关联；6项精度要求（水平度/中心线/标高/同轴度/齿轮侧隙/接触率）；10条通用安全措施+6类设备专用安全措施；5类风险分析；交底签字栏含5类岗位；get_disclosure_template获取模板结构；新增/api/mining-disclosure-enhanced/{template,generate}端点；前端新增技术交底生成区）

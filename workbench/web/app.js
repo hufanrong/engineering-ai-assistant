@@ -5823,3 +5823,163 @@ document.addEventListener("DOMContentLoaded", function () {
   var b2 = document.getElementById("btnAeCheck"); if (b2) b2.addEventListener("click", aeCheck);
   var b3 = document.getElementById("btnAeTransmittal"); if (b3) b3.addEventListener("click", aeTransmittal);
 });
+
+// v0.1.107：项目管理
+function loadProjects() {
+  fetch("/api/projects").then(function(r){return r.json();}).then(function(d) {
+    var sel = document.getElementById("projectSelector");
+    if (!sel) return;
+    sel.innerHTML = '<option value="">选择项目...</option>';
+    d.projects.forEach(function(p) {
+      var opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name + (p.client ? "（" + p.client + "）" : "");
+      sel.appendChild(opt);
+    });
+    if (d.current_project) {
+      document.getElementById("currentProjectName").textContent = d.current_project.name;
+      sel.value = d.current_project.id;
+    } else {
+      document.getElementById("currentProjectName").textContent = "（未选择项目，请先新建）";
+    }
+  }).catch(function(){});
+}
+function switchProject() {
+  var pid = document.getElementById("projectSelector").value;
+  if (!pid) { alert("请先选择项目"); return; }
+  fetch("/api/projects/switch", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project_id:pid})}).then(function(r){return r.json();}).then(function(d) {
+    if (d.ok) { alert(d.message); loadProjects(); }
+    else alert(d.error);
+  }).catch(function(){});
+}
+function showNewProjectForm() {
+  document.getElementById("newProjectForm").style.display = "block";
+}
+function hideNewProjectForm() {
+  document.getElementById("newProjectForm").style.display = "none";
+}
+function createProject() {
+  var name = document.getElementById("newProjectName").value.trim();
+  if (!name) { alert("请输入项目名称"); return; }
+  var data = {
+    name: name,
+    client: document.getElementById("newProjectClient").value,
+    location: document.getElementById("newProjectLocation").value,
+    description: document.getElementById("newProjectDesc").value,
+  };
+  fetch("/api/projects/create", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}).then(function(r){return r.json();}).then(function(d) {
+    if (d.ok) { alert(d.message); hideNewProjectForm(); loadProjects();
+      document.getElementById("newProjectName").value = "";
+      document.getElementById("newProjectClient").value = "";
+      document.getElementById("newProjectLocation").value = "";
+      document.getElementById("newProjectDesc").value = "";
+    }
+    else alert(d.error);
+  }).catch(function(){});
+}
+function showProjectDataDir() {
+  fetch("/api/projects/data-dir").then(function(r){return r.json();}).then(function(d) {
+    var el = document.getElementById("projectDataDirInfo");
+    el.style.display = "block";
+    el.innerHTML = '<strong>项目：</strong>' + esc(d.project_name) + '<br>' +
+      '<strong>数据目录：</strong>' + esc(d.data_dir) + '<br>' +
+      '<strong>索引文件：</strong>' + esc(d.index_path) + '<br>' +
+      '<strong>关系文件：</strong>' + esc(d.relations_path) + '<br>' +
+      '<strong>向量库：</strong>' + esc(d.vector_dir);
+  }).catch(function(){});
+}
+
+// v0.1.107：智能文件生成
+function loadSmartDocTypes() {
+  fetch("/api/smart-doc/types").then(function(r){return r.json();}).then(function(d) {
+    var el = document.getElementById("smartDocTypes");
+    if (el && d.types) {
+      el.textContent = d.types.map(function(t){return t.type;}).join("、");
+    }
+  }).catch(function(){});
+}
+function analyzeSmartDoc() {
+  var text = document.getElementById("smartDocInput").value.trim();
+  if (!text) { alert("请输入要生成的文件描述"); return; }
+  fetch("/api/smart-doc/analyze?text=" + encodeURIComponent(text)).then(function(r){return r.json();}).then(function(d) {
+    var el = document.getElementById("smartDocAnalyzeResult");
+    el.style.display = "block";
+    var html = '<strong>识别结果：</strong>';
+    if (d.recognized_doc_type) html += ' 文件类型=<span style="color:#1E5AA8;font-weight:600">' + esc(d.recognized_doc_type) + '</span>';
+    else html += ' <span style="color:#EA6668">未识别文件类型</span>';
+    if (d.recognized_equipment) html += ' | 设备=<span style="color:#FF7A00;font-weight:600">' + esc(d.recognized_equipment) + '</span>';
+    if (d.recognized_project) html += ' | 项目=' + esc(d.recognized_project);
+    if (d.recognized_workshop) html += ' | 车间=' + esc(d.recognized_workshop);
+    html += ' | 置信度=' + esc(d.confidence);
+    if (!d.can_generate) html += '<br><span style="color:#EA6668">提示：请在输入中包含文件类型，如"安全交底"、"施工方案"等</span>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function generateSmartDoc() {
+  var text = document.getElementById("smartDocInput").value.trim();
+  if (!text) { alert("请输入要生成的文件描述"); return; }
+  var el = document.getElementById("smartDocResult");
+  el.style.display = "block";
+  el.innerHTML = '<span style="color:#6B7280">正在生成...</span>';
+  fetch("/api/smart-doc/generate", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:text})}).then(function(r){return r.json();}).then(function(d) {
+    if (!d.ok) {
+      el.innerHTML = '<span style="color:#EA6668">' + esc(d.error || "生成失败") + '</span>' +
+        (d.suggestion ? '<br>' + esc(d.suggestion) : '') +
+        (d.supported_types ? '<br>支持类型：' + d.supported_types.join("、") : '');
+      return;
+    }
+    var html = '<div style="margin-bottom:8px;padding:8px;background:rgba(30,90,168,0.05);border-radius:6px">';
+    html += '<strong>' + esc(d.message) + '</strong><br>';
+    html += '类型：' + esc(d.doc_type) + ' | 设备：' + esc(d.equipment) + '<br>';
+    if (d.filled_fields && Object.keys(d.filled_fields).length > 0) {
+      html += '<strong>自动填充：</strong>';
+      Object.keys(d.filled_fields).forEach(function(k) {
+        html += k + '=' + esc(d.filled_fields[k]) + '；';
+      });
+      html += '<br>';
+    }
+    if (d.has_missing) {
+      html += '<strong style="color:#FF7A00">缺失数据（' + d.missing_count + '项）：</strong><br>';
+      d.missing_fields.forEach(function(f) {
+        html += '  ⚠️ ' + esc(f) + '<br>';
+      });
+      html += '<span style="color:#6B7280;font-size:11px">以上字段可在导出后人工补充完善</span><br>';
+    }
+    html += '</div>';
+    
+    // 显示生成的文件内容摘要
+    var r = d.result;
+    if (r) {
+      html += '<strong>生成结果：</strong><br>';
+      if (r.title) html += '标题：' + esc(r.title) + '<br>';
+      if (r.disclosure) {
+        html += '章节：' + r.disclosure.sections.length + '个<br>';
+        r.disclosure.sections.forEach(function(s) {
+          html += '  • ' + esc(s.section) + '<br>';
+        });
+      }
+      if (r.plan) {
+        html += '章节：' + r.plan.sections.length + '个<br>';
+      }
+      if (r.total_volumes) {
+        html += '卷册：' + r.total_volumes + '卷，资料：' + r.total_documents + '项<br>';
+      }
+      if (r.completion_rate) {
+        html += '完成率：' + r.completion_rate + '%<br>';
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(e){ el.innerHTML = '<span style="color:#EA6668">生成出错：' + e + '</span>'; });
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  loadProjects();
+  loadSmartDocTypes();
+  var b1 = document.getElementById("btnSwitchProject"); if (b1) b1.addEventListener("click", switchProject);
+  var b2 = document.getElementById("btnNewProject"); if (b2) b2.addEventListener("click", showNewProjectForm);
+  var b3 = document.getElementById("btnCreateProject"); if (b3) b3.addEventListener("click", createProject);
+  var b4 = document.getElementById("btnCancelNewProject"); if (b4) b4.addEventListener("click", hideNewProjectForm);
+  var b5 = document.getElementById("btnProjectDataDir"); if (b5) b5.addEventListener("click", showProjectDataDir);
+  var b6 = document.getElementById("btnSmartDocAnalyze"); if (b6) b6.addEventListener("click", analyzeSmartDoc);
+  var b7 = document.getElementById("btnSmartDocGenerate"); if (b7) b7.addEventListener("click", generateSmartDoc);
+});

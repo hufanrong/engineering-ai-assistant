@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.106")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.107")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -3084,6 +3084,97 @@ def mining_archive_enhanced_check_completeness(data: dict):
     from . import mining_completion_archive_enhanced as _mcae
     return _mcae.check_archive_completeness(data.get("equipment", ""), data.get("existing_documents", []))
 
+
+
+# ========== v0.1.107：项目管理 ==========
+@app.get("/api/projects")
+def list_projects():
+    """获取所有项目列表。"""
+    from . import project_manager as _pm
+    projects = _pm.list_projects()
+    current = _pm.get_current_project()
+    return {"ok": True, "projects": projects, "current_project": current, "total": len(projects)}
+
+
+@app.post("/api/projects/create")
+def create_project(data: dict):
+    """新建项目。"""
+    from . import project_manager as _pm
+    return _pm.create_project(
+        name=data.get("name", ""),
+        description=data.get("description", ""),
+        client=data.get("client", ""),
+        location=data.get("location", ""),
+    )
+
+
+@app.post("/api/projects/switch")
+def switch_project(data: dict):
+    """切换当前项目。"""
+    from . import project_manager as _pm
+    return _pm.set_current_project(data.get("project_id", ""))
+
+
+@app.get("/api/projects/current")
+def get_current_project():
+    """获取当前项目。"""
+    from . import project_manager as _pm
+    current = _pm.get_current_project()
+    if current:
+        return {"ok": True, "project": current}
+    return {"ok": False, "error": "当前未选择项目，请先新建或选择项目"}
+
+
+@app.post("/api/projects/delete")
+def delete_project(data: dict):
+    """删除项目。"""
+    from . import project_manager as _pm
+    return _pm.delete_project(data.get("project_id", ""))
+
+
+@app.get("/api/projects/data-dir")
+def get_project_data_dir():
+    """获取当前项目数据目录路径。"""
+    from . import project_manager as _pm
+    data_dir = _pm.get_project_data_dir()
+    current = _pm.get_current_project()
+    return {
+        "ok": True,
+        "data_dir": data_dir,
+        "project_name": current["name"] if current else "（未选择项目）",
+        "index_path": _pm.get_project_index_path(),
+        "relations_path": _pm.get_project_relations_path(),
+        "vector_dir": _pm.get_project_vector_dir(),
+    }
+
+
+# ========== v0.1.107：智能工程文件生成 ==========
+@app.get("/api/smart-doc/types")
+def get_supported_doc_types():
+    """获取支持的文件类型列表。"""
+    from . import smart_doc_generator as _sdg
+    return _sdg.get_supported_types()
+
+
+@app.get("/api/smart-doc/analyze")
+def analyze_smart_doc_input(text: str = ""):
+    """分析输入文本，识别文件类型和设备。"""
+    from . import smart_doc_generator as _sdg
+    return _sdg.analyze_input(text)
+
+
+@app.post("/api/smart-doc/generate")
+def generate_smart_doc(data: dict):
+    """
+    从自然语言生成工程文件。
+    输入：{"text": "生成球磨机安装的安全技术交底"}
+    输出：识别信息 + 自动填充数据 + 缺失字段 + 生成的文件内容
+    """
+    from . import smart_doc_generator as _sdg
+    return _sdg.generate_from_natural_language(
+        text=data.get("text", ""),
+        project_id=data.get("project_id"),
+    )
 
 @app.get("/api/mining-archive-enhanced/transmittal")
 def mining_archive_enhanced_transmittal(equipment: str = "", project: str = "矿山工程项目", workshop: str = "", unit: str = "", receiver: str = ""):

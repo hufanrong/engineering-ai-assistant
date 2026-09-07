@@ -64,6 +64,49 @@
       <p id="nodeName">解析节点：—</p>
     </div>
   </header>
+  <!-- v0.1.107：项目选择器 -->
+  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:linear-gradient(135deg,rgba(30,90,168,0.05),rgba(255,122,0,0.03))">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <strong style="font-size:14px">📁 当前项目：</strong>
+      <span id="currentProjectName" style="color:#1E5AA8;font-weight:600">加载中...</span>
+      <select id="projectSelector" style="padding:4px 8px;font-size:12px;min-width:150px">
+        <option value="">选择项目...</option>
+      </select>
+      <button class="btn" id="btnSwitchProject" style="background:#1E5AA8;font-size:12px;padding:4px 10px">切换</button>
+      <button class="btn" id="btnNewProject" style="background:#FF7A00;font-size:12px;padding:4px 10px">+ 新建项目</button>
+      <button class="btn" id="btnProjectDataDir" style="background:#6B7280;font-size:12px;padding:4px 10px">数据目录</button>
+    </div>
+    <div id="newProjectForm" style="display:none;margin-top:10px;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px">
+      <div class="row" style="margin-bottom:6px">
+        <input type="text" id="newProjectName" placeholder="项目名称（必填）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
+        <input type="text" id="newProjectClient" placeholder="建设单位" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <input type="text" id="newProjectLocation" placeholder="项目地点" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+        <input type="text" id="newProjectDesc" placeholder="项目描述" style="flex:2;min-width:200px;padding:4px 8px;font-size:12px">
+      </div>
+      <button class="btn" id="btnCreateProject" style="background:#52C41A;font-size:12px;padding:4px 12px">确认创建</button>
+      <button class="btn" id="btnCancelNewProject" style="background:#999;font-size:12px;padding:4px 12px">取消</button>
+    </div>
+    <div id="projectDataDirInfo" style="display:none;margin-top:8px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px;font-size:11px;font-family:monospace;word-break:break-all"></div>
+  </div>
+
+  <!-- v0.1.107：智能工程文件生成 -->
+  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+    <h3 style="margin:0 0 6px;font-size:15px">🤖 智能工程文件生成（v0.1.107）</h3>
+    <div class="msg" style="margin-bottom:6px">用自然语言描述要生成的文件，系统自动识别类型、读取项目数据填充、列出缺失项。例如："生成球磨机安装的安全技术交底"、"制作高压釜基础验收记录"</div>
+    <div class="row" style="margin-bottom:6px">
+      <input type="text" id="smartDocInput" placeholder="输入：生成球磨机安全交底 / 制作高压釜施工方案 / 生成浮选机开箱检验记录..." style="flex:1;min-width:200px;padding:6px 10px;font-size:13px">
+      <button class="btn" id="btnSmartDocAnalyze" style="background:#6B7280;font-size:12px;padding:4px 10px">分析</button>
+      <button class="btn" id="btnSmartDocGenerate" style="background:#1E5AA8;font-size:12px;padding:4px 10px">生成文件</button>
+    </div>
+    <div id="smartDocAnalyzeResult" style="font-size:12px;margin-bottom:6px;display:none"></div>
+    <div id="smartDocResult" style="font-size:12px;max-height:700px;overflow-y:auto;display:none"></div>
+    <div style="margin-top:6px;font-size:11px;color:#6B7280">
+      支持类型：<span id="smartDocTypes"></span>
+    </div>
+  </div>
+
 
   <div class="status-bar" id="statusBar">
     <span class="chip">向量库 <b id="stVec">—</b></span>
