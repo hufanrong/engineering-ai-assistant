@@ -1,0 +1,2560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>繁工AI 本地解析工作台</title>
+<style>
+  :root{
+    --blue:#1E5AA8; --blue-d:#153f75; --orange:#FF7A00;
+    --bg:#F4F5F7; --card:#fff; --line:#E4E6EB; --text:#1A1B1C; --sub:#6B7280;
+    --ok:#1B8A3F; --warn:#B45309; --err:#C0392B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Roboto','PingFang SC','Microsoft YaHei',Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+  .wrap{max-width:980px;margin:0 auto;padding:12px}
+  header{display:flex;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid var(--line);margin-bottom:12px}
+  .logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--blue),var(--blue-d));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px}
+  .brand h1{font-size:17px;font-weight:700}
+  .brand p{font-size:12px;color:var(--sub)}
+  .status-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12px;color:var(--sub)}
+  .chip b{color:var(--blue)}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .tab{padding:7px 14px;border-radius:8px;background:var(--card);border:1px solid var(--line);cursor:pointer;font-size:13px;color:var(--sub)}
+  .tab.on{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:600}
+  .panel{display:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .panel.on{display:block}
+  h2{font-size:15px;margin-bottom:10px;color:var(--blue)}
+  label{font-size:13px;color:var(--sub);display:block;margin:8px 0 4px}
+  input[type=text],input[type=number],select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+  .btn{display:inline-block;padding:9px 18px;border:none;border-radius:8px;font-size:14px;cursor:pointer;background:var(--blue);color:#fff;font-weight:600}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.orange{background:var(--orange)}
+  .btn.ghost{background:var(--card);border:1px solid var(--line);color:var(--sub)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .prog{height:10px;background:#E9EAEE;border-radius:6px;overflow:hidden;margin:10px 0}
+  .prog>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--blue),#4A90D9);transition:width .3s}
+  .msg{font-size:13px;color:var(--sub);margin-top:6px;word-break:break-all}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+  th{color:var(--sub);font-weight:600;white-space:nowrap}
+  .st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px}
+  .st.parsed{background:#E5F5EA;color:var(--ok)}
+  .st.partial{background:#FDF3E3;color:var(--warn)}
+  .st.failed{background:#FBE9E7;color:var(--err)}
+  .st.skipped{background:#EEF0F3;color:var(--sub)}
+  .item{cursor:pointer}
+  .item:hover{background:#F7F9FC}
+  .detail{border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;background:#FAFBFC;font-size:13px;max-height:340px;overflow:auto}
+  .detail pre{white-space:pre-wrap;word-break:break-all;font-family:inherit}
+  .search-item{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px}
+  .search-item .meta{color:var(--sub);font-size:12px;margin-bottom:4px}
+  .empty{color:var(--sub);text-align:center;padding:24px 0;font-size:13px}
+  .qr{color:var(--sub);font-size:12px;margin-top:8px}
+  @media(max-width:480px){ .wrap{padding:8px} .tab{padding:6px 10px;font-size:12px} th,td{font-size:12px} }
+</style>
+
+<style>
+.update-banner {
+    background: linear-gradient(135deg, #1E5AA8, #2E7BD4);
+    color: #fff;
+    padding: 10px 20px;
+    display: none;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    z-index: 9999;
+}
+.update-banner.show { display: flex; }
+.update-banner .icon { font-size: 20px; }
+.update-banner .info { flex: 1; }
+.update-banner .info .title { font-weight: 600; font-size: 14px; }
+.update-banner .info .desc { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+.update-banner .btn-update {
+    background: #FF7A00;
+    color: #fff;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.update-banner .btn-update:hover { background: #E66A00; }
+.update-banner .btn-update:disabled { background: #999; cursor: not-allowed; }
+.update-banner .btn-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    opacity: 0.7;
+    padding: 4px;
+}
+.update-banner .btn-close:hover { opacity: 1; }
+.update-progress {
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+    height: 4px;
+    margin-top: 6px;
+    overflow: hidden;
+}
+.update-progress-bar {
+    background: #FF7A00;
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s;
+}
+</style>
+
+<style>
+/* ===== v0.1.115 优化布局：左侧导航 + 主内容区 ===== */
+:root {
+    --sidebar-width: 220px;
+    --sidebar-bg: #1a2332;
+    --sidebar-text: #a0aec0;
+    --sidebar-active: #1E5AA8;
+    --sidebar-hover: rgba(255,255,255,0.08);
+}
+
+.app-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* 左侧导航 */
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    overflow-y: auto;
+    z-index: 100;
+    padding: 0;
+}
+
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+.sidebar-logo {
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.sidebar-logo .logo-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #1E5AA8, #FF7A00);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    font-size: 18px;
+}
+
+.sidebar-logo .logo-text {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.sidebar-logo .logo-sub {
+    font-size: 10px;
+    color: #718096;
+}
+
+.sidebar-section {
+    padding: 12px 16px 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #4a5568;
+    font-weight: 600;
+}
+
+.sidebar-nav {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar-nav li a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 20px;
+    color: var(--sidebar-text);
+    text-decoration: none;
+    font-size: 13px;
+    transition: all 0.15s;
+    border-left: 3px solid transparent;
+}
+
+.sidebar-nav li a:hover {
+    background: var(--sidebar-hover);
+    color: #fff;
+}
+
+.sidebar-nav li a.active {
+    background: rgba(30,90,168,0.3);
+    color: #fff;
+    border-left-color: #FF7A00;
+}
+
+.sidebar-nav li a .nav-icon {
+    font-size: 15px;
+    width: 20px;
+    text-align: center;
+}
+
+.sidebar-nav li a .nav-badge {
+    margin-left: auto;
+    background: #FF7A00;
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+}
+
+.sidebar-footer {
+    padding: 12px 20px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 11px;
+    color: #4a5568;
+    margin-top: auto;
+}
+
+/* 主内容区 */
+.main-content {
+    margin-left: var(--sidebar-width);
+    flex: 1;
+    min-width: 0;
+}
+
+.main-content .wrap {
+    max-width: 1200px;
+    padding: 20px 24px;
+}
+
+/* 内容区块 */
+.content-section {
+    scroll-margin-top: 16px;
+    margin-bottom: 24px;
+}
+
+.content-section > h2 {
+    position: sticky;
+    top: 0;
+    background: #f4f3ee;
+    z-index: 10;
+    padding: 8px 0;
+    margin: 0 0 12px;
+}
+
+/* 项目信息栏优化 */
+.project-bar {
+    background: linear-gradient(135deg, rgba(30,90,168,0.08), rgba(255,122,0,0.05));
+    border: 1px solid rgba(30,90,168,0.15);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+}
+
+/* 响应式 */
+@media (max-width: 900px) {
+    .sidebar { transform: translateX(-100%); transition: transform 0.3s; }
+    .sidebar.open { transform: translateX(0); }
+    .main-content { margin-left: 0; }
+    .mobile-menu-btn { display: block !important; }
+}
+
+.mobile-menu-btn {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 200;
+    background: #1E5AA8;
+    color: #fff;
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+/* 回到顶部 */
+.back-to-top {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 44px;
+    height: 44px;
+    background: #1E5AA8;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    font-size: 18px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    display: none;
+    z-index: 99;
+    transition: transform 0.2s;
+}
+.back-to-top:hover { transform: translateY(-2px); }
+.back-to-top.show { display: block; }
+</style>
+
+<style>
+/* ===== v0.1.116 精简布局：7大模块 + 可折叠区块 ===== */
+.module-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    background: #fff;
+    border-bottom: 2px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex-wrap: wrap;
+}
+.module-tab {
+    padding: 8px 14px;
+    border: none;
+    background: transparent;
+    color: #666;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.module-tab:hover { background: #f0f0f0; color: #333; }
+.module-tab.active { background: #1E5AA8; color: #fff; font-weight: 500; }
+
+/* 区块折叠 */
+.collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.collapsible-header::before {
+    content: "▼";
+    font-size: 10px;
+    transition: transform 0.2s;
+    color: #999;
+}
+.collapsible-header.collapsed::before {
+    transform: rotate(-90deg);
+}
+.collapsible-content {
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+.collapsible-content.collapsed {
+    display: none;
+}
+
+/* 统一上传区域 */
+.unified-upload {
+    background: linear-gradient(135deg, rgba(30,90,168,0.06), rgba(255,122,0,0.04));
+    border: 2px dashed rgba(30,90,168,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 16px;
+}
+.unified-upload h3 { margin: 0 0 8px; color: #1E5AA8; }
+.unified-upload p { margin: 0 0 12px; color: #666; font-size: 13px; }
+.unified-upload .upload-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+.unified-upload .upload-actions button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.unified-upload .upload-actions button:hover { transform: translateY(-1px); }
+.btn-scan { background: #1E5AA8; color: #fff; }
+.btn-manual { background: #FF7A00; color: #fff; }
+.btn-batch { background: #52C41A; color: #fff; }
+.btn-failed { background: #EA6668; color: #fff; }
+
+/* 模块内容区域 */
+.module-content { display: none; }
+.module-content.active { display: block; }
+
+/* 隐藏旧的sidebar导航中多余的项 */
+.sidebar-section + .sidebar-nav { display: none; }
+.sidebar-nav.show { display: block; }
+</style>
+</head>
+<body>
+<div class="update-banner" id="updateBanner">
+    <span class="icon">🔄</span>
+    <div class="info">
+        <div class="title" id="updateTitle">发现新版本</div>
+        <div class="desc" id="updateDesc">点击更新按钮自动下载并安装最新版本</div>
+        <div class="update-progress" id="updateProgress" style="display:none;">
+            <div class="update-progress-bar" id="updateProgressBar"></div>
+        </div>
+    </div>
+    <button class="btn-update" id="btnUpdateNow" onclick="performUpdate()">立即更新</button>
+    <button class="btn-close" onclick="hideUpdateBanner()">×</button>
+</div>
+
+
+<button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+
+<div class="app-layout">
+  <!-- 左侧导航 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">繁</div>
+      <div>
+        <div class="logo-text">繁工AI</div>
+        <div class="logo-sub">本地解析工作台</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">功能模块</div>
+    <ul class="sidebar-nav">
+      <li><a href="#" onclick="switchModule('project');return false;"><span class="nav-icon">📁</span>项目管理</a></li>
+      <li><a href="#" onclick="switchModule('upload');return false;"><span class="nav-icon">📤</span>文件上传解析</a></li>
+      <li><a href="#" onclick="switchModule('result');return false;"><span class="nav-icon">📋</span>解析结果</a></li>
+      <li><a href="#" onclick="switchModule('relation');return false;"><span class="nav-icon">🔗</span>关系与空间</a></li>
+      <li><a href="#" onclick="switchModule('docgen');return false;"><span class="nav-icon">📝</span>工程资料生成</a></li>
+      <li><a href="#" onclick="switchModule('platform');return false;"><span class="nav-icon">📖</span>平台规范库</a></li>
+      <li><a href="#" onclick="switchModule('cloud');return false;"><span class="nav-icon">☁️</span>云端与多机</a></li>
+    </ul>
+
+    <div class="sidebar-footer">
+      © 2026 胡繁荣<br>
+      繁工AI v0.1.116
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main class="main-content">
+    <!-- 模块Tab栏 -->
+    <div class="module-tabs" id="moduleTabs">
+      <button class="module-tab active" onclick="switchModule('project')">📁 项目管理</button>
+      <button class="module-tab" onclick="switchModule('upload')">📤 文件上传解析</button>
+      <button class="module-tab" onclick="switchModule('result')">📋 解析结果</button>
+      <button class="module-tab" onclick="switchModule('relation')">🔗 关系与空间</button>
+      <button class="module-tab" onclick="switchModule('docgen')">📝 工程资料生成</button>
+      <button class="module-tab" onclick="switchModule('platform')">📖 平台规范库</button>
+      <button class="module-tab" onclick="switchModule('cloud')">☁️ 云端与多机</button>
+    </div>
+
+
+  <div class="wrap">
+    <!-- 统一上传区域（文件上传模块默认显示） -->
+    <div class="unified-upload" id="unifiedUpload" style="display:none">
+      <h3>📤 文件上传与自动解析</h3>
+      <p>选择上传方式，文件上传后自动解析分类（图纸/箱单/工程资料/台账等），向量化入库，按需调用</p>
+      <div class="upload-actions">
+        <button class="btn-scan" onclick="scrollToSection('scan-parse')">📂 扫描文件夹</button>
+        <button class="btn-manual" onclick="scrollToSection('manual-upload')">📄 手动上传文件</button>
+        <button class="btn-batch" onclick="scrollToSection('batch-upload')">📦 批量上传</button>
+        <button class="btn-failed" onclick="scrollToSection('failed-files')">⚠️ 失败重试</button>
+      </div>
+    </div>
+
+  <header>
+    <div class="logo">繁</div>
+    <div class="brand">
+      <h1>繁工AI · 本地解析工作台</h1>
+      <p id="nodeName">解析节点：—</p>
+    </div>
+  </header>
+  <!-- v0.1.107：项目选择器 -->
+  <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:linear-gradient(135deg,rgba(30,90,168,0.05),rgba(255,122,0,0.03))">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <strong style="font-size:14px">📁 当前项目：</strong>
+      <span id="currentProjectName" style="color:#1E5AA8;font-weight:600">加载中...</span>
+      <select id="projectSelector" style="padding:4px 8px;font-size:12px;min-width:150px">
+        <option value="">选择项目...</option>
+      </select>
+      <button class="btn" id="btnSwitchProject" style="background:#1E5AA8;font-size:12px;padding:4px 10px">切换</button>
+      <button class="btn" id="btnNewProject" style="background:#FF7A00;font-size:12px;padding:4px 10px">+ 新建项目</button>
+      <button class="btn" id="btnProjectDataDir" style="background:#6B7280;font-size:12px;padding:4px 10px">数据目录</button>
+      <button class="btn" onclick="manualCheckUpdate()" style="background:#52C41A;font-size:12px;padding:4px 10px">🔄 检查更新</button>
+    </div>
+    <div id="newProjectForm" style="display:none;margin-top:10px;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px">
+      <div class="row" style="margin-bottom:6px">
+        <input type="text" id="newProjectName" placeholder="项目名称（必填）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
+        <input type="text" id="newProjectClient" placeholder="建设单位" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <input type="text" id="newProjectLocation" placeholder="项目地点" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+        <input type="text" id="newProjectDesc" placeholder="项目描述" style="flex:2;min-width:200px;padding:4px 8px;font-size:12px">
+      </div>
+      <button class="btn" id="btnCreateProject" style="background:#52C41A;font-size:12px;padding:4px 12px">确认创建</button>
+      <button class="btn" id="btnCancelNewProject" style="background:#999;font-size:12px;padding:4px 12px">取消</button>
+    </div>
+    <div id="project-backup" style="display:none;margin-top:8px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px;font-size:11px;font-family:monospace;word-break:break-all"></div>
+  </div>
+
+  <!-- v0.1.107：智能工程文件生成 -->
+  <div id="smart-gen" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+    <h3 style="margin:0 0 6px;font-size:15px">🤖 智能工程文件生成（v0.1.107）</h3>
+    <div class="msg" style="margin-bottom:6px">用自然语言描述要生成的文件，系统自动识别类型、读取项目数据填充、列出缺失项。例如："生成球磨机安装的安全技术交底"、"制作高压釜基础验收记录"</div>
+    <div class="row" style="margin-bottom:6px">
+      <input type="text" id="smartDocInput" placeholder="输入：生成设备安全交底 / 制作施工方案 / 生成开箱检验记录..." style="flex:1;min-width:200px;padding:6px 10px;font-size:13px">
+      <button class="btn" id="btnSmartDocAnalyze" style="background:#6B7280;font-size:12px;padding:4px 10px">分析</button>
+      <button class="btn" id="btnSmartDocGenerate" style="background:#1E5AA8;font-size:12px;padding:4px 10px">生成文件</button>
+    </div>
+    <div id="smartDocAnalyzeResult" style="font-size:12px;margin-bottom:6px;display:none"></div>
+    <div id="smartDocResult" style="font-size:12px;max-height:700px;overflow-y:auto;display:none"></div>
+    <div style="margin-top:6px;font-size:11px;color:#6B7280">
+      支持类型：<span id="smartDocTypes"></span>
+    </div>
+  <!-- v0.1.108：模板管理 -->
+  <div id="template-mgr" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
+    <h3 style="margin:0 0 6px;font-size:15px">📋 模板管理 - 基于模板生成文件（v0.1.108）</h3>
+    <div class="msg" style="margin-bottom:6px">上传Word模板（.docx），模板中使用 {{字段名}} 作为占位符，系统自动用项目数据库数据填充生成文件。支持字段：设备名称、项目名称、车间、施工单位、日期、供货厂家、设备型号、安装位置等28种。</div>
+    
+    
+  <!-- v0.1.110：项目备份与合并 -->
+  <div id="project-backup" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(82,196,26,0.03)">
+    <h3 style="margin:0 0 6px;font-size:15px">💾 项目备份与合并（v0.1.110）</h3>
+    
+    <!-- 备份导入导出 -->
+    <div style="margin-bottom:10px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px">
+      <strong style="font-size:13px">数据备份：</strong>
+      <div class="row" style="margin-top:6px;margin-bottom:6px">
+        <button class="btn" id="btnExportProject" style="background:#1E5AA8;font-size:12px;padding:4px 10px">导出当前项目</button>
+        <button class="btn" id="btnListBackups" style="background:#6B7280;font-size:12px;padding:4px 10px">备份列表</button>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <input type="file" id="backupFile" accept=".fgbak" style="font-size:12px">
+        <input type="text" id="importProjectName" placeholder="新项目名称（留空用原名）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+        <button class="btn" id="btnImportProject" style="background:#52C41A;font-size:12px;padding:4px 10px">导入备份</button>
+      </div>
+      <div id="backupResult" style="font-size:12px;display:none"></div>
+      <div id="backupList" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+    </div>
+
+    <!-- 项目对比合并 -->
+    <div style="padding:8px;background:rgba(0,0,0,0.02);border-radius:6px">
+      <strong style="font-size:13px">项目对比合并：</strong>
+      <div class="row" style="margin-top:6px;margin-bottom:6px">
+        <select id="compareProjectA" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">选择项目A...</option>
+        </select>
+        <span style="font-size:12px;color:#6B7280">对比</span>
+        <select id="compareProjectB" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">选择项目B...</option>
+        </select>
+        <button class="btn" id="btnCompareProjects" style="background:#FF7A00;font-size:12px;padding:4px 10px">对比</button>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <span style="font-size:12px">合并方向：</span>
+        <select id="mergeSource" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">源项目...</option>
+        </select>
+        <span style="font-size:12px">→</span>
+        <select id="mergeTarget" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">目标项目...</option>
+        </select>
+        <select id="mergeStrategy" style="padding:4px 8px;font-size:12px">
+          <option value="manual">冲突留人工确认</option>
+          <option value="source">以源项目为准</option>
+          <option value="target">以目标项目为准</option>
+        </select>
+        <button class="btn" id="btnMergeProjects" style="background:#1E5AA8;font-size:12px;padding:4px 10px">合并设备</button>
+      </div>
+      <div id="compareResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+      <div id="mergeResult" style="font-size:12px;display:none"></div>
+    </div>
+  </div>
+<!-- 上传模板 -->
+    <div style="margin-bottom:10px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px">
+      <strong style="font-size:13px">上传模板：</strong>
+      <div class="row" style="margin-top:6px">
+        <input type="file" id="templateFile" accept=".docx" style="font-size:12px">
+        <input type="text" id="templateName" placeholder="模板名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+        <select id="templateDocType" style="padding:4px 8px;font-size:12px">
+          <option value="">选择类型...</option>
+          <option value="安全交底">安全交底</option>
+          <option value="技术交底">技术交底</option>
+          <option value="施工方案">施工方案</option>
+          <option value="吊装方案">吊装方案</option>
+          <option value="基础验收">基础验收</option>
+          <option value="开箱检验">开箱检验</option>
+          <option value="隐蔽工程">隐蔽工程</option>
+          <option value="施工日志">施工日志</option>
+          <option value="竣工资料">竣工资料</option>
+          <option value="安装记录">安装记录</option>
+          <option value="试运转">试运转记录</option>
+        </select>
+        <button class="btn" id="btnUploadTemplate" style="background:#FF7A00;font-size:12px;padding:4px 10px">上传</button>
+      </div>
+    </div>
+
+    <!-- 模板列表 -->
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong style="font-size:13px">模板列表：</strong>
+        <button class="btn" id="btnRefreshTemplates" style="background:#6B7280;font-size:11px;padding:2px 8px">刷新</button>
+      </div>
+      <div id="templateList" style="font-size:12px;max-height:300px;overflow-y:auto">加载中...</div>
+    </div>
+
+    <!-- 用模板生成 -->
+    <div style="padding:8px;background:rgba(30,90,168,0.03);border-radius:6px">
+      <strong style="font-size:13px">用模板生成文件：</strong>
+      <div class="row" style="margin-top:6px;margin-bottom:6px">
+        <select id="genTemplateId" style="padding:4px 8px;font-size:12px;min-width:150px">
+          <option value="">选择模板...</option>
+        </select>
+        <input type="text" id="genEquipment" placeholder="设备名称（从项目资料识别）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+        <input type="text" id="genExtraData" placeholder="额外数据（JSON，如：{&quot;施工单位&quot;:&quot;XX公司&quot;}）" style="flex:2;min-width:150px;padding:4px 8px;font-size:12px">
+        <button class="btn" id="btnRenderTemplate" style="background:#1E5AA8;font-size:12px;padding:4px 10px">生成文件</button>
+      </div>
+      <div id="templateResult" style="font-size:12px;display:none"></div>
+    </div>
+
+    <!-- 支持字段 -->
+    <details style="margin-top:8px">
+      <summary style="font-size:12px;color:#6B7280;cursor:pointer">查看支持的占位符字段（28种）</summary>
+      <div id="templateFields" style="font-size:11px;margin-top:6px;padding:6px;background:rgba(0,0,0,0.02);border-radius:4px"></div>
+    </details>
+  </div>
+
+  </div>
+
+
+  <div class="status-bar" id="statusBar">
+    <span class="chip">向量库 <b id="stVec">—</b></span>
+    <span class="chip">已登记文件 <b id="stIdx">—</b></span>
+    <span class="chip">待上传 <b id="stQueue">—</b></span>
+    <span class="chip">云端 <b id="stCloud">—</b></span>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" data-p="scan">① 扫描解析</div>
+    <div class="tab" data-p="results">② 结果库</div>
+    <div class="tab" data-p="search">③ AI 检索</div>
+    <div class="tab" data-p="queue">④ 上传队列</div>
+    <div class="tab" data-p="relations">⑤ 关联图谱</div>
+    <div class="tab" data-p="docgen">⑥ 方案生成</div>
+    <div class="tab" data-p="platform">⑦ 平台规范库</div>
+    <div class="tab" data-p="docplan">⑧ 资料生成计划</div>
+    <div class="tab" data-p="cloud">⑨ 云库</div>
+  </div>
+
+  <!-- ① 扫描 -->
+  <div class="panel on" id="p-scan">
+    <h2 id="scan-parse">扫描文件夹 → 深度解析 → 向量化 → 待上传</h2>
+    <label>文件夹路径（支持多个：每行一个路径；可输入 D:\资料 形式，自动递归处理全部支持的文件）</label>
+    <textarea id="folder" rows="3" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;box-sizing:border-box;resize:vertical" placeholder="例如：&#10;D:\工程资料\XX项目\施工图纸&#10;D:\工程资料\XX项目\设备台账"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="btnScan">扫描解析</button>
+      <button class="btn ghost" id="btnForce">强制重扫</button>
+      <button class="btn ghost" id="btnRetry">重试失败文件</button>
+      <button class="btn orange" id="btnCancel" style="display:none">停止</button>
+    </div>
+    <div class="prog"><i id="progBar"></i></div>
+    <div class="msg" id="scanMsg">等待扫描…</div>
+    <div class="qr" id="scanStats"></div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2 id="failed-files">失败 / 待处理文件（v0.1.21）</h2>
+      <div class="row" style="margin-bottom:6px">
+        <button class="btn ghost" id="btnFailRefresh">刷新清单</button>
+        <button class="btn ghost" id="btnFailClear">清空失败记录</button>
+        <span style="font-size:12px;color:var(--text2)" id="failHint">重试 3 次仍失败自动转"待处理"，需人工检查文件。</span>
+      </div>
+      <div class="msg" id="failList" style="font-size:13px">暂无失败文件</div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2 id="manual-upload">手动上传文件（手机端/浏览器直传）</h2>
+      <label>上传人姓名（现场记录必填，方便溯源）</label>
+      <div class="row">
+        <input type="text" id="uploader" style="max-width:220px" placeholder="例如：胡繁荣">
+        <input type="file" id="upfiles" multiple style="flex:1;min-width:200px;font-size:13px">
+        <button class="btn orange" id="btnUploadFiles">上传并解析</button>
+      </div>
+      <div class="msg" id="uploadFilesMsg"></div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2 id="workshop-auto">车间资料自动划分（v0.1.27）</h2>
+      <div class="msg" style="margin-bottom:8px">上传/扫描后自动识别车间（CAD标题栏＞文件名＞正文关键词），无法确认的进『未归车间』；可单文件或批量人工指定车间，重建图谱后生效。</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" id="btnWsRefresh">刷新车间划分</button>
+        <button class="btn ghost" id="btnWsReAuto">重新自动识别未归车间</button>
+        <button class="btn orange" id="btnWsBatch">批量指定所选车间</button>
+        <select id="wsBatchSel" style="max-width:180px"><option value="">选择目标车间</option></select>
+        <span style="font-size:12px;color:var(--text2)" id="wsSummary"></span>
+      </div>
+      <div id="wsList"></div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2 id="version-merge">文件版本对照与冲突合并（v0.1.32）</h2>
+      <div class="msg" style="margin-bottom:8px">多电脑并库时，同名不同内容文件自动建立版本对照表，按时间戳以最新版为准；时间戳相同或缺失进待人工确认。同 SHA256 文件自动去重。</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" id="btnVerRefresh">刷新版本</button>
+        <span style="font-size:12px;color:var(--text2)" id="verSummary"></span>
+      </div>
+      <div id="verConflicts" style="margin-bottom:8px"></div>
+      <div id="verList"></div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2 id="batch-upload">文件夹批量上传（v0.1.22）</h2>
+      <label>选择多个文件夹，或把文件夹直接拖到下面区域。自动分批次后台上传（每批 20 个），切换页面不断；关掉页面后已传完的文件已入库，重开后重新选择文件夹会自动跳过已传的。</label>
+      <div id="dropZone" style="border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--text2);margin-top:8px;cursor:pointer">
+        拖入文件夹到此，或 <button type="button" onclick="document.getElementById('upfilesDir').click()">选择文件夹</button>
+      </div>
+      <input type="file" id="upfilesDir" webkitdirectory multiple style="display:none">
+      <div class="row" style="margin-top:8px">
+        <button class="btn orange" id="btnBatchStart">开始上传所选文件夹</button>
+        <button class="btn ghost" id="btnBatchClear" style="display:none">清空已选</button>
+        <span style="font-size:12px;color:var(--text2)" id="batchSelInfo"></span>
+      </div>
+      <div class="prog" style="margin-top:8px"><i id="batchBar"></i></div>
+      <div class="msg" id="batchMsg">未选择文件夹</div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2 id="export-merge">解析库导出 / 多机合并（.fglib）</h2>
+      <div class="msg" style="margin-bottom:8px">多台电脑各自解析后：A 机点"导出库包"生成 .fglib → 传到 B 机点"导入库包合并"。SHA256 相同自动去重，不同版本全部保留（最新时间戳为准），合并后自动重建关联图谱。</div>
+      <div class="row">
+        <button class="btn ghost" id="btnLibExport">导出库包 (.fglib)</button>
+        <input type="file" id="libImportFile" accept=".fglib" style="display:none">
+        <button class="btn ghost" id="btnLibImport">导入库包合并</button>
+        <span class="msg" id="libMsg" style="margin-left:8px"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 结果库 -->
+  <div class="panel" id="p-results">
+    <h2 id="parsed-list">已解析文件清单（点击查看结构化详情）</h2>
+    <div class="row" style="margin-bottom:8px">
+      <select id="filter" style="max-width:200px">
+        <option value="">全部状态</option>
+        <option value="parsed">parsed 已解析</option>
+        <option value="partial">partial 部分</option>
+        <option value="failed">failed 失败</option>
+        <option value="skipped">skipped 跳过</option>
+      </select>
+      <button class="btn ghost" id="btnRefresh">刷新</button>
+    </div>
+    <div id="resultList"></div>
+    <div class="detail" id="resultDetail" style="display:none"></div>
+  </div>
+
+  <!-- ③ AI 检索 -->
+  <div class="panel" id="p-search">
+    <h2 id="vector-search">向量检索（验证解析库已可被 AI/Agent 读取）</h2>
+    <label>输入查询，例如"1号车间离心泵 P-101 安装位置"</label>
+    <div class="row">
+      <input type="text" id="query" placeholder="输入检索内容…">
+      <button class="btn" id="btnSearch">检索</button>
+      <label style="display:flex;align-items:center;gap:4px;margin:0;font-size:13px;color:var(--text)">
+        <input type="checkbox" id="chkPlatform" style="width:auto"> 同时检索平台规范库
+      </label>
+    </div>
+    <div id="searchOut" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ④ 上传队列 -->
+  <div class="panel" id="p-queue">
+    <h2 id="cloud-queue">云端合并上传队列</h2>
+    <div class="msg" style="margin-bottom:8px">解析完成的文件已打包在此队列。配置好 app/config.py 的 CLOUD_ENDPOINT 后，点"上传到云端"完成合并（SHA256 自动去重）。未配置时文件安全保留在本机。</div>
+    <button class="btn" id="btnUpload">上传到云端</button>
+    <button class="btn ghost" id="btnQueueRefresh">刷新队列</button>
+    <div class="msg" id="uploadMsg" style="margin-top:8px"></div>
+    <div id="queueList" style="margin-top:8px"></div>
+  </div>
+
+  <!-- ⑤ 关联图谱（多图纸联动） -->
+  <div class="panel" id="p-relations">
+    <h2 id="cad-linkage">多图纸联动图谱（全场布置图 ↔ 车间图 ↔ 设备台账）</h2>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 style="margin:0 0 6px;font-size:15px">群聊文件关联（v0.1.34）</h3>
+      <div class="msg" style="margin-bottom:6px">上传微信群/QQ群聊天记录导出文件（TXT/HTML/CSV），自动解析每条消息，提取涉及的设备位号、车间、事项，关联到项目图谱。群聊提及但不在台账中的设备进入人工确认。</div>
+      <div class="row">
+        <button class="btn" id="btnChatList">刷新群聊列表</button>
+        <span id="chatCount" style="font-size:13px;color:var(--text2)"></span>
+      </div>
+      <div id="chatList" style="margin-top:8px"></div>
+      <!-- v0.1.43：群聊提及设备候选（人工确认） -->
+      <div style="margin-top:12px">
+        <h4 style="margin:0 0 6px;font-size:14px">群聊提及设备（待确认）</h4>
+        <div class="row" style="margin-bottom:6px">
+          <button class="btn ghost" id="btnChatCandRefresh">刷新候选</button>
+          <span id="chatCandCount" style="font-size:12px;color:var(--text2)"></span>
+        </div>
+        <div id="chatCandidates" style="font-size:12px"></div>
+      </div>
+    </div>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 id="spatial-model" style="margin:0 0 6px;font-size:15px">设备空间结构（v0.1.35）</h3>
+      <div class="msg" style="margin-bottom:6px">基于 CAD 坐标+设备台账+车间划分，建立 AI 可读的类3D空间结构。设备按车间分组、按坐标排序，自动计算相邻设备（15米内）。台账有但图纸未标注的设备单独标记。</div>
+      <div class="row">
+        <button class="btn" id="btnSpatialLoad">加载空间结构</button>
+        <button class="btn" id="btnSpatialSummary">AI 空间摘要</button>
+        <span id="spatialStats" style="font-size:13px;color:var(--text2)"></span>
+      </div>
+      <div id="spatialSummary" style="margin-top:8px;display:none;white-space:pre-wrap;font-size:12px;background:#fff;padding:8px 10px;border:1px solid var(--line);border-radius:8px;max-height:300px;overflow-y:auto"></div>
+      <div id="spatialTree" style="margin-top:8px"></div>
+    </div>
+    <!-- v0.1.39：资料关联到设备/车间 -->
+    <div style="margin-top:12px">
+      <h3 style="margin:0 0 6px">资料关联（设备/车间）</h3>
+      <div class="msg" style="margin-bottom:6px">已生成的工程资料自动关联到对应设备和车间，完整性检查可精准判断每台设备/每个车间是否已有资料。</div>
+      <div class="row" style="margin-bottom:6px;gap:6px">
+        <button class="btn" id="btnDocRelScan">扫描已生成资料</button>
+        <button class="btn ghost" id="btnDocRelRefresh">刷新</button>
+      </div>
+      <span id="docRelStats" style="font-size:12px;color:var(--text2)"></span>
+      <div id="docRelList" style="margin-top:6px"></div>
+    </div>
+    <div class="msg" style="margin-bottom:8px">扫描/上传完成后点"重建图谱"：自动归组车间、分类图纸、按设备位号跨图纸/台账关联，并把空间摘要写入向量库（AI 可回答"P-101 在哪、在哪个车间"）。无法确认的冲突进入"待人工确认"。</div>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn" id="btnRebuildRel">重建图谱</button>
+      <button class="btn ghost" id="btnRelRefresh">刷新</button>
+    </div>
+    <div class="row" id="relStats" style="margin-bottom:10px;gap:6px"></div>
+    <div id="relCand" style="margin-bottom:10px"></div>
+    <div id="relNet" style="margin-bottom:10px"></div>
+    <div style="border-top:1px solid var(--line);margin:12px 0;padding-top:10px">
+      <h3 id="device-workshop" style="margin:0 0 6px">设备级车间归属（v0.1.29）</h3>
+      <div class="msg" style="margin-bottom:6px">跨车间箱单/台账中的设备按台账行"车间"列或位号前缀自动分到各车间；人工指定最高优先，重建图谱后生效。</div>
+      <div class="row" style="margin-bottom:6px">
+        <button class="btn small" id="btnDevWsRefresh">刷新设备车间</button>
+        <button class="btn ghost small" id="btnDevWsRebuild">从台账重新提取</button>
+        <span style="font-size:12px;color:var(--text2)" id="devWsSummary"></span>
+      </div>
+      <div id="devWsList"></div>
+    </div>
+    <div style="border-top:1px solid var(--line);margin:12px 0;padding-top:10px">
+      <h3 id="tag-alias" style="margin:0 0 6px">设计院编号↔厂家编号映射（v0.1.31）</h3>
+      <div class="msg" style="margin-bottom:6px">自动识别 CAD 块/台账行中同时标注的设计院位号与厂家编号，以设计院位号为主键合并；低置信映射进待人工确认，确认后重建图谱生效。</div>
+      <div class="row" style="margin-bottom:6px">
+        <button class="btn small" id="btnAliasRefresh">刷新映射</button>
+        <span style="font-size:12px;color:var(--text2)" id="aliasSummary"></span>
+      </div>
+      <div id="aliasPending" style="margin-bottom:8px"></div>
+      <div id="aliasConfirmed"></div>
+    </div>
+    <div id="relDwgOut" style="margin-bottom:10px"></div>
+    <select id="relWorkshop" style="max-width:260px;margin-bottom:8px">
+      <option value="">— 选择车间查看详情 —</option>
+    </select>
+    <div id="relOut"></div>
+  </div>
+  <!-- ⑥ 方案生成（工程资料 Word） -->
+  <div class="panel" id="p-docgen">
+    <h2 id="doc-gen">工程资料生成（施工方案 / 吊装方案 / 交底 / 验收记录）</h2>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 style="margin:0 0 6px;font-size:15px">现场记录快速生成（v0.1.33）</h3>
+      <div class="msg" style="margin-bottom:6px">粘贴手机端现场文字/OCR结果/语音转写，自动识别记录类型（开箱/隐蔽/施工日志等）+提取关键字段+列出缺失，补充后生成 Word。</div>
+      <textarea id="frText" placeholder="粘贴现场记录文字，如：2026年9月6日 1号车间 P-101离心泵开箱验收，箱单号BX-001，验收人张三，结果合格，设备外观完好…" style="width:100%;min-height:80px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;box-sizing:border-box;font-size:13px;resize:vertical"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button class="btn" id="btnFrAnalyze">自动分析</button>
+        <span id="frType" style="font-size:13px;color:var(--accent);font-weight:600"></span>
+        <span id="frMissing" style="font-size:12px;color:#C0392B"></span>
+      </div>
+      <div id="frForm" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn orange" id="btnFrGen" style="display:none">生成 Word 记录</button>
+      </div>
+    </div>
+    <div class="msg" style="margin-bottom:8px">选择方案类型 → 自动从解析库预填车间设备 → 填写关键数据（缺项会提示）→ 生成 Word 下载，人工打印签字。规范依据内置，可人工补充。</div>
+    <div class="row" style="margin-bottom:10px">
+      <select id="dgType" style="max-width:200px"></select>
+      <select id="dgWorkshop" style="max-width:200px">
+        <option value="">— 全项目设备 —</option>
+      </select>
+      <button class="btn ghost" id="btnDgPrefill">从库预填设备</button>
+    </div>
+    <div id="dgForm" style="max-width:720px"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnDgGen">生成 Word 方案</button>
+      <span class="msg" id="dgMsg" style="margin-left:8px"></span>
+    </div>
+  </div>
+
+  <!-- ⑦ 平台规范库（多项目共享的国标/规范/通用文件） -->
+  <div class="panel" id="p-platform">
+    <h2 id="platform-lib">平台级规范库（国标/规范/通用文件，独立于子项目库）</h2>
+    <div class="msg" style="margin-bottom:8px">规范/标准在此单独建库，所有项目共享；AI 检索项目库时可同时读取平台库（引用规范正文内容而非名称）。上传时立即登记有效期，每 6 个月自动提醒核验；配置联网端点后可自动搜索最新版替换。新电脑安装时导出 .fpglib 导入即可复用。</div>
+    <div class="row" style="margin-bottom:10px">
+      <input type="file" id="platFiles" multiple style="flex:1;min-width:200px;font-size:13px">
+      <button class="btn orange" id="btnPlatUpload">上传规范文件</button>
+      <button class="btn ghost" id="btnPlatCheck">检查过期（6个月周期）</button>
+    </div>
+    <div class="msg" id="platMsg"></div>
+    <div class="row" style="margin:10px 0">
+      <button class="btn ghost" id="btnPlatExport">导出平台库 (.fpglib)</button>
+      <input type="file" id="platImportFile" accept=".fpglib" style="display:none">
+      <button class="btn ghost" id="btnPlatImport">导入平台库</button>
+    </div>
+    <div id="platList"></div>
+  </div>
+
+  <!-- ⑧ 工程资料生成计划（v0.1.12） -->
+  <div class="panel" id="p-docplan">
+    <h2 id="doc-plan">工程资料生成计划（按项目进度，缺项进待办）</h2>
+    <div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+      <h3 style="margin:0 0 6px;font-size:15px">资料完整性检查（v0.1.36）</h3>
+      <div class="msg" style="margin-bottom:6px">按工程6个阶段（施工准备/设备到货/施工过程/吊装作业/设计变更/竣工验收）自动检查资料完整性，区分项目级/车间级/设备级，缺失项按优先级列出待补充清单。</div>
+      <div class="row">
+        <button class="btn" id="btnCompletenessCheck">检查完整性</button>
+        <span id="completenessStats" style="font-size:13px;color:var(--text2)"></span>
+      </div>
+      <div id="completenessPhases" style="margin-top:8px"></div>
+      <div id="completenessTodo" style="margin-top:8px"></div>
+    </div>
+    <div class="msg" style="margin-bottom:8px">系统根据解析库自动判断"库里已有什么、每类资料缺什么"。缺的部分列出清单，把资料补进库后该资料自动转为"可生成"；也可在下方人工登记资料任务（现场进度需要做什么就登记什么）。生成结果优先 Word，签字由人工下载打印。</div>
+    <div class="row" style="margin:10px 0;gap:8px">
+      <select id="docplanType" style="max-width:180px">
+        <option value="施工方案">施工方案</option>
+        <option value="吊装方案">吊装方案</option>
+        <option value="技术交底">技术交底</option>
+        <option value="开箱验收记录">开箱验收记录</option>
+        <option value="隐蔽工程验收记录">隐蔽工程验收记录</option>
+        <option value="施工计划">施工计划</option>
+        <option value="施工日志">施工日志</option>
+        <option value="设计变更">设计变更</option>
+        <option value="货损报告">货损报告</option>
+        <option value="竣工资料">竣工资料</option>
+      </select>
+      <input type="text" id="docplanName" placeholder="任务名称（可留空）" style="flex:1;min-width:160px">
+      <button class="btn" id="btnDocPlanTask">登记资料任务</button>
+    </div>
+    <div class="msg" id="docplanMsg"></div>
+    <div id="docplanList"></div>
+    <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+      <h2 id="completion-archive">竣工资料自动组卷（v0.1.24）</h2>
+      <div class="msg" style="margin-bottom:8px">生成的资料自动存档归档；按竣工归档卷宗归卷，缺失项列出待补，补齐后可整卷导出（zip 含卷内目录.xlsx）。</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" id="btnArchiveRefresh">刷新组卷状态</button>
+        <button class="btn orange" id="btnArchiveExport">导出归档包（zip）</button>
+        <span style="font-size:12px;color:var(--text2)" id="archiveSummary"></span>
+      </div>
+      <div id="archiveList"></div>
+    </div>
+  </div>
+
+  <!-- ⑨ 云库（手机端对接 v0.1.14） -->
+  <div class="panel" id="p-cloud">
+    <h2 id="cloud-library">云库（多电脑合并 + 手机端现场上传）</h2>
+    <div class="msg" style="margin-bottom:8px">云库把多台电脑的解析结果合并为一个完整库，手机端配置云库地址即可户外读取；手机端上传的现场照片/语音/文字会先到云端"现场区"，点"拉取现场资料"即可自动下载并解析进本地项目库。连接配置在 app/config.py 的 CLOUD_ENDPOINT / CLOUD_API_KEY。</div>
+    <div class="row" style="margin-bottom:10px;gap:8px;flex-wrap:wrap">
+      <span class="chip" id="clConn">连接状态 —</span>
+      <span class="chip" id="clFiles">云库文件 —</span>
+      <span class="chip" id="clField">现场上传 —</span>
+      <button class="btn orange" id="btnPullField">拉取现场资料并解析</button>
+      <button class="btn ghost" id="btnClRefresh">刷新</button>
+    </div>
+    <div class="msg" id="clMsg"></div>
+    <h3 style="margin-top:12px">云端现场上传清单</h3>
+    <div id="clFieldList"></div>
+    <h3 style="margin-top:12px">云库文件清单（近 50）</h3>
+    <div id="clCloudList"></div>
+  </div>
+</div>
+
+
+    <section id="tab10" class="tab-content">
+        <h3>⑩ AI 助手</h3>
+        <p style="color:#666">自动调用解析数据库（项目库+平台库+工程关系+资料待办）。输入含模板名（如"吊装方案"）即离线生成 Word 资料；其他提问先本地检索，配置 AI 网关后升级联网问答。</p>
+        <div id="aiChatBox" style="height:300px;overflow:auto;border:1px solid #d0d7e2;border-radius:8px;padding:10px;background:#fafbfc;margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input id="aiInput" style="flex:1;min-width:200px;padding:8px;border:1px solid #c0c9d6;border-radius:6px;" placeholder="问 AI：如『生成 1号车间 P-101 吊装方案，设备重3.5t』或『P-101 安装要求』">
+            <button onclick="aiSend()">发送</button>
+            <button onclick="aiStatus()">助手状态</button>
+        </div>
+        <div id="aiSuggest" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+    </section>
+
+
+<!-- v0.1.45：设备台账多版本合并去重 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备台账合并去重（v0.1.45）</h3>
+  <div class="msg" style="margin-bottom:6px">自动识别同一设备在不同版本台账中的重复记录（位号匹配>名称+型号匹配），合并去重，最新版为准。名称相似但无法确认的留人工确认。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnEqMergeRun">执行合并</button>
+    <button class="btn ghost" id="btnEqMergeRefresh">刷新</button>
+    <span id="eqMergeStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="eqMergeList" style="font-size:12px;max-height:300px;overflow-y:auto"></div>
+  <div style="margin-top:8px">
+    <h4 style="margin:0 0 4px;font-size:13px">待人工确认（名称相似）</h4>
+    <div id="eqMergePending" style="font-size:12px"></div>
+  </div>
+</div>
+
+<!-- v0.1.46：施工日志自动生成 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">施工日志自动生成（v0.1.46）</h3>
+  <div class="msg" style="margin-bottom:6px">从现场记录（手机端照片/语音/文字）按日期汇总，自动提取施工内容、设备、人员、材料、机械、质量安全，生成Word施工日志。缺失字段提示补充，支持人工修改后导出。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnLogAggregate">汇总现场记录</button>
+    <button class="btn ghost" id="btnLogRefresh">刷新日志列表</button>
+    <span id="logStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="logList" style="font-size:12px;max-height:250px;overflow-y:auto;margin-bottom:8px"></div>
+  <div id="logEditor" style="display:none;border-top:1px solid var(--line);padding-top:8px">
+    <h4 style="margin:0 0 6px;font-size:13px">施工日志编辑 <span id="logEditDate" style="color:var(--accent)"></span></h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <div><label style="font-size:11px;color:var(--text2)">项目名称</label><input id="logProject" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">车间</label><input id="logWorkshop" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">记录人</label><input id="logRecorder" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">天气</label><input id="logWeather" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+    </div>
+    <div style="margin-bottom:6px"><label style="font-size:11px;color:var(--text2)">当日工作内容</label><textarea id="logContent" rows="2" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px;box-sizing:border-box"></textarea></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <div><label style="font-size:11px;color:var(--text2)">到场人员</label><input id="logPersonnel" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">进场材料</label><input id="logMaterials" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">机械使用</label><input id="logMachinery" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">温度</label><input id="logTemp" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px"></div>
+    </div>
+    <div style="margin-bottom:6px"><label style="font-size:11px;color:var(--text2)">安全质量情况</label><textarea id="logQuality" rows="2" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px;box-sizing:border-box"></textarea></div>
+    <div style="margin-bottom:8px"><label style="font-size:11px;color:var(--text2)">问题及处理</label><textarea id="logIssues" rows="2" style="width:100%;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px;box-sizing:border-box"></textarea></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn" id="btnLogSave">保存修改</button>
+      <button class="btn" id="btnLogExport" style="background:#52C41A">导出Word</button>
+      <button class="btn ghost" id="btnLogClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- v0.1.47：设备间管线/连接关系 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备间管线/连接关系（v0.1.47）</h3>
+  <div class="msg" style="margin-bottom:6px">从CAD/PID图纸提取管线编号和介质，通过空间位置关联管线两端连接的设备，构建设备-管线-设备连接网络。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnPipingBuild">构建管线网络</button>
+    <button class="btn ghost" id="btnPipingRefresh">刷新</button>
+    <span id="pipingStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div>
+      <h4 style="margin:0 0 4px;font-size:13px">管线列表</h4>
+      <div id="pipingPipeList" style="font-size:11px;max-height:200px;overflow-y:auto"></div>
+    </div>
+    <div>
+      <h4 style="margin:0 0 4px;font-size:13px">设备连接关系</h4>
+      <div id="pipingConnList" style="font-size:11px;max-height:200px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
+<!-- v0.1.48：竣工资料自动组卷增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">竣工资料自动组卷（增强版 v0.1.48）</h3>
+  <div class="msg" style="margin-bottom:6px">多级分类组卷（卷→专业→车间→设备），自动检查完整性，生成详细卷内目录，导出多级文件夹结构归档包。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnArchiveEnhanced">刷新增强状态</button>
+    <button class="btn" id="btnArchiveCompleteness">完整性检查</button>
+    <button class="btn" id="btnArchiveExportEnhanced" style="background:#52C41A">导出增强归档包</button>
+    <span id="archiveEnhancedStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="archiveEnhancedVolumes" style="font-size:12px;max-height:250px;overflow-y:auto"></div>
+  <div id="archiveCompletenessReport" style="margin-top:8px;display:none">
+    <h4 style="margin:0 0 4px;font-size:13px">完整性检查报告</h4>
+    <div id="completenessContent" style="font-size:11px"></div>
+  </div>
+</div>
+
+<!-- v0.1.58：设备安装位置与管线联动可视化 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与管线联动可视化（v0.1.58）</h3>
+  <div class="msg" style="margin-bottom:6px">展示设备在车间中的位置分布和设备间的管线连接关系，支持按车间和设备类型筛选。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnSpatialViz">生成可视化图</button>
+    <button class="btn" id="btnSpatialVizHtml" style="background:#16a085">打开完整页面</button>
+    <select id="vizWorkshop" style="padding:4px 8px;font-size:12px"><option value="">全部车间</option></select>
+    <select id="vizEqType" style="padding:4px 8px;font-size:12px"><option value="">全部类型</option></select>
+    <span id="spatialVizStats" style="font-size:12px;color:var(--text2)"></span>
+  </div>
+  <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
+</div>
+
+<!-- v0.1.104：技术交底生成 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">技术交底自动生成（v0.1.104）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成技术交底记录（8个标准章节，含精度要求和签字栏）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="tdName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <input type="text" id="tdProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="tdWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnTdGenerate" style="background:#1E5AA8">生成交底</button>
+  </div>
+  <div id="tdResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.105：安全交底生成 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+  <h3 style="margin:0 0 6px;font-size:15px">安全交底自动生成（v0.1.105）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库和危险源库自动生成安全交底记录（8个标准章节，含危险源辨识和应急预案）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="sdName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <input type="text" id="sdProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="sdWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnSdGenerate" style="background:#FF7A00">生成交底</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnSdHazards">通用危险源库</button>
+  </div>
+  <div id="sdResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.106：竣工资料组卷增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">竣工资料自动组卷增强（v0.1.106）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成竣工资料组卷目录（8卷80+项资料，根据设备类型自动调整）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="aeName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <input type="text" id="aeProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="aeWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnAeGenerate" style="background:#1E5AA8">生成组卷</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnAeCheck">完整性检查</button>
+    <button class="btn" id="btnAeTransmittal">移交单</button>
+  </div>
+  <div id="aeResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.101：施工方案增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">施工方案自动生成增强（v0.1.101）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成完整施工方案（11个标准章节）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="cpeName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <input type="text" id="cpeProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="cpeWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnCpeGenerate" style="background:#1E5AA8">生成方案</button>
+  </div>
+  <div id="cpeResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.102：吊装方案增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+  <h3 style="margin:0 0 6px;font-size:15px">吊装方案自动生成增强（v0.1.102）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细参数和吊装参数库自动生成完整吊装方案（12个标准章节，含吊车选型和吊装计算）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="lpeName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <input type="number" id="lpeWeight" placeholder="重量(t)" style="width:80px;padding:4px 8px;font-size:12px">
+    <input type="number" id="lpeHeight" placeholder="高度(m)" style="width:80px;padding:4px 8px;font-size:12px">
+    <input type="number" id="lpeRadius" placeholder="半径(m)" style="width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnLpeGenerate" style="background:#FF7A00">生成方案</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnLpeCraneDb">吊车参数库</button>
+    <button class="btn" id="btnLpeRiggingDb">索具参数库</button>
+  </div>
+  <div id="lpeResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.103：故障诊断AI助手 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">故障诊断AI助手（v0.1.103）</h3>
+  <div class="msg" style="margin-bottom:6px">基于常见故障库进行智能故障诊断，支持症状匹配、原因排查、处理建议、预防措施。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="fdName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <input type="text" id="fdSymptoms" placeholder="故障症状（逗号分隔，如：温度过高,异响）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnFdDiagnose" style="background:#1E5AA8">故障诊断</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnFdFaults">常见故障</button>
+    <button class="btn" id="btnFdMonitoring">监测参数</button>
+    <button class="btn" id="btnFdStats">诊断库统计</button>
+    <button class="btn" id="btnFdPrompt">生成AI提示词</button>
+  </div>
+  <div id="fdResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.98：多电脑并库现场记录合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库现场记录合并（v0.1.98）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑上传的现场记录合并，自动去重，冲突处理，待人工确认。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnFrmStats" style="background:#1E5AA8">合并统计</button>
+    <button class="btn" id="btnFrmPending">待人工确认</button>
+    <button class="btn" id="btnFrmLog">合并日志</button>
+    <button class="btn" id="btnFrmIntegrity">完整性检查</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="frmStrategy" style="padding:4px 8px;font-size:12px">
+      <option value="latest">最新优先</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">人工确认</option>
+    </select>
+    <button class="btn" id="btnFrmMerge">模拟合并</button>
+  </div>
+  <div id="frmStatsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="frmPendingResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="frmLogResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="frmIntegrityResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.99：移动端APP界面 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+  <h3 style="margin:0 0 6px;font-size:15px">移动端APP界面（v0.1.99）</h3>
+  <div class="msg" style="margin-bottom:6px">移动端专用界面，自适应手机屏幕，底部Tab导航。</div>
+  <div class="row" style="margin-bottom:6px">
+    <a href="/mobile/index.html" target="_blank" style="text-decoration:none"><button class="btn" style="background:#FF7A00">📱 打开移动端界面</button></a>
+    <button class="btn" id="btnMobileConfig">移动端配置</button>
+    <button class="btn" id="btnMobileDashboard">移动端数据</button>
+  </div>
+  <div id="mobileConfigResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mobileDashboardResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.100：设备详细知识库 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备详细知识库（v0.1.100）</h3>
+  <div class="msg" style="margin-bottom:6px">8种典型设备详细参数、施工要点、质量标准、常见故障、验收项目。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="eqDetailName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <button class="btn" id="btnEqDetail" style="background:#1E5AA8">设备详情</button>
+    <button class="btn" id="btnEqPoints">施工要点</button>
+    <button class="btn" id="btnEqStandards">质量标准</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnEqFaults">常见故障</button>
+    <button class="btn" id="btnEqAcceptance">验收项目</button>
+    <button class="btn" id="btnEqPhasePoints">分阶段要点</button>
+    <button class="btn" id="btnEqStats">知识库统计</button>
+  </div>
+  <div id="eqDetailResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.96：施工进度资料联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">施工进度与资料生成联动（v0.1.96）</h3>
+  <div class="msg" style="margin-bottom:6px">根据施工进度自动检查对应阶段资料完整性，生成需要的资料清单。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnSdPhases" style="background:#1E5AA8">阶段资料映射</button>
+    <button class="btn" id="btnSdCheck">阶段资料检查</button>
+    <button class="btn" id="btnSdGenerate">生成资料清单</button>
+    <button class="btn" id="btnSdCheckFull">全进度检查</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="sdPhase" style="padding:4px 8px;font-size:12px">
+      <option value="施工准备">施工准备</option>
+      <option value="基础施工">基础施工</option>
+      <option value="设备开箱">设备开箱</option>
+      <option value="设备安装">设备安装</option>
+      <option value="管道安装">管道安装</option>
+      <option value="电气安装">电气安装</option>
+      <option value="试运转">试运转</option>
+      <option value="竣工验收">竣工验收</option>
+    </select>
+    <input type="text" id="sdDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="sdPhasesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="sdCheckResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="sdGenerateResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="sdCheckFullResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.97：移动端上传联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">移动端资料上传与解析联动（v0.1.97）</h3>
+  <div class="msg" style="margin-bottom:6px">移动端上传资料后自动解析，自动识别资料类型，自动归类到项目/车间/设备。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnMbTypes" style="background:#1E5AA8">上传类型</button>
+    <button class="btn" id="btnMbClassify">自动分类</button>
+    <button class="btn" id="btnMbRecords">上传记录</button>
+    <button class="btn" id="btnMbBatchParse">批量解析</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="mbFilename" placeholder="文件名（如 设备开箱照片.jpg）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
+    <input type="text" id="mbUploader" placeholder="上传人" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <input type="text" id="mbWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="mbTypesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mbClassifyResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="mbRecordsResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.94：Word文档导出 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">Word文档导出（v0.1.94）</h3>
+  <div class="msg" style="margin-bottom:6px">将现场记录导出为标准Word文档，含数据表格、设备专用要点、签字栏。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="wordRecordType" style="padding:4px 8px;font-size:12px">
+      <option value="construction_log">施工日志</option>
+      <option value="unboxing_record">设备开箱检验记录</option>
+      <option value="concealment_record">隐蔽工程验收记录</option>
+      <option value="installation_record">设备安装记录</option>
+      <option value="trial_run_record">设备试运转记录</option>
+      <option value="safety_check">安全检查记录</option>
+      <option value="lifting_record">吊装作业记录</option>
+      <option value="welding_record">焊接记录</option>
+    </select>
+    <input type="text" id="wordDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnWordExport" style="background:#1E5AA8">导出Word</button>
+  </div>
+  <div id="wordExportResult" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.95：AI知识库联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">AI助手与资料库联动（v0.1.95）</h3>
+  <div class="msg" style="margin-bottom:6px">AI助手深度访问项目资料库，多库联合检索，生成专业问答上下文。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnKbStats" style="background:#1E5AA8">资料库统计</button>
+    <button class="btn" id="btnKbSearch">设备检索</button>
+    <button class="btn" id="btnKbMultiSearch">多库检索</button>
+    <button class="btn" id="btnKbContext">生成AI上下文</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="kbQuery" placeholder="检索关键词/问题" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+    <input type="text" id="kbEquipment" placeholder="设备名称/位号" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="kbWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="kbStatsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="kbSearchResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="kbMultiResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="kbContextResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.93：资料记录联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">资料生成与现场记录联动（v0.1.93）</h3>
+  <div class="msg" style="margin-bottom:6px">根据现场记录自动生成工程资料，现场数据自动填充到资料模板。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnDrMapping" style="background:#1E5AA8">记录-资料映射</button>
+    <button class="btn" id="btnDrGenerate">生成资料</button>
+    <button class="btn" id="btnDrCheck">完整性检查</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="drRecordType" style="padding:4px 8px;font-size:12px">
+      <option value="construction_log">施工日志</option>
+      <option value="unboxing_record">设备开箱检验记录</option>
+      <option value="concealment_record">隐蔽工程验收记录</option>
+      <option value="installation_record">设备安装记录</option>
+      <option value="trial_run_record">设备试运转记录</option>
+      <option value="safety_check">安全检查记录</option>
+      <option value="lifting_record">吊装作业记录</option>
+      <option value="welding_record">焊接记录</option>
+    </select>
+    <input type="text" id="drDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="drMappingResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="drGenerateResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+  <div id="drCheckResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.91：矿山现场记录 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山现场记录（v0.1.91）</h3>
+  <div class="msg" style="margin-bottom:6px">针对矿山设备特点优化现场记录模板，8种记录类型，自动填充设备信息和专用要点。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnFrTypes" style="background:#1E5AA8">记录类型</button>
+    <button class="btn" id="btnFrGenerate">生成记录</button>
+    <button class="btn" id="btnFrPoints">设备专用要点</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="frTypeSelect" style="padding:4px 8px;font-size:12px">
+      <option value="construction_log">施工日志</option>
+      <option value="unboxing_record">设备开箱检验记录</option>
+      <option value="concealment_record">隐蔽工程验收记录</option>
+      <option value="installation_record">设备安装记录</option>
+      <option value="trial_run_record">设备试运转记录</option>
+      <option value="safety_check">安全检查记录</option>
+      <option value="lifting_record">吊装作业记录</option>
+      <option value="welding_record">焊接记录</option>
+    </select>
+    <input type="text" id="frDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="frWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="frTypesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="frGenerateResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+  <div id="frPointsResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.90：矿山AI助手优化 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山AI助手优化（v0.1.90）</h3>
+  <div class="msg" style="margin-bottom:6px">针对矿山设备特点优化问答提示词，支持7种专业问答模式和设备专用提示词。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnAiModes" style="background:#1E5AA8">问答模式</button>
+    <button class="btn" id="btnAiPrompt">生成提示词</button>
+    <button class="btn" id="btnAiEquipPrompt">设备专用提示词</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="aiModeSelect" style="padding:4px 8px;font-size:12px">
+      <option value="general">通用咨询</option>
+      <option value="construction_plan">施工方案咨询</option>
+      <option value="lifting_plan">吊装方案咨询</option>
+      <option value="technical_disclosure">技术交底咨询</option>
+      <option value="safety">安全咨询</option>
+      <option value="quality">质量咨询</option>
+      <option value="troubleshooting">故障诊断咨询</option>
+    </select>
+    <input type="text" id="aiQuestion" placeholder="输入问题（可选）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+    <input type="text" id="aiDeviceType" placeholder="设备类型（可选）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="aiModesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="aiPromptResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="aiEquipPromptResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.89：矿山资料完整性检查 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山资料完整性检查（v0.1.89）</h3>
+  <div class="msg" style="margin-bottom:6px">按工艺流程（破碎/磨矿/选别/脱水/火法/湿法/公用辅助）检查各系统资料完整性，生成待补充清单。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnCompletenessCheck" style="background:#1E5AA8">完整性检查</button>
+    <button class="btn" id="btnCompletenessTodo">待补充清单</button>
+    <button class="btn" id="btnCompletenessReq">资料要求</button>
+  </div>
+  <div id="completenessResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="completenessTodoResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="completenessReqResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.88：矿山施工进度计划 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山施工进度计划（v0.1.88）</h3>
+  <div class="msg" style="margin-bottom:6px">按工艺流程（破碎→磨矿→选别→脱水→冶炼）自动生成施工进度计划和甘特图。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="scheduleStartDate" placeholder="开工日期(YYYY-MM-DD)" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+    <select id="scheduleWorkDays" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+      <option value="6">6天工作制</option>
+      <option value="5">5天工作制</option>
+      <option value="7">7天工作制</option>
+    </select>
+    <button class="btn" id="btnGenSchedule" style="background:#1E5AA8">生成进度计划</button>
+    <button class="btn" id="btnGenGantt" style="background:#FF7A00">甘特图</button>
+  </div>
+  <div id="scheduleResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="ganttResult" style="font-size:12px;max-height:500px;overflow:auto;display:none"></div>
+</div>
+
+<!-- v0.1.87：多电脑并库矿山设备合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库矿山设备合并（v0.1.87）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析同一矿山项目设备数据的合并，支持设计院/厂家编号映射、跨车间合并、空间位置合并。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnMergeStats" style="background:#1E5AA8">合并统计</button>
+    <button class="btn" id="btnMergePending">待确认</button>
+    <button class="btn" id="btnMergeLog">合并日志</button>
+    <button class="btn" id="btnMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="mergeStatsResult" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="mergePendingResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mergeLogResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mergeIntegrityResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.86：矿山竣工资料组卷管理 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山竣工资料组卷管理（v0.1.86）</h3>
+  <div class="msg" style="margin-bottom:6px">按矿山工艺流程（破碎→磨矿→选别→脱水→冶炼）组卷竣工资料。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnArchiveCatalog" style="background:#1E5AA8">卷册目录</button>
+    <button class="btn" id="btnArchiveOrganize">按流程组卷</button>
+    <button class="btn" id="btnArchiveTransmittal">移交单</button>
+  </div>
+  <div id="archiveCatalogResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="archiveOrganizeResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="archiveTransmittalResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.85：矿山设备施工方案/吊装方案生成 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山设备施工方案/吊装方案生成（v0.1.85）</h3>
+  <div class="msg" style="margin-bottom:6px">针对矿山设备重量大、尺寸大、安装要求特殊的特点，生成专用施工方案和吊装方案。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="planTagInput" placeholder="设备位号如：M-101" style="flex:1;min-width:100px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+    <input type="text" id="planTypeSelect" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
+    <button class="btn" id="btnGenConstructionPlan" style="background:#1E5AA8">施工方案</button>
+    <button class="btn" id="btnGenLiftingPlan" style="background:#FF7A00">吊装方案</button>
+  </div>
+  <div id="constructionPlanResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="liftingPlanResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.84：矿山/选矿/冶炼设备知识库（已隐藏，仅内部AI参考，不在前端展示） -->
+<div style="display:none">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山/选矿/冶炼设备知识库（内部参考，不展示）（v0.1.84）</h3>
+  <div class="msg" style="margin-bottom:6px">矿山设备、选厂设备、湿法/火法冶炼设备分类清单，吊装参数、技术交底、隐蔽工程、开箱验收、设计变更、货损、施工日志要点。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnMiningCategories" style="background:#1E5AA8">设备分类清单</button>
+    <input type="text" id="miningTypeInput" placeholder="输入设备类型（从项目资料识别）" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+    <button class="btn" id="btnMiningCategory">查询分类</button>
+    <button class="btn" id="btnMiningLifting">吊装参数</button>
+  </div>
+  <div id="miningCategories" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="miningCategoryResult" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="miningLiftingResult" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.83：设备安装位置与竣工资料联动增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与竣工资料联动增强（v0.1.83）</h3>
+  <div class="msg" style="margin-bottom:6px">竣工资料清单自动生成、完整性检查、组卷优化、资料总览。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnArchiveSummary" style="background:#1E5AA8">资料总览</button>
+    <button class="btn" id="btnArchiveChecklist">资料清单</button>
+    <button class="btn" id="btnArchiveIntegrity">完整性检查</button>
+    <button class="btn" id="btnArchiveOrganize">组卷优化</button>
+  </div>
+  <div id="archiveSummary" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="archiveChecklist" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="archiveIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="archiveOrganize" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.82：设备安装位置与施工进度联动增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动增强（v0.1.82）</h3>
+  <div class="msg" style="margin-bottom:6px">施工顺序优化、施工冲突识别、关键路径分析、施工进度预警、资源优化配置。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnScheduleOptimize" style="background:#1E5AA8">优化施工顺序</button>
+    <button class="btn" id="btnScheduleConflicts">识别施工冲突</button>
+    <button class="btn" id="btnScheduleCritical">关键路径分析</button>
+    <button class="btn" id="btnScheduleWarnings">施工进度预警</button>
+    <button class="btn" id="btnScheduleResources">资源优化配置</button>
+    <button class="btn" id="btnScheduleFull" style="background:#FF7A00">一键完整分析</button>
+  </div>
+  <div id="scheduleOptimizeResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleConflictsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleCriticalResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleWarningsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleResourcesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.82：设备安装位置与施工进度联动增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动增强（v0.1.82）</h3>
+  <div class="msg" style="margin-bottom:6px">关键路径分析、施工进度预警、施工顺序优化、施工进度总览。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnProgressDashboard" style="background:#1E5AA8">进度总览</button>
+    <button class="btn" id="btnProgressCriticalPath">关键路径</button>
+    <button class="btn" id="btnProgressWarnings">进度预警</button>
+    <button class="btn" id="btnProgressOptimize">顺序优化</button>
+    <input type="text" id="progressUpdateTag" placeholder="设备位号" style="width:100px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="progressUpdateStatus" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="pending">待安装</option>
+      <option value="in_progress">安装中</option>
+      <option value="completed">已完成</option>
+      <option value="accepted">已验收</option>
+    </select>
+    <button class="btn" id="btnProgressUpdateStatus">更新状态</button>
+  </div>
+  <div id="progressDashboard" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="progressCriticalPath" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="progressWarnings" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="progressOptimize" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.81：多电脑并库货损报告合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库货损报告合并（v0.1.81）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析的货损报告数据合并，自动去重，报告冲突处理，合并后自动触发完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="damageReportMergeFile" placeholder="源货损报告JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="damageReportMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="damageReportMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnDamageReportMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnDamageReportMergeStats">统计</button>
+    <button class="btn" id="btnDamageReportMergePending">待处理冲突</button>
+    <button class="btn" id="btnDamageReportMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="damageReportMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="damageReportMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="damageReportMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.80：多电脑并库设计变更合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库设计变更合并（v0.1.80）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析的设计变更数据合并，自动去重，变更冲突处理，合并后自动触发完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="designChangeMergeFile" placeholder="源设计变更JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="designChangeMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="designChangeMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnDesignChangeMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnDesignChangeMergeStats">统计</button>
+    <button class="btn" id="btnDesignChangeMergePending">待处理冲突</button>
+    <button class="btn" id="btnDesignChangeMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="designChangeMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="designChangeMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="designChangeMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.79：多电脑并库隐蔽工程验收记录合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库隐蔽工程验收记录合并（v0.1.79）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析的隐蔽工程验收记录数据合并，自动去重，记录冲突处理，合并后自动触发完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="concealmentMergeFile" placeholder="源隐蔽工程验收记录JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="concealmentMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="concealmentMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnConcealmentMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnConcealmentMergeStats">统计</button>
+    <button class="btn" id="btnConcealmentMergePending">待处理冲突</button>
+    <button class="btn" id="btnConcealmentMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="concealmentMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="concealmentMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="concealmentMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.78：多电脑并库开箱验收记录合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库开箱验收记录合并（v0.1.78）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析的开箱验收记录数据合并，自动去重，记录冲突处理，合并后自动触发完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="unboxingMergeFile" placeholder="源开箱验收记录JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="unboxingMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="unboxingMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnUnboxingMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnUnboxingMergeStats">统计</button>
+    <button class="btn" id="btnUnboxingMergePending">待处理冲突</button>
+    <button class="btn" id="btnUnboxingMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="unboxingMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="unboxingMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="unboxingMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.77：设备安装位置与货损报告联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与货损报告联动（v0.1.77）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成货损报告，包含报告编号、货损情况、损坏部位、原因分析、处理措施、索赔要求等完整要素。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="damageReportTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="damageReportDate" placeholder="报告日期(YYYY-MM-DD)" style="width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="damageReportDesc" placeholder="货损情况描述" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnDamageReportGenerate" style="background:#e74c3c">生成货损报告</button>
+    <button class="btn" id="btnDamageReportList">报告列表</button>
+    <button class="btn" id="btnDamageReportStats">统计</button>
+  </div>
+  <div id="damageReportStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="damageReportList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="damageReportDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.76：设备安装位置与设计变更联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与设计变更联动（v0.1.76）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成设计变更，包含变更编号、变更原因、影响分析、处理措施、验收要求等完整要素。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="designChangeTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="designChangeDate" placeholder="变更日期(YYYY-MM-DD)" style="width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="designChangeReason" placeholder="变更原因" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnDesignChangeGenerate" style="background:#FF7A00">生成设计变更</button>
+    <button class="btn" id="btnDesignChangeList">变更列表</button>
+    <button class="btn" id="btnDesignChangeStats">统计</button>
+  </div>
+  <div id="designChangeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="designChangeList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="designChangeDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.75：多电脑并库施工日志合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库施工日志合并（v0.1.75）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析的施工日志数据合并，自动去重，日志冲突处理，合并后自动触发完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="siteLogMergeFile" placeholder="源施工日志JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="siteLogMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="siteLogMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnSiteLogMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnSiteLogMergeStats">统计</button>
+    <button class="btn" id="btnSiteLogMergePending">待处理冲突</button>
+    <button class="btn" id="btnSiteLogMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="siteLogMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="siteLogMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="siteLogMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.74：设备安装位置与隐蔽工程验收记录联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与隐蔽工程验收记录联动（v0.1.74）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成隐蔽工程验收记录，包含隐蔽部位、隐蔽内容、检查项目、质量标准、验收依据、验收结论等完整要素。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="concealmentDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="concealmentDate" placeholder="隐蔽日期(YYYY-MM-DD)" style="width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnConcealmentGenerate" style="background:#1E5AA8">生成隐蔽记录</button>
+    <button class="btn" id="btnConcealmentList">记录列表</button>
+    <button class="btn" id="btnConcealmentStats">统计</button>
+  </div>
+  <div id="concealmentStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="concealmentList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="concealmentDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.73：设备安装位置与开箱验收记录联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与开箱验收记录联动（v0.1.73）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成开箱验收记录，包含设备基本信息、包装情况、外观检查、附件清单、随机文件、验收结论等完整要素。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="unboxingDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="unboxingDate" placeholder="开箱日期(YYYY-MM-DD)" style="width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnUnboxingGenerate" style="background:#FF7A00">生成开箱记录</button>
+    <button class="btn" id="btnUnboxingList">记录列表</button>
+    <button class="btn" id="btnUnboxingStats">统计</button>
+  </div>
+  <div id="unboxingStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="unboxingList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="unboxingDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.72：多电脑并库竣工资料合并增强 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库竣工资料合并增强（v0.1.72）</h3>
+  <div class="msg" style="margin-bottom:6px">按设备维度合并竣工资料，自动去重，资料冲突处理，合并后自动触发完整性检查，支持按车间/标高分组。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="archiveMergeFile" placeholder="源竣工资料JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="archiveMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="archiveMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnArchiveMergeFile" style="background:#1E5AA8">从文件合并</button>
+    <button class="btn" id="btnArchiveMergeStats">统计</button>
+    <button class="btn" id="btnArchiveMergePending">待处理冲突</button>
+    <button class="btn" id="btnArchiveMergeIntegrity">完整性检查</button>
+    <button class="btn" id="btnArchiveMergeGroupWS">按车间分组</button>
+  </div>
+  <div id="archiveMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="archiveMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="archiveMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="archiveMergeGroupWS" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.71：设备安装位置与施工日志联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工日志联动（v0.1.71）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成施工日志，包含施工部位、施工内容、人员配置、机具设备、材料使用、质量检查、安全情况、问题及处理、明日计划。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="siteLogDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="siteLogDate" placeholder="日期(YYYY-MM-DD)" style="width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="siteLogWeather" placeholder="天气" value="晴" style="width:60px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnSiteLogGenerate" style="background:#52C41A">生成施工日志</button>
+    <button class="btn" id="btnSiteLogList">日志列表</button>
+    <button class="btn" id="btnSiteLogStats">统计</button>
+  </div>
+  <div id="siteLogStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="siteLogList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="siteLogDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.70：设备安装位置与技术交底联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与技术交底联动（v0.1.70）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成技术交底六要素：工程概况、施工准备、施工工艺、质量标准、安全注意事项、环保要求。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="disclosureDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnDisclosureGenerate" style="background:#1E5AA8">生成技术交底</button>
+    <button class="btn" id="btnDisclosureList">交底列表</button>
+    <button class="btn" id="btnDisclosureStats">统计</button>
+  </div>
+  <div id="disclosureStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="disclosureList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="disclosureDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.69：多电脑并库施工进度合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库施工进度合并（v0.1.69）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析的施工进度数据合并，自动去重，进度冲突处理，合并后写回施工进度。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="scheduleMergeFile" placeholder="源进度JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="scheduleMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="scheduleMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnScheduleMergeFile" style="background:#FF7A00">从文件合并</button>
+    <button class="btn" id="btnScheduleMergeStats">统计</button>
+    <button class="btn" id="btnScheduleMergePending">待处理冲突</button>
+    <button class="btn" id="btnScheduleMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="scheduleMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="scheduleMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="scheduleMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.68：设备安装位置与吊装方案联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与吊装方案联动（v0.1.68）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成吊装方案要点，包括吊装环境分析、吊装参数建议、吊装顺序、安全注意事项。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="liftingDeviceTag" placeholder="设备位号（如 T-401）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnLiftingGenerate" style="background:#FF7A00">生成吊装方案</button>
+    <button class="btn" id="btnLiftingList">方案列表</button>
+    <button class="btn" id="btnLiftingStats">统计</button>
+  </div>
+  <div id="liftingStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="liftingList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="liftingDetail" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.67：设备安装位置与竣工资料联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与竣工资料联动（v0.1.67）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成竣工资料清单，完整性检查，资料缺失提醒。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="archiveDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnArchiveDevice">单台设备清单</button>
+    <button class="btn" id="btnArchiveAll" style="background:#52C41A">全部设备清单</button>
+    <button class="btn" id="btnArchiveStats">统计</button>
+    <button class="btn" id="btnArchiveMissing">缺失资料</button>
+  </div>
+  <div id="archiveStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="archiveDeviceDetail" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="archiveMissing" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.66：多电脑并库空间模型合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库空间模型合并（v0.1.66）</h3>
+  <div class="msg" style="margin-bottom:6px">将其他电脑解析的空间模型合并到本地，自动去重、坐标/标高/车间冲突处理、完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="spatialMergeFilePath" placeholder="空间模型JSON文件路径" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="spatialMergeNodeName" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="spatialMergeStrategy" style="padding:4px 8px;font-size:12px">
+      <option value="latest">最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">人工确认</option>
+    </select>
+    <button class="btn" id="btnSpatialMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnSpatialMergeStats">统计</button>
+    <button class="btn" id="btnSpatialMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="spatialMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="spatialMergePending" style="font-size:12px;max-height:150px;overflow-y:auto;display:none"></div>
+  <div id="spatialMergeIntegrity" style="font-size:12px;max-height:120px;overflow-y:auto;display:none"></div>
+  <div id="spatialMergeLog" style="font-size:11px;max-height:100px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.65：设备安装位置与施工方案联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工方案联动（v0.1.65）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成施工方案要点，包括施工环境分析、施工顺序建议、安全注意事项、质量控制要点。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="planDeviceTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnPlanGenerate" style="background:#52C41A">生成方案</button>
+    <button class="btn" id="btnPlanList">方案列表</button>
+    <button class="btn" id="btnPlanStats">统计</button>
+  </div>
+  <div id="planStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="planList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="planDetail" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.64：设备安装位置与施工进度联动 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动（v0.1.64）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置（车间、标高、坐标）自动安排施工顺序，生成甘特图，管理设备施工状态。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="scheduleStartDate" placeholder="开始日期（YYYY-MM-DD，默认今天）" style="width:180px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="number" id="scheduleDaysPerDevice" value="2" min="1" style="width:100px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px" title="每台设备施工天数">
+    <button class="btn" id="btnScheduleAuto" style="background:#52C41A">自动排程</button>
+    <button class="btn" id="btnScheduleStats">进度统计</button>
+    <button class="btn" id="btnScheduleGantt">查看甘特图</button>
+  </div>
+  <div id="scheduleStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="scheduleGantt" style="max-width:100%;overflow-x:auto;display:none"></div>
+  <div id="scheduleStatusUpdate" style="font-size:12px;margin-top:6px;display:none">
+    <strong>更新设备状态：</strong>
+    <input type="text" id="scheduleStatusTag" placeholder="设备位号" style="width:100px;padding:3px 6px;font-size:11px">
+    <select id="scheduleStatusSelect" style="padding:3px 6px;font-size:11px">
+      <option value="pending">待施工</option>
+      <option value="in_progress">进行中</option>
+      <option value="completed">已完成</option>
+    </select>
+    <input type="text" id="scheduleStatusNotes" placeholder="备注" style="width:120px;padding:3px 6px;font-size:11px">
+    <button class="btn" id="btnScheduleStatusUpdate" style="padding:3px 8px;font-size:11px">更新</button>
+  </div>
+</div>
+
+<!-- v0.1.63：多电脑并库设备关系合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库设备关系合并（v0.1.63）</h3>
+  <div class="msg" style="margin-bottom:6px">将其他电脑解析的设备关系图谱合并到本地，自动去重、冲突处理、完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="relMergeFilePath" placeholder="关系图谱JSON文件路径（如 D:\项目\relations.json）" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="relMergeNodeName" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="relMergeStrategy" style="padding:4px 8px;font-size:12px">
+      <option value="latest">最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">人工确认</option>
+    </select>
+    <button class="btn" id="btnRelMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnRelMergeStats">统计</button>
+    <button class="btn" id="btnRelMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="relMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="relMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="relMergeIntegrity" style="font-size:12px;max-height:150px;overflow-y:auto;display:none"></div>
+  <div id="relMergeLog" style="font-size:11px;max-height:120px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.62：设备安装位置三维可视化（等轴测视图） -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置三维可视化（v0.1.62）</h3>
+  <div class="msg" style="margin-bottom:6px">等轴测视图展示设备三维空间位置，支持视角切换（等轴测/正视图/侧视图/俯视图）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="view3dSelect" style="padding:4px 8px;font-size:12px">
+      <option value="isometric">等轴测视图</option>
+      <option value="front">正视图</option>
+      <option value="side">侧视图</option>
+      <option value="top">俯视图</option>
+    </select>
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
+      <input type="checkbox" id="showPiping3d" checked> 显示管线
+    </label>
+    <button class="btn" id="btn3dGenerate" style="background:#FF7A00">生成三维视图</button>
+  </div>
+  <div id="view3dSvgContainer" style="max-width:100%;overflow-x:auto;display:none"></div>
+</div>
+
+<!-- v0.1.61：设备位置按标高分层可视化 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备位置按标高分层可视化（v0.1.61）</h3>
+  <div class="msg" style="margin-bottom:6px">按标高z坐标分层展示设备位置，支持切换不同标高层、分层堆叠视图。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="elevationSelect" style="padding:4px 8px;font-size:12px">
+      <option value="">全部标高</option>
+    </select>
+    <button class="btn" id="btnElevationLayer">查看该层</button>
+    <button class="btn" id="btnElevationStack" style="background:#FF7A00">分层堆叠视图</button>
+    <button class="btn" id="btnElevationList">刷新标高列表</button>
+  </div>
+  <div id="elevationSvgContainer" style="max-width:100%;overflow-x:auto;display:none"></div>
+</div>
+
+<!-- v0.1.59：多电脑并库竣工资料合并 -->
+<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库竣工资料合并（v0.1.59）</h3>
+  <div class="msg" style="margin-bottom:6px">将其他电脑解析的竣工资料合并到本地库，自动去重、版本冲突处理、合并日志记录。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="mergeSourcePath" placeholder="源文件夹路径（如 D:\项目资料\电脑B解析结果）" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="mergeNodeName" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="mergeStrategy" style="padding:4px 8px;font-size:12px">
+      <option value="latest">最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">人工确认</option>
+    </select>
+    <button class="btn" id="btnMergeScan">扫描</button>
+    <button class="btn" id="btnMergeRun" style="background:#52C41A">开始合并</button>
+    <button class="btn" id="btnMergeStats">统计</button>
+  </div>
+  <div id="mergeScanResult" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="mergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="mergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="mergeLog" style="font-size:11px;max-height:150px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.41：设备位置人工确认弹窗 -->
+<div id="spatialEditModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;width:min(420px,92vw);padding:16px;box-sizing:border-box;">
+    <h4 style="margin:0 0 10px">设备位置确认</h4>
+    <div style="margin-bottom:8px"><strong id="editDeviceTag"></strong></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div><label style="font-size:12px;color:var(--text2)">X 坐标</label><input id="editX" type="number" step="0.01" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:6px"></div>
+      <div><label style="font-size:12px;color:var(--text2)">Y 坐标</label><input id="editY" type="number" step="0.01" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:6px"></div>
+      <div><label style="font-size:12px;color:var(--text2)">Z 标高(m)</label><input id="editZ" type="number" step="0.01" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:6px"></div>
+      <div><label style="font-size:12px;color:var(--text2)">车间</label><input id="editWorkshop" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:6px"></div>
+    </div>
+    <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--text2)">备注</label><input id="editNote" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:6px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="spatialEditClose()" style="padding:6px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer">取消</button>
+      <button onclick="spatialEditConfirm()" style="padding:6px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer">确认</button>
+    </div>
+  </div>
+</div>
+
+<div id="genModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;width:min(560px,92vw);max-height:85vh;overflow:auto;padding:16px;box-sizing:border-box;">
+    <h4 id="genModalTitle" style="margin:0 0 10px">生成资料</h4>
+    <div id="genModalFields" style="max-height:52vh;overflow:auto;"></div>
+    <div id="genModalHint" style="color:#c0392b;font-size:12px;margin-top:6px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+      <button onclick="genClose()">取消</button>
+      <button onclick="genDo()">生成并下载</button>
+    </div>
+  </div>
+</div>
+
+<script src="/web/app.js"></script>
+
+<script>
+// 自动更新功能
+var updateInfo = null;
+
+function checkForUpdates() {
+    fetch('/api/update/check')
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.has_update) {
+                updateInfo = data;
+                showUpdateBanner(data);
+            }
+        })
+        .catch(e => console.log('检查更新失败', e));
+}
+
+function showUpdateBanner(data) {
+    var banner = document.getElementById('updateBanner');
+    document.getElementById('updateTitle').textContent = 
+        '发现新版本 v' + data.latest_version + '（当前 v' + data.current_version + '）';
+    document.getElementById('updateDesc').textContent = 
+        '最新更新：' + (data.latest_commit_msg || '').substring(0, 60);
+    banner.classList.add('show');
+}
+
+function hideUpdateBanner() {
+    document.getElementById('updateBanner').classList.remove('show');
+}
+
+function performUpdate() {
+    var btn = document.getElementById('btnUpdateNow');
+    var progress = document.getElementById('updateProgress');
+    var progressBar = document.getElementById('updateProgressBar');
+    
+    if (!confirm('确定要更新到最新版本吗？\n\n更新前会自动备份当前版本，数据目录不会被覆盖。\n更新完成后需要重启服务。')) {
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = '更新中...';
+    progress.style.display = 'block';
+    progressBar.style.width = '20%';
+    
+    fetch('/api/update/perform', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({backup: true, force: false})
+    })
+    .then(r => r.json())
+    .then(data => {
+        progressBar.style.width = '100%';
+        
+        if (data.ok) {
+            btn.textContent = '更新成功';
+            alert('更新成功！\n\n' + (data.restart_hint || data.message || '') + 
+                  '\n\n请关闭当前窗口，重新运行 run_workbench.bat 启动新版本。');
+            setTimeout(() => {
+                hideUpdateBanner();
+                location.reload();
+            }, 2000);
+        } else {
+            btn.disabled = false;
+            btn.textContent = '立即更新';
+            alert('更新失败：' + (data.error || '未知错误') + 
+                  '\n\n' + (data.suggestion || ''));
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.textContent = '立即更新';
+        alert('更新请求失败：' + e.message);
+    });
+}
+
+// 手动检查更新
+function manualCheckUpdate() {
+    var btn = event.target;
+    var oldText = btn.textContent;
+    btn.textContent = '检查中...';
+    btn.disabled = true;
+    
+    fetch('/api/update/check')
+        .then(r => r.json())
+        .then(data => {
+            btn.textContent = oldText;
+            btn.disabled = false;
+            
+            if (data.ok && data.has_update) {
+                updateInfo = data;
+                showUpdateBanner(data);
+                alert('发现新版本 v' + data.latest_version + '！
+当前版本：v' + data.current_version + '
+
+请点击顶部更新横幅中的「立即更新」按钮。');
+            } else if (data.ok && !data.has_update) {
+                alert('当前已是最新版本 v' + data.current_version);
+            } else {
+                alert('检查更新失败：' + (data.error || '未知错误') + '
+
+' + (data.suggestion || ''));
+            }
+        })
+        .catch(e => {
+            btn.textContent = oldText;
+            btn.disabled = false;
+            alert('检查更新请求失败：' + e.message);
+        });
+}
+
+// 页面加载后3秒检查更新
+setTimeout(checkForUpdates, 3000);
+// 每小时检查一次
+setInterval(checkForUpdates, 3600000);
+</script>
+
+<script>
+// ========== 项目管理功能 ==========
+var currentProject = null;
+var projectList = [];
+
+// 页面加载时初始化项目管理
+document.addEventListener('DOMContentLoaded', function() {
+    loadProjects();
+    initProjectButtons();
+});
+
+function initProjectButtons() {
+    // 新建项目按钮
+    var btnNew = document.getElementById('btnNewProject');
+    if (btnNew) btnNew.onclick = showNewProjectForm;
+    
+    // 创建项目按钮
+    var btnCreate = document.getElementById('btnCreateProject');
+    if (btnCreate) btnCreate.onclick = createProject;
+    
+    // 取消新建按钮
+    var btnCancel = document.getElementById('btnCancelNewProject');
+    if (btnCancel) btnCancel.onclick = hideNewProjectForm;
+    
+    // 切换项目按钮
+    var btnSwitch = document.getElementById('btnSwitchProject');
+    if (btnSwitch) btnSwitch.onclick = showProjectSelector;
+    
+    // 数据目录按钮
+    var btnDataDir = document.getElementById('btnProjectDataDir');
+    if (btnDataDir) btnDataDir.onclick = showProjectDataDir;
+}
+
+// 加载项目列表
+function loadProjects() {
+    fetch('/api/projects')
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                projectList = data.projects || [];
+                updateProjectUI();
+            }
+        })
+        .catch(e => console.log('加载项目列表失败', e));
+    
+    // 加载当前项目
+    fetch('/api/projects/current')
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.project) {
+                currentProject = data.project;
+                updateProjectUI();
+            }
+        })
+        .catch(e => console.log('加载当前项目失败', e));
+}
+
+// 更新项目相关UI显示
+function updateProjectUI() {
+    // 当前项目名称
+    var nameEl = document.getElementById('currentProjectName');
+    if (nameEl) {
+        if (currentProject) {
+            nameEl.textContent = currentProject.name;
+            nameEl.style.color = '#1E5AA8';
+        } else {
+            nameEl.textContent = '未选择项目';
+            nameEl.style.color = '#EA6668';
+        }
+    }
+    
+    // 项目选择下拉框
+    var selector = document.getElementById('projectSelector');
+    if (selector) {
+        selector.innerHTML = '<option value="">-- 选择项目 --</option>';
+        projectList.forEach(function(p) {
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name + (p.file_count > 0 ? ' (' + p.file_count + '文件)' : '');
+            if (currentProject && p.id === currentProject.id) {
+                opt.selected = true;
+            }
+            selector.appendChild(opt);
+        });
+        selector.onchange = function() {
+            if (this.value) {
+                switchProject(this.value);
+            }
+        };
+    }
+}
+
+// 显示新建项目表单
+function showNewProjectForm() {
+    var form = document.getElementById('newProjectForm');
+    if (form) {
+        form.style.display = 'block';
+        document.getElementById('newProjectName').value = '';
+        document.getElementById('newProjectClient').value = '';
+        document.getElementById('newProjectLocation').value = '';
+        document.getElementById('newProjectDesc').value = '';
+        document.getElementById('newProjectName').focus();
+    }
+}
+
+// 隐藏新建项目表单
+function hideNewProjectForm() {
+    var form = document.getElementById('newProjectForm');
+    if (form) {
+        form.style.display = 'none';
+    }
+}
+
+// 创建项目
+function createProject() {
+    var name = document.getElementById('newProjectName').value.trim();
+    if (!name) {
+        alert('请输入项目名称');
+        return;
+    }
+    
+    var btn = document.getElementById('btnCreateProject');
+    btn.disabled = true;
+    btn.textContent = '创建中...';
+    
+    var data = {
+        name: name,
+        client: document.getElementById('newProjectClient').value.trim(),
+        location: document.getElementById('newProjectLocation').value.trim(),
+        description: document.getElementById('newProjectDesc').value.trim()
+    };
+    
+    fetch('/api/projects/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        btn.disabled = false;
+        btn.textContent = '创建项目';
+        
+        if (result.ok) {
+            alert('项目「' + name + '」创建成功！已自动切换为当前项目。\n\n现在上传的文件都会归入这个项目。');
+            hideNewProjectForm();
+            currentProject = result.project;
+            loadProjects();
+        } else {
+            alert('创建失败：' + (result.error || '未知错误'));
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.textContent = '创建项目';
+        alert('创建请求失败：' + e.message);
+    });
+}
+
+// 切换项目
+function switchProject(projectId) {
+    fetch('/api/projects/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: projectId})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            currentProject = data.project;
+            updateProjectUI();
+            alert('已切换到项目：' + currentProject.name + '\n\n后续上传的文件将归入此项目。');
+            // 刷新页面数据
+            location.reload();
+        } else {
+            alert('切换失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(e => alert('切换请求失败：' + e.message));
+}
+
+// 显示项目选择器
+function showProjectSelector() {
+    var selector = document.getElementById('projectSelector');
+    if (selector) {
+        selector.style.display = selector.style.display === 'none' ? 'block' : 'none';
+        if (selector.style.display === 'block') {
+            selector.focus();
+        }
+    }
+}
+
+// 显示项目数据目录
+function showProjectDataDir() {
+    if (!currentProject) {
+        alert('请先选择或创建一个项目');
+        return;
+    }
+    var infoEl = document.getElementById('projectDataDirInfo');
+    if (infoEl) {
+        infoEl.style.display = 'block';
+        infoEl.innerHTML = '<strong>当前项目数据目录：</strong><br>' +
+            'data/projects/' + currentProject.id + '/<br><br>' +
+            '<small>所有上传的文件、解析结果、向量库都存储在此目录下。<br>' +
+            '可将此路径复制给外部Agent使用。</small>';
+    }
+}
+
+// 删除项目（带确认）
+function deleteProject(projectId) {
+    if (!confirm('确定要删除这个项目吗？\n\n删除前会自动备份到 updates/backups/ 目录。\n删除后不可恢复（除非从备份恢复）。')) {
+        return;
+    }
+    fetch('/api/projects/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: projectId, backup: true})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            alert('项目已删除，备份保存在：' + (data.backup_path || 'updates/backups/'));
+            currentProject = null;
+            loadProjects();
+        } else {
+            alert('删除失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(e => alert('删除请求失败：' + e.message));
+}
+</script>
+
+<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+
+<script>
+// 导航功能
+function navTo(id) {
+    var el = document.getElementById(id);
+    if (el) {
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+    // 移动端关闭侧边栏
+    document.getElementById('sidebar').classList.remove('open');
+    // 更新激活状态
+    updateActiveNav(id);
+}
+
+function updateActiveNav(activeId) {
+    document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+        a.classList.remove('active');
+        if (a.getAttribute('href') === '#' + activeId) {
+            a.classList.add('active');
+        }
+    });
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+}
+
+// 滚动监听：高亮当前区块 + 显示回到顶部
+var sections = document.querySelectorAll('[id]');
+var backToTop = document.getElementById('backToTop');
+
+window.addEventListener('scroll', function() {
+    var scrollPos = window.scrollY + 100;
+    
+    // 回到顶部按钮
+    if (window.scrollY > 400) {
+        backToTop.classList.add('show');
+    } else {
+        backToTop.classList.remove('show');
+    }
+    
+    // 高亮当前导航
+    var currentId = '';
+    document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+        var id = a.getAttribute('href').substring(1);
+        var el = document.getElementById(id);
+        if (el && el.offsetTop <= scrollPos) {
+            currentId = id;
+        }
+    });
+    if (currentId) {
+        updateActiveNav(currentId);
+    }
+});
+
+// 点击主内容区关闭移动端侧边栏
+document.querySelector('.main-content').addEventListener('click', function() {
+    document.getElementById('sidebar').classList.remove('open');
+});
+</script>
+  </main>
+</div>
+
+<script>
+// ===== v0.1.116 精简布局：模块切换 + 区块折叠 =====
+var currentModule = 'project';
+
+// 模块定义：每个模块包含哪些区块ID（按顺序）
+var moduleSections = {
+    project: ['project-bar', 'smart-gen', 'template-mgr', 'project-backup'],
+    upload: ['scan-parse', 'failed-files', 'manual-upload', 'batch-upload'],
+    result: ['parsed-list', 'vector-search', 'workshop-auto', 'version-merge', 'export-merge'],
+    relation: ['cad-linkage', 'spatial-model', 'device-workshop', 'tag-alias'],
+    docgen: ['doc-gen', 'doc-plan', 'completion-archive'],
+    platform: ['platform-lib'],
+    cloud: ['cloud-library', 'cloud-queue']
+};
+
+// 所有需要被模块控制显隐的区块选择器
+var allControlledSections = [];
+for (var mod in moduleSections) {
+    allControlledSections = allControlledSections.concat(moduleSections[mod]);
+}
+
+function switchModule(moduleName) {
+    currentModule = moduleName;
+    
+    // 更新Tab激活状态
+    document.querySelectorAll('.module-tab').forEach(function(tab) {
+        tab.classList.remove('active');
+        if (tab.textContent.indexOf(moduleName === 'project' ? '项目管理' : 
+            moduleName === 'upload' ? '文件上传' :
+            moduleName === 'result' ? '解析结果' :
+            moduleName === 'relation' ? '关系与空间' :
+            moduleName === 'docgen' ? '工程资料' :
+            moduleName === 'platform' ? '平台规范' : '云端') >= 0) {
+            tab.classList.add('active');
+        }
+    });
+    
+    // 更新侧边栏激活状态
+    document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+        a.classList.remove('active');
+    });
+    
+    // 显示/隐藏统一上传区域
+    var unifiedUpload = document.getElementById('unifiedUpload');
+    if (unifiedUpload) {
+        unifiedUpload.style.display = moduleName === 'upload' ? 'block' : 'none';
+    }
+    
+    // 显示当前模块的区块，隐藏其他模块的区块
+    allControlledSections.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) {
+            // 找到该区块的容器（h2或div的父级）
+            var container = el.closest('div') || el;
+            if (moduleSections[moduleName].indexOf(id) >= 0) {
+                container.style.display = '';
+                // 同时显示该区块后面的兄弟内容直到下一个区块
+                showFollowingContent(el);
+            } else {
+                container.style.display = 'none';
+            }
+        }
+    });
+    
+    // 滚动到顶部
+    window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function showFollowingContent(startEl) {
+    // 显示从startEl开始到下一个有id的区块之间的所有内容
+    var el = startEl;
+    var count = 0;
+    while (el && count < 50) {
+        el = el.nextElementSibling;
+        if (!el) break;
+        // 如果遇到下一个有id的主要区块，停止
+        if (el.id && allControlledSections.indexOf(el.id) >= 0) break;
+        if (el.querySelector && el.querySelector('[id]')) {
+            var innerId = el.querySelector('[id]').id;
+            if (allControlledSections.indexOf(innerId) >= 0) break;
+        }
+        el.style.display = '';
+        count++;
+    }
+}
+
+function scrollToSection(id) {
+    var el = document.getElementById(id);
+    if (el) {
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+}
+
+// 初始化：默认显示项目管理模块
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+        switchModule('project');
+        initCollapsible();
+    }, 500);
+});
+
+// 区块折叠功能
+function initCollapsible() {
+    // 给所有h2添加折叠功能
+    document.querySelectorAll('h2[id]').forEach(function(h2) {
+        h2.classList.add('collapsible-header');
+        h2.onclick = function() {
+            this.classList.toggle('collapsed');
+            // 折叠后面的内容
+            var el = this.nextElementSibling;
+            while (el) {
+                if (el.tagName === 'H2' || (el.id && allControlledSections.indexOf(el.id) >= 0)) break;
+                el.classList.toggle('collapsed');
+                el = el.nextElementSibling;
+            }
+        };
+    });
+}
+</script>
+</body>
+</html>
