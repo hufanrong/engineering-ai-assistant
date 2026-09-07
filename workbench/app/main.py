@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.85")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.86")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2502,6 +2502,41 @@ def mining_plan_construction(tag: str = "", type: str = ""):
     result = _mpt.generate_mining_construction_plan(tag, type, spatial_info)
     return result
 
+
+
+@app.get("/api/mining-archive/process-flow")
+def mining_archive_process_flow():
+    """v0.1.86：获取矿山工艺流程定义。"""
+    from . import mining_archive_organize as _mao
+    return {"ok": True, **_mao.get_process_flow()}
+
+
+@app.get("/api/mining-archive/organize")
+def mining_archive_organize():
+    """v0.1.86：按工艺流程组卷竣工资料。"""
+    from . import mining_archive_organize as _mao
+    return _mao.organize_by_process_flow()
+
+
+@app.get("/api/mining-archive/catalog")
+def mining_archive_catalog():
+    """v0.1.86：获取竣工资料卷册目录。"""
+    from . import mining_archive_organize as _mao
+    return _mao.get_volume_catalog()
+
+
+@app.get("/api/mining-archive/process-equipment")
+def mining_archive_process_equipment(process: str = ""):
+    """v0.1.86：获取指定工艺流程的设备清单。"""
+    from . import mining_archive_organize as _mao
+    return _mao.get_process_equipment_list(process)
+
+
+@app.get("/api/mining-archive/transmittal")
+def mining_archive_transmittal(process: str = "", volume_name: str = ""):
+    """v0.1.86：生成竣工资料移交单。"""
+    from . import mining_archive_organize as _mao
+    return _mao.generate_archive_transmittal(volume_name, process)
 
 @app.get("/api/mining-plan/lifting")
 def mining_plan_lifting(tag: str = "", type: str = ""):

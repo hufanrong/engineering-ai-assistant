@@ -4318,3 +4318,83 @@ document.addEventListener("DOMContentLoaded", function () {
   var b2 = document.getElementById("btnGenLiftingPlan");
   if (b2) b2.addEventListener("click", genLiftingPlan);
 });
+
+// v0.1.86：矿山竣工资料组卷管理
+function loadArchiveCatalog() {
+  fetch("/api/mining-archive/catalog").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveCatalogResult");
+    el.style.display = "block";
+    document.getElementById("archiveOrganizeResult").style.display = "none";
+    document.getElementById("archiveTransmittalResult").style.display = "none";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>竣工资料卷册目录（共' + d.total_volumes + '卷）：</strong><br>';
+    d.volumes.forEach(function(v) {
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + esc(v.volume_number) + ' ' + esc(v.volume_name) + '</strong><br>';
+      html += '<span style="color:#6B7280">' + esc(v.description) + '</span><br>';
+      html += '关键设备：' + v.key_equipment.map(function(x){return esc(x);}).join('、') + '<br>';
+      html += '设备类型数：' + v.equipment_count + '种';
+      html += '</div>';
+    });
+    html += '<br><strong>资料阶段：</strong>' + d.stages.map(function(x){return esc(x);}).join('→');
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function loadArchiveOrganize() {
+  fetch("/api/mining-archive/organize").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveOrganizeResult");
+    el.style.display = "block";
+    document.getElementById("archiveCatalogResult").style.display = "none";
+    document.getElementById("archiveTransmittalResult").style.display = "none";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>按工艺流程组卷结果：</strong><br>';
+    html += '总卷册：' + d.total_volumes + '卷 | 总设备：' + d.total_devices + '台 | 资料总数：' + d.total_docs + '项';
+    html += ' | 已完成：' + d.completed_docs + '项 | 完成率：' + d.completion_rate + '%<br>';
+    if (d.uncategorized_count > 0) {
+      html += '<span style="color:#f39c12">未分类设备：' + d.uncategorized_count + '台</span><br>';
+    }
+    d.volumes.forEach(function(v) {
+      var color = v.completion_rate >= 80 ? '#52C41A' : (v.completion_rate >= 50 ? '#FAAD14' : '#EA6668');
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+      html += '<strong>' + esc(v.volume_name) + '</strong>（' + v.device_count + '台设备）<br>';
+      html += '<span style="color:#6B7280">' + esc(v.description) + '</span><br>';
+      html += '资料：' + v.completed_docs + '/' + v.total_docs + '项 | 完成率：<span style="color:' + color + '">' + v.completion_rate + '%</span><br>';
+      html += '关键设备：' + v.key_equipment.map(function(x){return esc(x);}).join('、');
+      if (v.devices.length > 0) {
+        html += '<br>设备清单（前' + Math.min(v.devices.length, 10) + '台）：';
+        v.devices.slice(0, 10).forEach(function(dev) {
+          html += '<br>  - ' + esc(dev.tag) + ' ' + esc(dev.name || '') + ' (' + esc(dev.type || '') + '/' + esc(dev.status || '') + ')';
+        });
+      }
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function loadArchiveTransmittal() {
+  fetch("/api/mining-archive/transmittal?process=1. 破碎系统").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveTransmittalResult");
+    el.style.display = "block";
+    document.getElementById("archiveCatalogResult").style.display = "none";
+    document.getElementById("archiveOrganizeResult").style.display = "none";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.transmittal_title) + '</strong><br>';
+    html += '移交日期：' + esc(d.transmittal_date) + '<br>';
+    html += '工艺流程：' + esc(d.process) + '<br>';
+    html += '<span style="color:#6B7280">' + esc(d.description) + '</span><br><br>';
+    html += '<strong>移交项目清单：</strong><br>';
+    d.transmittal_items.forEach(function(item, i) {
+      html += (i+1) + '. ' + esc(item.item) + '（' + esc(item.count) + '）- ' + esc(item.remarks) + '<br>';
+    });
+    html += '<br><span style="color:#6B7280">' + esc(d.remarks) + '</span>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnArchiveCatalog");
+  if (b1) b1.addEventListener("click", loadArchiveCatalog);
+  var b2 = document.getElementById("btnArchiveOrganize");
+  if (b2) b2.addEventListener("click", loadArchiveOrganize);
+  var b3 = document.getElementById("btnArchiveTransmittal");
+  if (b3) b3.addEventListener("click", loadArchiveTransmittal);
+});
