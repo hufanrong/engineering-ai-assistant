@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.93")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.95")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2736,6 +2736,55 @@ def mining_doc_record_batch_generate(data: dict):
     from . import mining_doc_record_link as _mdrl
     return _mdrl.batch_generate_docs_from_records(data.get("records", []))
 
+
+
+@app.post("/api/mining-word/export")
+def mining_word_export(data: dict):
+    """v0.1.94：将现场记录导出为Word文档。"""
+    from . import mining_doc_word_export as _mdwe
+    return _mdwe.export_record_to_word(
+        data.get("record_type", ""),
+        data.get("record_data", {}),
+        data.get("device_type", ""),
+        data.get("device_tag", ""),
+        data.get("workshop", ""),
+        data.get("output_path", ""),
+    )
+
+
+
+@app.get("/api/mining-ai-kb/search-equipment")
+def mining_ai_kb_search_equipment(equipment_name: str = "", equipment_tag: str = "", workshop: str = ""):
+    """v0.1.95：在资料库中检索设备信息。"""
+    from . import mining_ai_knowledge_link as _maik
+    return _maik.search_equipment_in_knowledge_base(equipment_name, equipment_tag, workshop)
+
+
+@app.get("/api/mining-ai-kb/generate-context")
+def mining_ai_kb_generate_context(question: str = "", equipment_name: str = "", equipment_tag: str = "", workshop: str = ""):
+    """v0.1.95：从资料库生成AI问答上下文。"""
+    from . import mining_ai_knowledge_link as _maik
+    return _maik.generate_ai_context_from_knowledge_base(question, equipment_name, equipment_tag, workshop)
+
+
+@app.get("/api/mining-ai-kb/multi-search")
+def mining_ai_kb_multi_search(query: str = "", top_k: int = 10):
+    """v0.1.95：多库联合检索（项目库+平台规范库+设备知识库）。"""
+    from . import mining_ai_knowledge_link as _maik
+    return _maik.multi_knowledge_base_search(query, top_k=top_k)
+
+
+@app.get("/api/mining-ai-kb/stats")
+def mining_ai_kb_stats():
+    """v0.1.95：获取资料库统计信息。"""
+    from . import mining_ai_knowledge_link as _maik
+    return _maik.get_knowledge_base_stats()
+
+@app.post("/api/mining-word/batch-export")
+def mining_word_batch_export(data: dict):
+    """v0.1.94：批量导出Word文档。"""
+    from . import mining_doc_word_export as _mdwe
+    return _mdwe.batch_export_to_word(data.get("records", []))
 
 @app.post("/api/mining-doc-record/check-completeness")
 def mining_doc_record_check_completeness(data: dict):

@@ -514,6 +514,48 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.94：Word文档导出 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">Word文档导出（v0.1.94）</h3>
+  <div class="msg" style="margin-bottom:6px">将现场记录导出为标准Word文档，含数据表格、设备专用要点、签字栏。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="wordRecordType" style="padding:4px 8px;font-size:12px">
+      <option value="construction_log">施工日志</option>
+      <option value="unboxing_record">设备开箱检验记录</option>
+      <option value="concealment_record">隐蔽工程验收记录</option>
+      <option value="installation_record">设备安装记录</option>
+      <option value="trial_run_record">设备试运转记录</option>
+      <option value="safety_check">安全检查记录</option>
+      <option value="lifting_record">吊装作业记录</option>
+      <option value="welding_record">焊接记录</option>
+    </select>
+    <input type="text" id="wordDeviceType" placeholder="设备类型（如球磨机）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnWordExport" style="background:#1E5AA8">导出Word</button>
+  </div>
+  <div id="wordExportResult" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.95：AI知识库联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">AI助手与资料库联动（v0.1.95）</h3>
+  <div class="msg" style="margin-bottom:6px">AI助手深度访问项目资料库，多库联合检索，生成专业问答上下文。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnKbStats" style="background:#1E5AA8">资料库统计</button>
+    <button class="btn" id="btnKbSearch">设备检索</button>
+    <button class="btn" id="btnKbMultiSearch">多库检索</button>
+    <button class="btn" id="btnKbContext">生成AI上下文</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="kbQuery" placeholder="检索关键词/问题" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+    <input type="text" id="kbEquipment" placeholder="设备名称/位号" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="kbWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="kbStatsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="kbSearchResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="kbMultiResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="kbContextResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.93：资料记录联动 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">资料生成与现场记录联动（v0.1.93）</h3>

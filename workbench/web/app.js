@@ -4890,3 +4890,142 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnDrCheck");
   if (b3) b3.addEventListener("click", drCheck);
 });
+
+// v0.1.94：Word导出
+function wordExport() {
+  var type = document.getElementById("wordRecordType").value;
+  var devType = document.getElementById("wordDeviceType").value;
+  var recordData = {date: "2026-09-07", workshop: "示例车间", equipment_name: devType || "示例设备", conclusion: "合格"};
+  fetch("/api/mining-word/export", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({record_type: type, record_data: recordData, device_type: devType, workshop: "示例车间"})
+  }).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("wordExportResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>Word导出成功：</strong><br>';
+    html += '文档：' + esc(d.doc_name) + '<br>';
+    html += '大小：' + d.file_size_kb + ' KB<br>';
+    html += '字段：' + d.field_count + '项';
+    if (d.equipment_points_count > 0) html += '，设备要点：' + d.equipment_points_count + '项';
+    html += '<br>路径：' + esc(d.output_path);
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b = document.getElementById("btnWordExport");
+  if (b) b.addEventListener("click", wordExport);
+});
+
+// v0.1.95：AI知识库联动
+function kbStats() {
+  fetch("/api/mining-ai-kb/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("kbStatsResult");
+    el.style.display = "block";
+    ["kbSearchResult","kbMultiResult","kbContextResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>资料库统计：</strong><br>';
+    html += '项目文档：' + d.project_docs + '份<br>';
+    html += '设备数量：' + d.devices + '台<br>';
+    html += '车间数量：' + d.workshops + '个';
+    if (d.workshop_list) html += '（' + d.workshop_list.join('、') + '）';
+    html += '<br>平台规范：' + d.platform_standards + '项<br>';
+    html += '设备类型：' + d.equipment_types + '种<br>';
+    if (d.equipment_categories) {
+      html += '分类：';
+      for (var cat in d.equipment_categories) {
+        html += cat + '(' + d.equipment_categories[cat] + ') ';
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function kbSearch() {
+  var eq = document.getElementById("kbEquipment").value;
+  var ws = document.getElementById("kbWorkshop").value;
+  var url = "/api/mining-ai-kb/search-equipment?";
+  if (eq) url += "equipment_name=" + encodeURIComponent(eq) + "&";
+  if (ws) url += "workshop=" + encodeURIComponent(ws);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("kbSearchResult");
+    el.style.display = "block";
+    ["kbStatsResult","kbMultiResult","kbContextResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>设备检索结果：</strong> ' + (d.found ? '<span style="color:#52C41A">找到</span>' : '<span style="color:#EA6668">未找到</span>') + '<br>';
+    if (d.found && d.device_info) {
+      var dev = d.device_info;
+      html += '位号：' + esc(dev.tag || '') + '<br>';
+      html += '名称：' + esc(dev.name || '') + '<br>';
+      html += '类型：' + esc(dev.type || '') + '<br>';
+      html += '车间：' + esc(dev.workshop || '') + '<br>';
+      if (dev.elevation) html += '标高：' + esc(dev.elevation) + '<br>';
+      if (dev.sources) {
+        html += '数据来源：CAD=' + (dev.sources.cad||0) + ', Excel=' + (dev.sources.excel||0) + ', OCR=' + (dev.sources.ocr||0) + '<br>';
+      }
+    }
+    if (d.workshop_devices) {
+      html += '<br>车间设备列表（' + d.workshop_device_count + '台）：<br>';
+      d.workshop_devices.slice(0, 10).forEach(function(dev) {
+        html += '  • ' + esc(dev.tag) + ' - ' + esc(dev.name) + '（' + esc(dev.type) + '）<br>';
+      });
+    }
+    if (d.related_docs_count) html += '<br>相关文档：' + d.related_docs_count + '份<br>';
+    if (d.related_standards_count) html += '相关规范：' + d.related_standards_count + '项';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function kbMultiSearch() {
+  var q = document.getElementById("kbQuery").value || "球磨机";
+  fetch("/api/mining-ai-kb/multi-search?query=" + encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("kbMultiResult");
+    el.style.display = "block";
+    ["kbStatsResult","kbSearchResult","kbContextResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>多库检索："' + esc(d.query) + '"，共' + d.total_results + '条结果</strong><br>';
+    html += '项目库：' + (d.project_count||0) + '条 | 平台规范：' + (d.platform_count||0) + '条 | 设备知识库：' + (d.equipment_count||0) + '条<br><br>';
+    if (d.equipment_results && d.equipment_results.length > 0) {
+      html += '<span style="color:#1E5AA8">设备知识库：</span><br>';
+      d.equipment_results.slice(0, 5).forEach(function(e) {
+        html += '  • ' + esc(e.name) + '（' + esc(e.category) + '）';
+        if (e.lifting_params && e.lifting_params.weight_range) html += ' 重量：' + esc(e.lifting_params.weight_range);
+        html += '<br>';
+      });
+    }
+    if (d.project_results && d.project_results.length > 0) {
+      html += '<br><span style="color:#FF7A00">项目库：</span><br>';
+      d.project_results.slice(0, 5).forEach(function(p) {
+        html += '  • ' + esc(p.filename) + '（' + esc(p.file_type) + '）<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function kbContext() {
+  var q = document.getElementById("kbQuery").value || "球磨机安装方案";
+  var eq = document.getElementById("kbEquipment").value;
+  var ws = document.getElementById("kbWorkshop").value;
+  var url = "/api/mining-ai-kb/generate-context?question=" + encodeURIComponent(q);
+  if (eq) url += "&equipment_name=" + encodeURIComponent(eq);
+  if (ws) url += "&workshop=" + encodeURIComponent(ws);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("kbContextResult");
+    el.style.display = "block";
+    ["kbStatsResult","kbSearchResult","kbMultiResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>AI问答上下文：</strong><br>';
+    html += '问题：' + esc(d.question) + '<br>';
+    html += '资料库命中：' + (d.knowledge_base_found ? '<span style="color:#52C41A">是</span>' : '<span style="color:#EA6668">否</span>') + '<br>';
+    html += '相关文档：' + d.related_docs_count + '份 | 相关规范：' + d.related_standards_count + '项<br><br>';
+    html += '<div style="background:rgba(0,0,0,0.03);padding:8px;border-radius:4px;white-space:pre-wrap;font-family:monospace;font-size:11px;max-height:300px;overflow-y:auto">';
+    html += esc(d.full_prompt);
+    html += '</div>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnKbStats");
+  if (b1) b1.addEventListener("click", kbStats);
+  var b2 = document.getElementById("btnKbSearch");
+  if (b2) b2.addEventListener("click", kbSearch);
+  var b3 = document.getElementById("btnKbMultiSearch");
+  if (b3) b3.addEventListener("click", kbMultiSearch);
+  var b4 = document.getElementById("btnKbContext");
+  if (b4) b4.addEventListener("click", kbContext);
+});
