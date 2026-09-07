@@ -4200,3 +4200,57 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnArchiveOrganize");
   if (b4) b4.addEventListener("click", archiveLoadOrganize);
 });
+
+// v0.1.84：矿山/选矿/冶炼设备知识库
+function miningLoadCategories() {
+  fetch("/api/mining-equipment/categories").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("miningCategories");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>设备分类清单（共' + d.total + '种）：</strong><br>';
+    for (var cat in d.categories) {
+      var items = d.categories[cat];
+      html += '<strong>' + esc(cat) + '</strong>（' + items.length + '种）：<br>';
+      html += items.map(function(x){return esc(x);}).join('、') + '<br><br>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function miningQueryCategory() {
+  var type = document.getElementById("miningTypeInput").value.trim();
+  if (!type) { alert("请输入设备类型"); return; }
+  fetch("/api/mining-equipment/category?type=" + encodeURIComponent(type)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("miningCategoryResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    el.innerHTML = '<strong>' + esc(d.type) + '</strong> → 分类：<strong>' + esc(d.category) + '</strong> | 矿山设备：' + (d.is_mining ? '是' : '否');
+  }).catch(function(){});
+}
+function miningQueryLifting() {
+  var type = document.getElementById("miningTypeInput").value.trim();
+  if (!type) { alert("请输入设备类型"); return; }
+  fetch("/api/mining-equipment/lifting-params?type=" + encodeURIComponent(type)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("miningLiftingResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    if (!d.params || Object.keys(d.params).length === 0) {
+      el.innerHTML = '<span style="color:#f39c12">未找到' + esc(type) + '的吊装参数，请参考通用设备参数</span>';
+      return;
+    }
+    var p = d.params;
+    var html = '<strong>' + esc(type) + ' 吊装参数：</strong><br>';
+    html += '重量范围：' + esc(p.weight_range || '未知') + '<br>';
+    html += '吊点：' + esc(p.lifting_points || '未知') + '<br>';
+    html += '吊车推荐：' + esc(p.crane_recommendation || '未知') + '<br>';
+    html += '特殊注意事项：' + esc(p.special_notes || '无') + '<br>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnMiningCategories");
+  if (b1) b1.addEventListener("click", miningLoadCategories);
+  var b2 = document.getElementById("btnMiningCategory");
+  if (b2) b2.addEventListener("click", miningQueryCategory);
+  var b3 = document.getElementById("btnMiningLifting");
+  if (b3) b3.addEventListener("click", miningQueryLifting);
+});

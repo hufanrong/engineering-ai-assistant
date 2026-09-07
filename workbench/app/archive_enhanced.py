@@ -172,6 +172,26 @@ DEFAULT_ARCHIVE_REQUIREMENTS = [
 ]
 
 
+
+# v0.1.84：合并矿山设备竣工资料要求
+from .mining_equipment import EQUIPMENT_CATEGORIES as _MINING_CATS
+# 矿山设备通用竣工资料要求（按大类）
+_MINING_ARCHIVE_REQ = {}
+for _cat in ["矿山设备", "选矿厂设备", "湿法冶炼设备", "火法冶炼设备"]:
+    for _dev in _MINING_CATS.get(_cat, []):
+        _MINING_ARCHIVE_REQ[_dev] = [
+            {"doc_type": "设备开箱检验记录", "required": True, "stage": "开箱"},
+            {"doc_type": "设备基础验收记录", "required": True, "stage": "基础"},
+            {"doc_type": "设备安装记录", "required": True, "stage": "安装"},
+            {"doc_type": "设备找平找正记录", "required": True, "stage": "安装"},
+            {"doc_type": "隐蔽工程验收记录", "required": True, "stage": "隐蔽"},
+            {"doc_type": "设备试运转记录", "required": True, "stage": "试运转"},
+            {"doc_type": "设备质量证明文件", "required": True, "stage": "资料"},
+            {"doc_type": "设备说明书", "required": True, "stage": "资料"},
+            {"doc_type": "设备竣工图", "required": True, "stage": "资料"},
+        ]
+DEVICE_ARCHIVE_REQUIREMENTS.update(_MINING_ARCHIVE_REQ)
+
 def get_archive_requirements(dev_type: str) -> list:
     """v0.1.83：获取设备类型竣工资料要求。"""
     return DEVICE_ARCHIVE_REQUIREMENTS.get(dev_type, DEFAULT_ARCHIVE_REQUIREMENTS)

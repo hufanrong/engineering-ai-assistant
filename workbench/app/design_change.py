@@ -284,6 +284,11 @@ DEFAULT_CHANGE_POINTS = {
 }
 
 
+
+# v0.1.84：合并矿山设备设计变更要点
+from .mining_equipment import MINING_DESIGN_CHANGE as _MINING_DC
+DEVICE_CHANGE_POINTS.update(_MINING_DC)
+
 def get_change_points(dev_type: str) -> dict:
     """v0.1.76：获取设备类型设计变更要点。"""
     return DEVICE_CHANGE_POINTS.get(dev_type, DEFAULT_CHANGE_POINTS)

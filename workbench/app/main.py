@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.83")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.84")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2462,6 +2462,28 @@ def archive_enhanced_update_doc(body: dict):
         raise HTTPException(status_code=400, detail="status必须是pending/complete/missing")
     return {"ok": True, **_ae.update_archive_doc_status(tag, doc_type, status, file_path)}
 
+
+
+@app.get("/api/mining-equipment/categories")
+def mining_equipment_categories():
+    """v0.1.84：矿山/选矿/冶炼设备分类清单。"""
+    from . import mining_equipment as _me
+    return {"ok": True, "categories": _me.EQUIPMENT_CATEGORIES, "total": len(_me.ALL_MINING_EQUIPMENT)}
+
+
+@app.get("/api/mining-equipment/category")
+def mining_equipment_category(type: str = ""):
+    """v0.1.84：查询设备所属分类。"""
+    from . import mining_equipment as _me
+    return {"ok": True, "type": type, "category": _me.get_mining_equipment_category(type), "is_mining": _me.is_mining_equipment(type)}
+
+
+@app.get("/api/mining-equipment/lifting-params")
+def mining_equipment_lifting_params(type: str = ""):
+    """v0.1.84：查询矿山设备吊装参数。"""
+    from . import mining_equipment as _me
+    params = _me.MINING_LIFTING_PARAMS.get(type, {})
+    return {"ok": True, "type": type, "params": params}
 
 @app.get("/api/archive-enhanced/requirements")
 def archive_enhanced_requirements(type: str = ""):

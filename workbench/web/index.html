@@ -514,6 +514,21 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.84：矿山/选矿/冶炼设备知识库 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山/选矿/冶炼设备知识库（v0.1.84）</h3>
+  <div class="msg" style="margin-bottom:6px">矿山设备、选厂设备、湿法/火法冶炼设备分类清单，吊装参数、技术交底、隐蔽工程、开箱验收、设计变更、货损、施工日志要点。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnMiningCategories" style="background:#1E5AA8">设备分类清单</button>
+    <input type="text" id="miningTypeInput" placeholder="输入设备类型如：球磨机" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+    <button class="btn" id="btnMiningCategory">查询分类</button>
+    <button class="btn" id="btnMiningLifting">吊装参数</button>
+  </div>
+  <div id="miningCategories" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="miningCategoryResult" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="miningLiftingResult" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.83：设备安装位置与竣工资料联动增强 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与竣工资料联动增强（v0.1.83）</h3>

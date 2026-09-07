@@ -296,6 +296,11 @@ DEFAULT_CONCEALMENT_CONTENT = {
 }
 
 
+
+# v0.1.84：合并矿山设备隐蔽工程内容
+from .mining_equipment import MINING_CONCEALMENT as _MINING_CONC
+DEVICE_CONCEALMENT_CONTENT.update(_MINING_CONC)
+
 def get_concealment_content(dev_type: str) -> dict:
     """v0.1.74：获取设备类型隐蔽工程内容。"""
     return DEVICE_CONCEALMENT_CONTENT.get(dev_type, DEFAULT_CONCEALMENT_CONTENT)

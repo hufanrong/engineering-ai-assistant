@@ -109,6 +109,162 @@ DEVICE_LIFTING_PARAMS = {
         "lifting_method": "倒装法或正装法",
         "special_requirements": ["储罐体积大，需确认现场组装空间", "罐底基础平整度要求高", "焊接需考虑防风措施", "充水试验需在所有附件安装完成后进行"],
     },
+    # 矿山/选矿设备
+    "破碎机": {
+        "estimated_weight": 15.0,
+        "estimated_height": 4.0,
+        "crane_tons": 50,
+        "lifting_radius": 8,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["破碎机重心高，吊装需注意平衡", "颚式破碎机需整体吊装或分体吊装后组装", "圆锥破碎机主轴需垂直吊装", "吊装前确认基础螺栓孔位置"],
+    },
+    "磨矿机": {
+        "estimated_weight": 80.0,
+        "estimated_height": 5.0,
+        "crane_tons": 200,
+        "lifting_radius": 12,
+        "lifting_method": "双机抬吊或单机吊装",
+        "special_requirements": ["磨机筒体重量大，需编制专项吊装方案", "筒体吊装需使用专用吊耳或吊带", "端盖与筒体组装后整体吊装", "吊装前确认主轴承已安装找平", "大型磨机需考虑厂房内桥式起重机配合"],
+    },
+    "分级机": {
+        "estimated_weight": 8.0,
+        "estimated_height": 6.0,
+        "crane_tons": 25,
+        "lifting_radius": 6,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["螺旋分级机槽体长，吊装需多点吊挂", "旋流器组需整体吊装", "注意安装倾角"],
+    },
+    "浮选机": {
+        "estimated_weight": 5.0,
+        "estimated_height": 3.0,
+        "crane_tons": 16,
+        "lifting_radius": 5,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["多槽浮选机可单槽吊装后连接", "槽体吊装注意保护衬里", "叶轮定子需在槽体就位后安装"],
+    },
+    "磁选机": {
+        "estimated_weight": 6.0,
+        "estimated_height": 3.0,
+        "crane_tons": 20,
+        "lifting_radius": 5,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["磁选机周围避免铁磁性物体", "滚筒吊装注意磁系保护", "湿式磁选机注意槽体密封"],
+    },
+    "浓密机": {
+        "estimated_weight": 25.0,
+        "estimated_height": 8.0,
+        "crane_tons": 50,
+        "lifting_radius": 15,
+        "lifting_method": "单机吊装或分段吊装",
+        "special_requirements": ["浓密机池体直径大，需现场组装", "中心传动装置需精确吊装就位", "耙架需在池体就位后安装", "注意池体水平度"],
+    },
+    "过滤机": {
+        "estimated_weight": 10.0,
+        "estimated_height": 4.0,
+        "crane_tons": 25,
+        "lifting_radius": 6,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["压滤机机架需整体吊装", "真空过滤机滤盘需水平吊装", "注意滤布保护"],
+    },
+    # 湿法冶炼设备
+    "浸出槽": {
+        "estimated_weight": 12.0,
+        "estimated_height": 8.0,
+        "crane_tons": 25,
+        "lifting_radius": 6,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["浸出槽衬里需保护，禁止焊接和敲击", "大型浸出槽可现场卷制组装", "搅拌器需在槽体就位后安装", "注意防腐层检查"],
+    },
+    "萃取设备": {
+        "estimated_weight": 8.0,
+        "estimated_height": 4.0,
+        "crane_tons": 20,
+        "lifting_radius": 5,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["萃取槽体需水平安装", "有机相区域需防静电", "多级萃取槽需按序连接"],
+    },
+    "电解槽": {
+        "estimated_weight": 5.0,
+        "estimated_height": 2.0,
+        "crane_tons": 16,
+        "lifting_radius": 4,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["电解槽需绝缘安装", "衬里需保护", "导电排需在槽体就位后安装", "注意酸雾防护"],
+    },
+    "高压釜": {
+        "estimated_weight": 60.0,
+        "estimated_height": 10.0,
+        "crane_tons": 150,
+        "lifting_radius": 10,
+        "lifting_method": "单机吊装或双机抬吊",
+        "special_requirements": ["高压釜属于压力容器，吊装需有资质单位", "需编制专项吊装方案并专家论证", "使用制造厂指定吊耳", "吊装前确认安全附件已安装", "注意釜体衬里保护"],
+    },
+    "蒸发结晶器": {
+        "estimated_weight": 20.0,
+        "estimated_height": 12.0,
+        "crane_tons": 50,
+        "lifting_radius": 8,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["多效蒸发设备需按效序吊装", "加热器列管需保护", "结晶器搅拌器需在就位后安装", "注意设备保温"],
+    },
+    # 火法冶炼设备
+    "熔炼炉": {
+        "estimated_weight": 100.0,
+        "estimated_height": 15.0,
+        "crane_tons": 200,
+        "lifting_radius": 15,
+        "lifting_method": "分段吊装+现场组装",
+        "special_requirements": ["熔炼炉体积大，需现场组装", "炉体钢结构分段吊装", "铜水套需逐块吊装就位", "炉衬砌筑需在炉体就位后进行", "需编制专项吊装方案"],
+    },
+    "吹炼炉": {
+        "estimated_weight": 150.0,
+        "estimated_height": 8.0,
+        "crane_tons": 300,
+        "lifting_radius": 12,
+        "lifting_method": "双机抬吊或大型履带吊",
+        "special_requirements": ["转炉炉体重量大，需编制专项吊装方案", "炉体与托圈组装后整体吊装", "使用专用吊耳", "吊装前确认托轮装置已安装找平", "需专家论证"],
+    },
+    "回转窑": {
+        "estimated_weight": 120.0,
+        "estimated_height": 4.0,
+        "crane_tons": 200,
+        "lifting_radius": 20,
+        "lifting_method": "分段吊装+现场组装焊接",
+        "special_requirements": ["回转窑长度大，需分段吊装现场焊接", "焊接需100%无损检测", "吊装前确认托轮装置已安装找平", "注意窑体斜度", "需编制专项吊装方案"],
+    },
+    "余热锅炉": {
+        "estimated_weight": 80.0,
+        "estimated_height": 20.0,
+        "crane_tons": 150,
+        "lifting_radius": 12,
+        "lifting_method": "分段吊装+现场组装",
+        "special_requirements": ["余热锅炉属于压力容器，安装需有资质单位", "汽包需单独吊装就位", "受热面管束需逐组吊装", "钢架需先安装找正", "需编制专项吊装方案"],
+    },
+    "收尘设备": {
+        "estimated_weight": 15.0,
+        "estimated_height": 10.0,
+        "crane_tons": 50,
+        "lifting_radius": 8,
+        "lifting_method": "单机吊装或分段吊装",
+        "special_requirements": ["大型除尘器壳体需现场组装", "滤袋/极板需在壳体就位后安装", "注意壳体气密性", "灰斗需精确吊装就位"],
+    },
+    "排烟机": {
+        "estimated_weight": 20.0,
+        "estimated_height": 4.0,
+        "crane_tons": 50,
+        "lifting_radius": 6,
+        "lifting_method": "单机吊装",
+        "special_requirements": ["排烟机叶轮需做动平衡复检", "机壳需水平安装", "转子需精确吊装就位", "注意轴承保护", "大型排烟机需厂房内桥式起重机配合"],
+    },
+    "冶金起重机": {
+        "estimated_weight": 50.0,
+        "estimated_height": 2.0,
+        "crane_tons": 100,
+        "lifting_radius": 15,
+        "lifting_method": "厂房内桥式起重机或大型汽车吊",
+        "special_requirements": ["冶金起重机属于特种设备，安装需有资质单位", "桥架需在轨道安装完成后吊装", "大车运行机构需先安装", "需编制专项吊装方案", "注意轨道上方作业空间"],
+    },
+
 }
 
 DEFAULT_LIFTING_PARAMS = {
@@ -120,6 +276,11 @@ DEFAULT_LIFTING_PARAMS = {
     "special_requirements": [],
 }
 
+
+
+# v0.1.84：合并矿山设备吊装参数
+from .mining_equipment import MINING_LIFTING_PARAMS as _MINING_LIFTING
+DEVICE_LIFTING_PARAMS.update(_MINING_LIFTING)
 
 def get_lifting_params(dev_type: str) -> dict:
     """v0.1.68：获取设备类型吊装参数参考。"""

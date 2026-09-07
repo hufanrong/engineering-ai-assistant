@@ -416,6 +416,11 @@ DEFAULT_DAMAGE_POINTS = {
 }
 
 
+
+# v0.1.84：合并矿山设备货损要点
+from .mining_equipment import MINING_DAMAGE as _MINING_DMG
+DEVICE_DAMAGE_POINTS.update(_MINING_DMG)
+
 def get_damage_points(dev_type: str) -> dict:
     """v0.1.77：获取设备类型货损要点。"""
     return DEVICE_DAMAGE_POINTS.get(dev_type, DEFAULT_DAMAGE_POINTS)
