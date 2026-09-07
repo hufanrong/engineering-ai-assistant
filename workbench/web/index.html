@@ -533,6 +533,30 @@
   <div id="scheduleResourcesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
 </div>
 
+<!-- v0.1.82：设备安装位置与施工进度联动增强 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动增强（v0.1.82）</h3>
+  <div class="msg" style="margin-bottom:6px">关键路径分析、施工进度预警、施工顺序优化、施工进度总览。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnProgressDashboard" style="background:#1E5AA8">进度总览</button>
+    <button class="btn" id="btnProgressCriticalPath">关键路径</button>
+    <button class="btn" id="btnProgressWarnings">进度预警</button>
+    <button class="btn" id="btnProgressOptimize">顺序优化</button>
+    <input type="text" id="progressUpdateTag" placeholder="设备位号" style="width:100px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="progressUpdateStatus" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="pending">待安装</option>
+      <option value="in_progress">安装中</option>
+      <option value="completed">已完成</option>
+      <option value="accepted">已验收</option>
+    </select>
+    <button class="btn" id="btnProgressUpdateStatus">更新状态</button>
+  </div>
+  <div id="progressDashboard" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="progressCriticalPath" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="progressWarnings" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="progressOptimize" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.81：多电脑并库货损报告合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库货损报告合并（v0.1.81）</h3>

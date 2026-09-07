@@ -4018,3 +4018,100 @@ document.addEventListener("DOMContentLoaded", function () {
   var b6 = document.getElementById("btnScheduleFull");
   if (b6) b6.addEventListener("click", scheduleFullAnalysis);
 });
+
+// v0.1.82：设备安装位置与施工进度联动增强
+function progressLoadDashboard() {
+  fetch("/api/progress-enhanced/dashboard").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("progressDashboard");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var sc = d.status_count || {};
+    var html = '<strong>施工进度总览：</strong>总设备' + d.total_devices + '台 | 完成率' + d.completion_rate + '%<br>';
+    html += '待安装:' + (sc.pending || 0) + ' | 安装中:' + (sc.in_progress || 0) + ' | 已完成:' + (sc.completed || 0) + ' | 已验收:' + (sc.accepted || 0) + '<br>';
+    if (d.by_workshop) {
+      html += '<strong>按车间：</strong><br>';
+      for (var ws in d.by_workshop) {
+        var wsd = d.by_workshop[ws];
+        html += '- ' + esc(ws) + ': 总' + wsd.total + '台 待安装' + wsd.pending + ' 安装中' + wsd.in_progress + ' 已完成' + wsd.completed + '<br>';
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function progressLoadCriticalPath() {
+  fetch("/api/progress-enhanced/critical-path").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("progressCriticalPath");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>关键路径分析：</strong>总设备' + d.total_devices + '台 | 关键设备' + d.critical_devices_count + '台<br>';
+    if (d.critical_path && d.critical_path.length > 0) {
+      d.critical_path.forEach(function(c, i) {
+        html += (i+1) + '. <strong>' + esc(c.tag) + '</strong> ' + esc(c.name || '') + ' (' + esc(c.workshop || '') + '/标高' + (c.elevation != null ? c.elevation : '未知') + 'm/' + esc(c.status || '') + ')<br>';
+        (c.critical_reasons || []).forEach(function(r) { html += '   - ' + esc(r) + '<br>'; });
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function progressLoadWarnings() {
+  fetch("/api/progress-enhanced/warnings").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("progressWarnings");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>施工进度预警：</strong>总预警' + d.warnings_count + '个 | 高危' + d.high_severity + ' | 中危' + d.medium_severity + '<br>';
+    if (d.warnings && d.warnings.length > 0) {
+      d.warnings.forEach(function(w) {
+        var color = w.severity === 'high' ? '#e74c3c' : (w.severity === 'medium' ? '#f39c12' : '#27ae60');
+        html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+        html += '<span style="color:' + color + '">[' + esc(w.severity) + ']</span> ' + esc(w.message) + '</div>';
+      });
+    } else {
+      html += '<span style="color:#27ae60">无预警</span>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function progressLoadOptimize() {
+  fetch("/api/progress-enhanced/optimize-order").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("progressOptimize");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>施工顺序优化：</strong>总设备' + d.total_devices + '台 | 阶段' + d.total_phases + '个 | 待安装' + d.pending_count + ' | 安装中' + d.in_progress_count + ' | 已完成' + d.completed_count + '<br>';
+    if (d.optimized_order && d.optimized_order.length > 0) {
+      d.optimized_order.slice(0, 20).forEach(function(o, i) {
+        var statusColor = o.status === 'completed' ? '#27ae60' : (o.status === 'in_progress' ? '#f39c12' : '#95a5a6');
+        html += (i+1) + '. 阶段' + o.phase + ' <strong>' + esc(o.tag) + '</strong> ' + esc(o.name || '') + ' (' + esc(o.workshop || '') + '/' + esc(o.elevation_group || '') + '/标高' + (o.elevation != null ? o.elevation : '未知') + 'm) <span style="color:' + statusColor + '">[' + esc(o.status) + ']</span> 优先级:' + o.priority_score + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function progressUpdateStatus() {
+  var tag = document.getElementById("progressUpdateTag").value.trim();
+  var status = document.getElementById("progressUpdateStatus").value;
+  if (!tag) { alert("请输入设备位号"); return; }
+  fetch("/api/progress-enhanced/update-status", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({tag: tag, status: status})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("更新失败：" + d.error); return; }
+    var msg = "设备" + d.tag + "状态已更新为" + d.status;
+    if (d.affected_devices && d.affected_devices.length > 0) {
+      msg += "\n受影响相邻设备：" + d.affected_devices.map(function(a){return a.tag;}).join(", ");
+    }
+    alert(msg);
+    progressLoadDashboard();
+  }).catch(function(e){ alert("更新失败：" + e.message); });
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnProgressDashboard");
+  if (b1) b1.addEventListener("click", progressLoadDashboard);
+  var b2 = document.getElementById("btnProgressCriticalPath");
+  if (b2) b2.addEventListener("click", progressLoadCriticalPath);
+  var b3 = document.getElementById("btnProgressWarnings");
+  if (b3) b3.addEventListener("click", progressLoadWarnings);
+  var b4 = document.getElementById("btnProgressOptimize");
+  if (b4) b4.addEventListener("click", progressLoadOptimize);
+  var b5 = document.getElementById("btnProgressUpdateStatus");
+  if (b5) b5.addEventListener("click", progressUpdateStatus);
+});

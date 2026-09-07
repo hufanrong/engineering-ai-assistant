@@ -2390,6 +2390,48 @@ def schedule_enhanced_stats():
     from . import schedule_enhanced as _se
     return {"ok": True, **_se.get_enhanced_stats()}
 
+
+@app.get("/api/progress-enhanced/critical-path")
+def progress_enhanced_critical_path():
+    """v0.1.82：关键路径分析。"""
+    from . import progress_enhanced as _pe
+    return {"ok": True, **_pe.analyze_critical_path()}
+
+
+@app.get("/api/progress-enhanced/warnings")
+def progress_enhanced_warnings():
+    """v0.1.82：施工进度预警。"""
+    from . import progress_enhanced as _pe
+    return {"ok": True, **_pe.check_progress_warnings()}
+
+
+@app.get("/api/progress-enhanced/optimize-order")
+def progress_enhanced_optimize_order():
+    """v0.1.82：施工顺序优化。"""
+    from . import progress_enhanced as _pe
+    return {"ok": True, **_pe.optimize_installation_order()}
+
+
+@app.get("/api/progress-enhanced/dashboard")
+def progress_enhanced_dashboard():
+    """v0.1.82：施工进度总览。"""
+    from . import progress_enhanced as _pe
+    return {"ok": True, **_pe.get_progress_dashboard()}
+
+
+@app.post("/api/progress-enhanced/update-status")
+def progress_enhanced_update_status(body: dict):
+    """v0.1.82：更新设备状态（带位置信息联动）。"""
+    from . import progress_enhanced as _pe
+    tag = body.get("tag", "")
+    status = body.get("status", "")
+    notes = body.get("notes", "")
+    if not tag or not status:
+        raise HTTPException(status_code=400, detail="缺少tag或status")
+    if status not in ["pending", "in_progress", "completed", "accepted"]:
+        raise HTTPException(status_code=400, detail="status必须是pending/in_progress/completed/accepted")
+    return {"ok": True, **_pe.update_device_status_with_position(tag, status, notes)}
+
 @app.get("/api/damage-report-merge/integrity")
 def damage_report_merge_integrity():
     """v0.1.81：检查货损报告完整性。"""
