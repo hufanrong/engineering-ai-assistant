@@ -3786,3 +3786,98 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnDesignChangeMergeIntegrity");
   if (b4) b4.addEventListener("click", designChangeMergeLoadIntegrity);
 });
+
+// v0.1.81：多电脑并库货损报告合并
+function damageReportMergeFile() {
+  var file = document.getElementById("damageReportMergeFile").value.trim();
+  var pc = document.getElementById("damageReportMergePC").value.trim();
+  var strategy = document.getElementById("damageReportMergeStrategy").value;
+  if (!file) { alert("请输入源货损报告JSON文件路径"); return; }
+  fetch("/api/damage-report-merge/merge-file", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({file_path: file, source_pc: pc, conflict_strategy: strategy})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.detail) { alert("合并失败：" + d.detail); return; }
+    var log = d.log || {};
+    var msg = "合并完成！源报告:" + log.source_reports + " 合并:" + log.merged_reports + " 跳过:" + log.skipped_duplicate + " 冲突:" + log.conflicts + " 字段合并:" + (log.fields_merged || 0);
+    if (d.integrity_after_merge) {
+      var integ = d.integrity_after_merge;
+      msg += "\n合并后完整性：覆盖" + integ.coverage_percent + "% 日期跨度" + integ.date_span + " 待鉴定" + integ.devices_pending + "台 待认定责任" + integ.devices_responsibility_pending + "台 严重/报废" + integ.devices_severe + "台 问题" + integ.issues_count + "个";
+    }
+    alert(msg);
+    damageReportMergeLoadStats();
+    damageReportMergeLoadIntegrity();
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function damageReportMergeLoadStats() {
+  fetch("/api/damage-report-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("damageReportMergeStats");
+    el.style.display = "block";
+    var html = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并报告' + d.total_reports_merged + '条 | 合并字段' + d.total_fields_merged + '项 | 冲突' + d.total_conflicts + '次<br>';
+    html += '待处理冲突:' + d.pending_conflicts + ' | 已解决:' + d.resolved_conflicts + ' | 当前报告:' + d.current_total_reports + '条<br>';
+    if (d.current_by_degree) {
+      html += '<strong>按损坏程度：</strong>';
+      for (var k in d.current_by_degree) { html += esc(k) + ':' + d.current_by_degree[k] + ' '; }
+      html += '<br>';
+    }
+    if (d.current_by_responsibility) {
+      html += '<strong>按责任认定：</strong>';
+      for (var k in d.current_by_responsibility) { html += esc(k) + ':' + d.current_by_responsibility[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function damageReportMergeLoadPending() {
+  fetch("/api/damage-report-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("damageReportMergePending");
+    var pending = d.pending || [];
+    if (pending.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#27ae60">无待处理冲突</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + pending.length + '个）：</strong><br>';
+    pending.slice(0, 10).forEach(function(p, i) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(231,76,60,0.05);border-radius:4px">';
+      html += '<strong>' + esc(p.tag) + '</strong> ' + esc(p.report_date || '') + ' 来源:' + esc(p.source_pc || '') + '<br>';
+      html += '源程度:' + esc(p.source_degree || '无') + ' vs 当前:' + esc(p.current_degree || '无') + '<br>';
+      html += '源责任:' + esc(p.source_responsibility || '无') + ' vs 当前:' + esc(p.current_responsibility || '无') + '<br>';
+      html += '源损坏部位:' + p.source_parts_count + '项 vs 当前:' + p.current_parts_count + '项 | 源原因分析:' + p.source_causes_count + '项 vs 当前:' + p.current_causes_count + '项<br>';
+      html += '<button onclick="damageReportMergeResolve(' + i + ',\'use_source\')" style="font-size:11px;padding:2px 6px;margin-right:4px">用源数据</button>';
+      html += '<button onclick="damageReportMergeResolve(' + i + ',\'keep_existing\')" style="font-size:11px;padding:2px 6px;margin-right:4px">保留现有</button>';
+      html += '<button onclick="damageReportMergeResolve(' + i + ',\'skip\')" style="font-size:11px;padding:2px 6px">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function damageReportMergeResolve(index, decision) {
+  fetch("/api/damage-report-merge/resolve", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({index: index, decision: decision})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("已处理：" + d.decision); damageReportMergeLoadPending(); damageReportMergeLoadStats(); }
+    else alert("处理失败：" + (d.error || ""));
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function damageReportMergeLoadIntegrity() {
+  fetch("/api/damage-report-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("damageReportMergeIntegrity");
+    el.style.display = "block";
+    var html = '<strong>货损报告完整性：</strong>总设备' + d.total_devices + '台 | 有报告' + d.devices_with_reports + '台 | 报告总数' + d.total_reports + '条 | 覆盖率' + d.coverage_percent + '%<br>';
+    html += '日期跨度: ' + esc(d.date_span) + ' | 待鉴定: ' + d.devices_pending + '台 | 待认定责任: ' + d.devices_responsibility_pending + '台 | 严重/报废: ' + d.devices_severe + '台 | 问题: ' + d.issues_count + '个<br>';
+    if (d.issues && d.issues.length > 0) {
+      d.issues.forEach(function(iss) {
+        html += '- ' + esc(iss.type) + ': ' + iss.count + (iss.devices ? '台 (' + iss.devices.slice(0,5).join(',') + '...)' : '条') + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnDamageReportMergeFile");
+  if (b1) b1.addEventListener("click", damageReportMergeFile);
+  var b2 = document.getElementById("btnDamageReportMergeStats");
+  if (b2) b2.addEventListener("click", damageReportMergeLoadStats);
+  var b3 = document.getElementById("btnDamageReportMergePending");
+  if (b3) b3.addEventListener("click", damageReportMergeLoadPending);
+  var b4 = document.getElementById("btnDamageReportMergeIntegrity");
+  if (b4) b4.addEventListener("click", damageReportMergeLoadIntegrity);
+});

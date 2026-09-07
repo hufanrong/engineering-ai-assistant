@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.80")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.81")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2282,6 +2282,70 @@ def design_change_merge_stats():
     from . import design_change_merge as _dcm
     return {"ok": True, **_dcm.merge_stats()}
 
+
+
+@app.post("/api/damage-report-merge/merge")
+def damage_report_merge_merge(body: dict):
+    """v0.1.81：合并源货损报告数据。"""
+    from . import damage_report_merge as _drm
+    source = body.get("source_reports", {})
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    return {"ok": True, **_drm.merge_damage_reports(source, source_pc, strategy)}
+
+
+@app.post("/api/damage-report-merge/merge-file")
+def damage_report_merge_merge_file(body: dict):
+    """v0.1.81：从文件合并货损报告。"""
+    from . import damage_report_merge as _drm
+    file_path = body.get("file_path", "")
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    source = _drm.load_reports_from_file(file_path)
+    if "error" in source:
+        raise HTTPException(status_code=400, detail=source["error"])
+    return {"ok": True, **_drm.merge_damage_reports(source, source_pc, strategy)}
+
+
+@app.get("/api/damage-report-merge/pending")
+def damage_report_merge_pending():
+    """v0.1.81：列出待人工确认的报告冲突。"""
+    from . import damage_report_merge as _drm
+    return {"ok": True, "pending": _drm.list_pending()}
+
+
+@app.post("/api/damage-report-merge/resolve")
+def damage_report_merge_resolve(body: dict):
+    """v0.1.81：处理待人工确认的报告冲突。"""
+    from . import damage_report_merge as _drm
+    index = body.get("index", 0)
+    decision = body.get("decision", "")
+    if decision not in ["use_source", "keep_existing", "skip"]:
+        raise HTTPException(status_code=400, detail="decision必须是use_source/keep_existing/skip")
+    return {"ok": True, **_drm.resolve_pending(index, decision)}
+
+
+@app.get("/api/damage-report-merge/log")
+def damage_report_merge_log():
+    """v0.1.81：列出合并日志。"""
+    from . import damage_report_merge as _drm
+    return {"ok": True, "log": _drm.list_merge_log()}
+
+
+@app.get("/api/damage-report-merge/stats")
+def damage_report_merge_stats():
+    """v0.1.81：获取合并统计信息。"""
+    from . import damage_report_merge as _drm
+    return {"ok": True, **_drm.merge_stats()}
+
+
+@app.get("/api/damage-report-merge/integrity")
+def damage_report_merge_integrity():
+    """v0.1.81：检查货损报告完整性。"""
+    from . import damage_report_merge as _drm
+    return {"ok": True, **_drm.check_damage_report_integrity()}
 
 @app.get("/api/design-change-merge/integrity")
 def design_change_merge_integrity():
