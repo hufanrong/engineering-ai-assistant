@@ -514,6 +514,23 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.77：设备安装位置与货损报告联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与货损报告联动（v0.1.77）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成货损报告，包含报告编号、货损情况、损坏部位、原因分析、处理措施、索赔要求等完整要素。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="damageReportTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="damageReportDate" placeholder="报告日期(YYYY-MM-DD)" style="width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="damageReportDesc" placeholder="货损情况描述" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnDamageReportGenerate" style="background:#e74c3c">生成货损报告</button>
+    <button class="btn" id="btnDamageReportList">报告列表</button>
+    <button class="btn" id="btnDamageReportStats">统计</button>
+  </div>
+  <div id="damageReportStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="damageReportList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="damageReportDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.76：设备安装位置与设计变更联动 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与设计变更联动（v0.1.76）</h3>

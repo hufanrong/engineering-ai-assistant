@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.76")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.77")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2074,6 +2074,46 @@ def design_change_stats():
     from . import design_change as _dc
     return {"ok": True, **_dc.get_design_change_stats()}
 
+
+
+@app.get("/api/damage-report/generate")
+def damage_report_generate(tag: str, date: str = None, description: str = ""):
+    """v0.1.77：生成设备货损报告。"""
+    from . import damage_report as _dr
+    return {"ok": True, **_dr.generate_damage_report(tag, date, description)}
+
+
+@app.post("/api/damage-report/update")
+def damage_report_update(body: dict):
+    """v0.1.77：更新货损报告。"""
+    from . import damage_report as _dr
+    tag = body.get("tag", "")
+    date = body.get("date", "")
+    updates = body.get("updates", {})
+    if not tag or not date:
+        raise HTTPException(status_code=400, detail="缺少tag或date")
+    return {"ok": True, **_dr.update_damage_report(tag, date, updates)}
+
+
+@app.get("/api/damage-report/list")
+def damage_report_list(tag: str = None):
+    """v0.1.77：列出生成的货损报告。"""
+    from . import damage_report as _dr
+    return {"ok": True, "reports": _dr.list_damage_reports(tag)}
+
+
+@app.get("/api/damage-report/stats")
+def damage_report_stats():
+    """v0.1.77：获取货损报告统计。"""
+    from . import damage_report as _dr
+    return {"ok": True, **_dr.get_damage_report_stats()}
+
+
+@app.get("/api/damage-report/points")
+def damage_report_points(type: str = ""):
+    """v0.1.77：获取设备类型货损要点。"""
+    from . import damage_report as _dr
+    return {"ok": True, "points": _dr.get_damage_points(type)}
 
 @app.get("/api/design-change/points")
 def design_change_points(type: str = ""):

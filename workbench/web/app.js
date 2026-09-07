@@ -3443,3 +3443,78 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnDesignChangeStats");
   if (b3) b3.addEventListener("click", designChangeLoadStats);
 });
+
+// v0.1.77：设备安装位置与货损报告联动
+function damageReportGenerate() {
+  var tag = document.getElementById("damageReportTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  var date = document.getElementById("damageReportDate").value.trim();
+  var desc = document.getElementById("damageReportDesc").value.trim();
+  var url = "/api/damage-report/generate?tag=" + encodeURIComponent(tag);
+  if (date) url += "&date=" + encodeURIComponent(date);
+  if (desc) url += "&description=" + encodeURIComponent(desc);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("damageReportDetail");
+    el.style.display = "block";
+    var html = '<strong>货损报告 - ' + esc(d.report_number) + '</strong><br>';
+    html += '设备: ' + esc(d.tag) + ' ' + esc(d.name || '') + ' | 类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配');
+    if (d.elevation != null) html += ' | 标高: ' + d.elevation + 'm';
+    html += '<br>';
+    html += '报告日期: ' + esc(d.report_date) + ' | 货损位置: ' + esc(d.damage_location) + '<br>';
+    html += '货损描述: ' + esc(d.damage_description) + '<br>';
+    html += '损坏程度: <span style="color:#e74c3c">' + esc(d.damage_degree) + '</span> | 责任认定: <span style="color:#f39c12">' + esc(d.responsibility) + '</span><br>';
+    html += '<strong>一、常见损坏部位：</strong><br>';
+    (d.common_damage_parts || []).forEach(function(p, i){ html += (i+1) + '. ' + esc(p) + '<br>'; });
+    html += '<strong>二、损坏原因分析：</strong><br>';
+    (d.damage_causes || []).forEach(function(c, i){ html += (i+1) + '. ' + esc(c) + '<br>'; });
+    html += '<strong>三、处理措施：</strong><br>';
+    (d.handling_measures || []).forEach(function(m, i){ html += (i+1) + '. ' + esc(m) + '<br>'; });
+    html += '<strong>四、索赔要求：</strong><br>';
+    (d.claim_requirements || []).forEach(function(r, i){ html += (i+1) + '. ' + esc(r) + '<br>'; });
+    html += '<strong>五、参加人员：</strong><br>';
+    (d.participants || []).forEach(function(p){ html += '- ' + esc(p.role) + ': ' + (p.name ? esc(p.name) : '______') + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function damageReportLoadList() {
+  var tag = document.getElementById("damageReportTag").value.trim();
+  var url = "/api/damage-report/list" + (tag ? "?tag=" + encodeURIComponent(tag) : "");
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("damageReportList");
+    var reports = d.reports || [];
+    if (reports.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无货损报告</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>货损报告（' + reports.length + '条）：</strong><br>';
+    reports.slice(0, 15).forEach(function(r) {
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'damageReportTag\').value=\'' + r.tag + '\';document.getElementById(\'damageReportDate\').value=\'' + r.report_date + '\';damageReportGenerate();" style="color:#e74c3c">' + esc(r.report_number) + '</a> ' + esc(r.tag) + ' ' + esc(r.name || '') + ' (' + esc(r.type || '') + '/' + esc(r.workshop || '') + '/' + esc(r.damage_degree || '') + '/' + esc(r.responsibility || '') + ')<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function damageReportLoadStats() {
+  fetch("/api/damage-report/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("damageReportStats");
+    el.style.display = "block";
+    if (d.total_reports === 0) { el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    var html = '<strong>货损报告统计：</strong>共' + d.total_reports + '条 / 涉及' + d.devices_with_damage + '台设备 / 总设备' + d.total_devices + '台（货损率' + d.damage_rate_percent + '%）<br>';
+    if (d.by_degree) {
+      html += '<strong>按损坏程度：</strong>';
+      for (var k in d.by_degree) { html += esc(k) + ':' + d.by_degree[k] + ' '; }
+      html += '<br>';
+    }
+    if (d.by_responsibility) {
+      html += '<strong>按责任认定：</strong>';
+      for (var k in d.by_responsibility) { html += esc(k) + ':' + d.by_responsibility[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnDamageReportGenerate");
+  if (b1) b1.addEventListener("click", damageReportGenerate);
+  var b2 = document.getElementById("btnDamageReportList");
+  if (b2) b2.addEventListener("click", damageReportLoadList);
+  var b3 = document.getElementById("btnDamageReportStats");
+  if (b3) b3.addEventListener("click", damageReportLoadStats);
+});
