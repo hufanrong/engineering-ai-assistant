@@ -994,7 +994,7 @@ function showArchiveDetail(workshopName) {
             html += '<div style="padding:8px 12px;background:' + (has ? '#f0fff4' : '#fff3f0') + ';border-radius:6px;font-size:12px;display:flex;align-items:center;gap:6px">' +
                 (has ? '<span style="color:#52C41A">✓</span>' : '<span style="color:#EA6668">✗</span>') +
                 '<span style="flex:1">' + item + '</span>' +
-                (has ? '' : '<button class="btn btn-primary btn-sm" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();switchModule('docgen')">补全</button>') +
+                (has ? '' : `<button class="btn btn-primary btn-sm" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();switchModule('docgen')">补全</button>`) +
                 '</div>';
         });
         html += '</div></div>';
