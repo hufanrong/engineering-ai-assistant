@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>繁工AI · 移动端</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif; background:#f5f6f8; color:#1a1b1c; font-size:14px; line-height:1.5; padding-bottom:70px; }
+.header { background:linear-gradient(135deg,#1E5AA8,#2d7dd2); color:#fff; padding:16px 16px 12px; position:sticky; top:0; z-index:100; box-shadow:0 2px 8px rgba(30,90,168,0.2); }
+.header h1 { font-size:18px; font-weight:600; margin-bottom:2px; }
+.header .sub { font-size:12px; opacity:0.85; }
+.header .status { display:flex; gap:12px; margin-top:8px; font-size:11px; }
+.header .status span { background:rgba(255,255,255,0.15); padding:2px 8px; border-radius:10px; }
+.card { background:#fff; border-radius:12px; margin:12px; padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+.card-title { font-size:15px; font-weight:600; color:#1E5AA8; margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+.card-title .icon { font-size:18px; }
+.grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.btn { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:12px 6px; background:#f0f4f8; border-radius:10px; border:none; font-size:12px; color:#1a1b1c; cursor:pointer; transition:all 0.15s; min-height:64px; }
+.btn:active { background:#1E5AA8; color:#fff; transform:scale(0.97); }
+.btn .icon { font-size:22px; margin-bottom:4px; }
+.btn.primary { background:#1E5AA8; color:#fff; }
+.btn.primary:active { background:#154a8a; }
+.btn.warn { background:#FFF3E0; color:#E65100; }
+.btn.success { background:#E8F5E9; color:#2E7D32; }
+.input-group { margin-bottom:10px; }
+.input-group label { display:block; font-size:12px; color:#666; margin-bottom:4px; }
+.input-group input, .input-group select, .input-group textarea { width:100%; padding:10px 12px; border:1px solid #e0e0e0; border-radius:8px; font-size:14px; background:#fafafa; }
+.input-group input:focus, .input-group select:focus { outline:none; border-color:#1E5AA8; background:#fff; }
+.result { background:#f8f9fa; border-radius:8px; padding:10px; margin-top:10px; font-size:12px; max-height:300px; overflow-y:auto; }
+.result-item { padding:6px 0; border-bottom:1px solid #eee; }
+.result-item:last-child { border-bottom:none; }
+.tag { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; margin:2px; }
+.tag.high { background:#FFEBEE; color:#C62828; }
+.tag.medium { background:#FFF3E0; color:#E65100; }
+.tag.low { background:#E3F2FD; color:#1565C0; }
+.tag.success { background:#E8F5E9; color:#2E7D32; }
+.tag.info { background:#E3F2FD; color:#1565C0; }
+.stat-row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f0f0f0; }
+.stat-row:last-child { border-bottom:none; }
+.stat-label { color:#666; font-size:13px; }
+.stat-value { font-weight:600; font-size:13px; }
+.tab-bar { position:fixed; bottom:0; left:0; right:0; background:#fff; display:flex; border-top:1px solid #e0e0e0; box-shadow:0 -2px 8px rgba(0,0,0,0.05); z-index:100; }
+.tab-item { flex:1; display:flex; flex-direction:column; align-items:center; padding:8px 0; font-size:10px; color:#999; cursor:pointer; }
+.tab-item.active { color:#1E5AA8; }
+.tab-item .icon { font-size:20px; margin-bottom:2px; }
+.section { display:none; }
+.section.active { display:block; }
+.upload-zone { border:2px dashed #1E5AA8; border-radius:12px; padding:24px; text-align:center; background:#f8faff; margin-bottom:12px; }
+.upload-zone .icon { font-size:36px; margin-bottom:8px; }
+.upload-zone .text { font-size:13px; color:#666; }
+.quick-actions { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:12px; }
+.quick-action { display:flex; flex-direction:column; align-items:center; padding:10px 4px; background:#fff; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+.quick-action .icon { font-size:24px; margin-bottom:4px; }
+.quick-action .label { font-size:11px; color:#333; text-align:center; }
+.list-item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f0f0f0; }
+.list-item:last-child { border-bottom:none; }
+.list-item .info { flex:1; }
+.list-item .title { font-size:13px; font-weight:500; }
+.list-item .meta { font-size:11px; color:#999; margin-top:2px; }
+.list-item .status-badge { font-size:11px; padding:2px 8px; border-radius:10px; }
+.empty { text-align:center; padding:30px; color:#999; font-size:13px; }
+.progress-bar { height:6px; background:#e0e0e0; border-radius:3px; overflow:hidden; margin:6px 0; }
+.progress-fill { height:100%; background:linear-gradient(90deg,#1E5AA8,#2d7dd2); border-radius:3px; transition:width 0.3s; }
+</style>
+
+<style>
+.offline-banner {
+    background: linear-gradient(135deg, #FF7A00, #FF9800);
+    color: #fff;
+    padding: 8px 16px;
+    font-size: 13px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+.offline-banner.show { display: flex; }
+.offline-banner .icon { font-size: 18px; }
+.offline-banner .text { flex: 1; }
+.offline-banner .sync-btn {
+    background: rgba(255,255,255,0.25);
+    border: none;
+    color: #fff;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.offline-banner .sync-btn:active { background: rgba(255,255,255,0.4); }
+.pending-badge {
+    background: #EA6668;
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 4px;
+}
+</style>
+
+<style>
+/* 语音录制 */
+.voice-recorder {
+    background: linear-gradient(135deg, rgba(30,90,168,0.06), rgba(255,122,0,0.04));
+    border: 1px solid rgba(30,90,168,0.15);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.voice-recorder-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1E5AA8;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.voice-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.voice-btn {
+    padding: 8px 14px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.voice-btn:active { transform: scale(0.97); }
+.voice-btn.record { background: #EA6668; color: #fff; }
+.voice-btn.record.recording { background: #c0392b; animation: pulse 1s infinite; }
+.voice-btn.stop { background: #666; color: #fff; }
+.voice-btn.play { background: #1E5AA8; color: #fff; }
+.voice-btn.delete { background: #f0f0f0; color: #666; }
+.voice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+.voice-timer {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    font-family: monospace;
+    min-width: 50px;
+}
+.voice-preview {
+    margin-top: 10px;
+    display: none;
+}
+.voice-preview.show { display: block; }
+.voice-preview audio {
+    width: 100%;
+    height: 36px;
+}
+.voice-preview-label {
+    font-size: 11px;
+    color: #666;
+    margin-bottom: 4px;
+}
+
+/* 图片预览 */
+.image-preview-grid {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.image-preview-item {
+    position: relative;
+    width: 70px;
+    height: 70px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #ddd;
+}
+.image-preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.image-preview-item .remove-btn {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 20px;
+    height: 20px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 组合上传状态 */
+.combined-status {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+.status-chip {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.status-chip.has { background: #e8f5e9; color: #2e7d32; }
+.status-chip.empty { background: #f5f5f5; color: #999; }
+</style>
+</head>
+<body>
+<div class="offline-banner" id="offlineBanner">
+    <span class="icon">📡</span>
+    <span class="text" id="offlineText">离线模式 - 数据将保存在手机本地，联网后自动上传</span>
+    <button class="sync-btn" onclick="manualSync()">立即同步</button>
+</div>
+
+
+<div class="header">
+  <h1>繁工AI · 工程助手</h1>
+  <div class="sub">矿山设备现场管理</div>
+  <div class="status">
+    <span id="statusProject">项目：默认</span>
+    <span id="statusWorkshop">车间：全部</span>
+    <span id="statusOnline">在线</span>
+  </div>
+</div>
+
+<!-- 首页 -->
+<div id="section-home" class="section active">
+  <div class="card">
+    <div class="card-title"><span class="icon">📊</span>项目概览</div>
+    <div class="stat-row"><span class="stat-label">设备总数</span><span class="stat-value" id="statDevices">-</span></div>
+    <div class="stat-row"><span class="stat-label">资料总数</span><span class="stat-value" id="statDocs">-</span></div>
+    <div class="stat-row"><span class="stat-label">现场记录</span><span class="stat-value" id="statRecords">-</span></div>
+    <div class="stat-row"><span class="stat-label">待处理</span><span class="stat-value" style="color:#E65100" id="statPending">-</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">⚡</span>快捷操作</div>
+    <div class="quick-actions">
+      <div class="quick-action" onclick="switchTab('upload')"><div class="icon">📷</div><div class="label">拍照上传</div></div>
+      <div class="quick-action" onclick="switchTab('upload')"><div class="icon">🎤</div><div class="label">语音记录</div></div>
+      <div class="quick-action" onclick="switchTab('upload')"><div class="icon">📝</div><div class="label">文字记录</div></div>
+      <div class="quick-action" onclick="switchTab('records')"><div class="icon">📋</div><div class="label">记录列表</div></div>
+      <div class="quick-action" onclick="switchTab('docs')"><div class="icon">📄</div><div class="label">资料生成</div></div>
+      <div class="quick-action" onclick="switchTab('ai')"><div class="icon">🤖</div><div class="label">AI助手</div></div>
+      <div class="quick-action" onclick="switchTab('schedule')"><div class="icon">📅</div><div class="label">施工进度</div></div>
+      <div class="quick-action" onclick="switchTab('more')"><div class="icon">⋯</div><div class="label">更多</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">🔔</span>待办提醒</div>
+    <div id="todoList"><div class="empty">加载中...</div></div>
+  </div>
+</div>
+
+<!-- 上传 -->
+<div id="section-upload" class="section">
+  <div class="card">
+    <div class="card-title"><span class="icon">📤</span>现场资料上传（语音+文字+图片同步）</div>
+    
+    <!-- 组合状态指示 -->
+    <div class="combined-status">
+      <span class="status-chip" id="statusVoice">🎤 语音: 未录制</span>
+      <span class="status-chip" id="statusText">📝 文字: 未填写</span>
+      <span class="status-chip" id="statusImage">🖼️ 图片: 0张</span>
+    </div>
+    
+    <!-- 语音录制区 -->
+    <div class="voice-recorder">
+      <div class="voice-recorder-title">🎤 语音记录（录制后可回放确认）</div>
+      <div class="voice-controls">
+        <button class="voice-btn record" id="btnRecord" onclick="toggleRecording()">
+          <span id="recordIcon">●</span> <span id="recordText">开始录音</span>
+        </button>
+        <span class="voice-timer" id="voiceTimer">00:00</span>
+        <button class="voice-btn play" id="btnPlayVoice" onclick="playVoice()" style="display:none">▶ 回放</button>
+        <button class="voice-btn delete" id="btnDeleteVoice" onclick="deleteVoice()" style="display:none">✕ 重录</button>
+      </div>
+      <div class="voice-preview" id="voicePreview">
+        <div class="voice-preview-label">回放确认（确认无误后再上传）：</div>
+        <audio id="voiceAudio" controls></audio>
+      </div>
+    </div>
+    
+    <!-- 图片选择区 -->
+    <div class="input-group">
+      <label>现场照片（可多选，支持拍照）</label>
+      <div class="upload-zone" style="padding:12px" onclick="document.getElementById('imageInput').click()">
+        <div class="icon" style="font-size:24px">📷</div>
+        <div class="text" style="font-size:12px">点击选择照片或拍照<br>可多选</div>
+      </div>
+      <input type="file" id="imageInput" style="display:none" accept="image/*" multiple capture="environment">
+      <div class="image-preview-grid" id="imagePreviewGrid"></div>
+    </div>
+    
+    <!-- 文字说明区 -->
+    <div class="input-group">
+      <label>文字说明（语音转文字可在此编辑）</label>
+      <textarea id="uploadText" rows="3" placeholder="输入现场情况说明，或语音录制后自动转写..."></textarea>
+    </div>
+    
+    <div class="input-group">
+      <label>上传人</label>
+      <input type="text" id="uploaderName" placeholder="请输入姓名">
+    </div>
+    <div class="input-group">
+      <label>所属车间</label>
+      <select id="uploadWorkshop">
+        <option value="">请选择车间</option>
+        <option value="破碎车间">破碎车间</option>
+        <option value="磨矿车间">磨矿车间</option>
+        <option value="浮选车间">浮选车间</option>
+        <option value="脱水车间">脱水车间</option>
+        <option value="火法冶炼车间">火法冶炼车间</option>
+        <option value="湿法冶炼车间">湿法冶炼车间</option>
+        <option value="公用辅助">公用辅助</option>
+      </select>
+    </div>
+    
+    <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="submitCombinedUpload()">
+      <span class="icon" style="font-size:16px;margin:0">↑</span>同步上传（语音+文字+图片）
+    </button>
+    <div id="uploadResult" class="result" style="display:none"></div>
+  </div>
+</div>
+
+<!-- 记录 -->
+<div id="section-records" class="section">
+  <div class="card">
+    <div class="card-title"><span class="icon">📋</span>现场记录</div>
+    <div class="grid" style="margin-bottom:10px">
+      <button class="btn" onclick="filterRecords('all')"><span class="icon">📋</span>全部</button>
+      <button class="btn" onclick="filterRecords('待解析')"><span class="icon">⏳</span>待解析</button>
+      <button class="btn" onclick="filterRecords('已解析')"><span class="icon">✅</span>已解析</button>
+      <button class="btn" onclick="batchParse()"><span class="icon">⚡</span>批量解析</button>
+    </div>
+    <div id="recordsList"><div class="empty">加载中...</div></div>
+  </div>
+</div>
+
+<!-- 资料 -->
+<div id="section-docs" class="section">
+  <div class="card">
+    <div class="card-title"><span class="icon">📄</span>工程资料生成</div>
+    <div class="input-group">
+      <label>资料类型</label>
+      <select id="docType">
+        <option value="construction_log">施工日志</option>
+        <option value="unboxing_record">开箱检验记录</option>
+        <option value="concealment_record">隐蔽工程验收</option>
+        <option value="installation_record">设备安装记录</option>
+        <option value="trial_run_record">试运转记录</option>
+        <option value="safety_check">安全检查记录</option>
+        <option value="lifting_record">吊装作业记录</option>
+        <option value="welding_record">焊接记录</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label>设备类型</label>
+      <input type="text" id="docDevice" placeholder="如：球磨机">
+    </div>
+    <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="generateDoc()">
+      <span class="icon" style="font-size:16px;margin:0">📄</span>生成资料
+    </button>
+    <div id="docResult" class="result" style="display:none"></div>
+  </div>
+</div>
+
+<!-- AI助手 -->
+<div id="section-ai" class="section">
+  <div class="card">
+    <div class="card-title"><span class="icon">🤖</span>AI助手</div>
+    <div class="input-group">
+      <label>咨询模式</label>
+      <select id="aiMode">
+        <option value="general">通用咨询</option>
+        <option value="construction_plan">施工方案</option>
+        <option value="lifting_plan">吊装方案</option>
+        <option value="technical_disclosure">技术交底</option>
+        <option value="safety">安全咨询</option>
+        <option value="quality">质量咨询</option>
+        <option value="troubleshooting">故障诊断</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label>问题描述</label>
+      <textarea id="aiQuestion" rows="3" placeholder="请输入您的问题..."></textarea>
+    </div>
+    <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="askAI()">
+      <span class="icon" style="font-size:16px;margin:0">💬</span>提问
+    </button>
+    <div id="aiResult" class="result" style="display:none"></div>
+  </div>
+</div>
+
+<!-- 进度 -->
+<div id="section-schedule" class="section">
+  <div class="card">
+    <div class="card-title"><span class="icon">📅</span>施工进度</div>
+    <div class="input-group">
+      <label>选择阶段</label>
+      <select id="schedulePhase">
+        <option value="施工准备">施工准备</option>
+        <option value="基础施工">基础施工</option>
+        <option value="设备开箱">设备开箱</option>
+        <option value="设备安装">设备安装</option>
+        <option value="管道安装">管道安装</option>
+        <option value="电气安装">电气安装</option>
+        <option value="试运转">试运转</option>
+        <option value="竣工验收">竣工验收</option>
+      </select>
+    </div>
+    <div class="grid">
+      <button class="btn" onclick="checkPhaseDocs()"><span class="icon">✅</span>资料检查</button>
+      <button class="btn" onclick="genPhaseDocs()"><span class="icon">📋</span>资料清单</button>
+      <button class="btn" onclick="checkFullSchedule()"><span class="icon">📊</span>全进度</button>
+      <button class="btn" onclick="genSchedule()"><span class="icon">📈</span>进度计划</button>
+    </div>
+    <div id="scheduleResult" class="result" style="display:none"></div>
+  </div>
+</div>
+
+<!-- 更多 -->
+<div id="section-more" class="section">
+  <div class="card">
+    <div class="card-title"><span class="icon">⚙️</span>更多功能</div>
+    <div class="grid-2" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+      <button class="btn" onclick="showMerge()"><span class="icon">🔄</span>多电脑并库</button>
+      <button class="btn" onclick="showCompleteness()"><span class="icon">📊</span>资料完整性</button>
+      <button class="btn" onclick="showEquipment()"><span class="icon">⚙️</span>设备知识库</button>
+      <button class="btn" onclick="showWordExport()"><span class="icon">📝</span>Word导出</button>
+      <button class="btn" onclick="showPlatform()"><span class="icon">📚</span>平台规范库</button>
+      <button class="btn" onclick="showSettings()"><span class="icon">⚙️</span>设置</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span class="icon">ℹ️</span>关于</div>
+    <div class="stat-row"><span class="stat-label">版本</span><span class="stat-value">v0.1.99</span></div>
+    <div class="stat-row"><span class="stat-label">名称</span><span class="stat-value">繁工AI · 工程助手</span></div>
+    <div class="stat-row"><span class="stat-label">版权</span><span class="stat-value">©2026 胡繁荣</span></div>
+  </div>
+</div>
+
+<!-- 底部导航 -->
+<div class="tab-bar">
+  <div class="tab-item active" onclick="switchTab('home')"><div class="icon">🏠</div>首页</div>
+  <div class="tab-item" onclick="switchTab('upload')"><div class="icon">📤</div>上传</div>
+  <div class="tab-item" onclick="switchTab('records')"><div class="icon">📋</div>记录</div>
+  <div class="tab-item" onclick="switchTab('ai')"><div class="icon">🤖</div>AI</div>
+  <div class="tab-item" onclick="switchTab('more')"><div class="icon">⋯</div>更多</div>
+</div>
+
+<script>
+const API_BASE = '';
+
+function switchTab(tab) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+  document.getElementById('section-' + tab).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (tab === 'home') loadHome();
+  if (tab === 'records') loadRecords();
+}
+
+function loadHome() {
+  fetch(API_BASE + '/api/status').then(r => r.json()).then(d => {
+    document.getElementById('statDevices').textContent = d.devices || '-';
+    document.getElementById('statDocs').textContent = d.files || '-';
+  }).catch(() => {});
+  fetch(API_BASE + '/api/mining-mobile/records?limit=5').then(r => r.json()).then(d => {
+    document.getElementById('statRecords').textContent = d.stats.total;
+    document.getElementById('statPending').textContent = d.stats.pending_parse;
+    const list = document.getElementById('todoList');
+    if (d.records.length === 0) {
+      list.innerHTML = '<div class="empty">暂无待办</div>';
+    } else {
+      list.innerHTML = d.records.map(r => 
+        '<div class="list-item"><div class="info"><div class="title">' + r.filename + '</div><div class="meta">' + r.uploader + ' · ' + r.upload_time + '</div></div><span class="status-badge" style="background:' + (r.status==='已解析'?'#E8F5E9':'#FFF3E0') + ';color:' + (r.status==='已解析'?'#2E7D32':'#E65100') + '">' + r.status + '</span></div>'
+      ).join('');
+    }
+  }).catch(() => {
+    document.getElementById('todoList').innerHTML = '<div class="empty">暂无数据</div>';
+  });
+}
+
+function submitUpload() {
+  const name = document.getElementById('uploaderName').value;
+  const ws = document.getElementById('uploadWorkshop').value;
+  const remark = document.getElementById('uploadRemark').value;
+  const files = document.getElementById('fileInput').files;
+  if (files.length === 0) { alert('请先选择文件'); return; }
+  if (!name) { alert('请输入上传人姓名'); return; }
+  
+  const result = document.getElementById('uploadResult');
+  result.style.display = 'block';
+  result.innerHTML = '<div>正在上传...</div>';
+  
+  // 模拟上传（实际应使用FormData）
+  setTimeout(() => {
+    let html = '<div style="color:#2E7D32;font-weight:600">上传成功！</div>';
+    html += '<div>文件数：' + files.length + '</div>';
+    html += '<div>上传人：' + name + '</div>';
+    if (ws) html += '<div>车间：' + ws + '</div>';
+    html += '<div style="margin-top:6px;color:#666">系统将自动识别资料类型并解析</div>';
+    result.innerHTML = html;
+  }, 1000);
+}
+
+function loadRecords(filter) {
+  fetch(API_BASE + '/api/mining-mobile/records?limit=20').then(r => r.json()).then(d => {
+    const list = document.getElementById('recordsList');
+    let records = d.records;
+    if (filter && filter !== 'all') {
+      records = records.filter(r => r.status === filter);
+    }
+    if (records.length === 0) {
+      list.innerHTML = '<div class="empty">暂无记录</div>';
+      return;
+    }
+    list.innerHTML = records.map(r => 
+      '<div class="list-item"><div class="info"><div class="title">' + r.filename + '</div><div class="meta">' + r.upload_type_name + ' · ' + r.doc_type + ' · ' + r.uploader + '</div></div><span class="status-badge" style="background:' + (r.status==='已解析'?'#E8F5E9':'#FFF3E0') + ';color:' + (r.status==='已解析'?'#2E7D32':'#E65100') + '">' + r.status + '</span></div>'
+    ).join('');
+  }).catch(() => {
+    document.getElementById('recordsList').innerHTML = '<div class="empty">加载失败</div>';
+  });
+}
+
+function filterRecords(type) { loadRecords(type); }
+
+function batchParse() {
+  fetch(API_BASE + '/api/mining-mobile/batch-parse', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'待解析'})}).then(r => r.json()).then(d => {
+    alert('批量解析完成：共' + d.total + '条，成功' + d.parsed + '条');
+    loadRecords();
+  }).catch(() => alert('解析失败'));
+}
+
+function generateDoc() {
+  const type = document.getElementById('docType').value;
+  const dev = document.getElementById('docDevice').value;
+  const result = document.getElementById('docResult');
+  result.style.display = 'block';
+  result.innerHTML = '<div>正在生成...</div>';
+  
+  fetch(API_BASE + '/api/mining-field-record/generate?record_type=' + type + (dev ? '&device_type=' + encodeURIComponent(dev) : '')).then(r => r.json()).then(d => {
+    let html = '<div style="color:#1E5AA8;font-weight:600">' + d.type_name + '</div>';
+    html += '<div>完成率：' + d.completion_rate + '%（' + d.filled_count + '/' + d.total_fields + '）</div>';
+    if (d.equipment_specific_points && d.equipment_specific_points.length > 0) {
+      html += '<div style="margin-top:6px;color:#E65100">设备专用要点：</div>';
+      html += d.equipment_specific_points.map(p => '<div>• ' + p + '</div>').join('');
+    }
+    result.innerHTML = html;
+  }).catch(() => { result.innerHTML = '<div style="color:#C62828">生成失败</div>'; });
+}
+
+function askAI() {
+  const mode = document.getElementById('aiMode').value;
+  const q = document.getElementById('aiQuestion').value;
+  if (!q) { alert('请输入问题'); return; }
+  const result = document.getElementById('aiResult');
+  result.style.display = 'block';
+  result.innerHTML = '<div>AI正在思考...</div>';
+  
+  fetch(API_BASE + '/api/mining-ai/prompt?mode=' + mode + '&question=' + encodeURIComponent(q)).then(r => r.json()).then(d => {
+    let html = '<div style="color:#1E5AA8;font-weight:600">' + d.mode_name + '</div>';
+    html += '<div style="margin-top:6px;white-space:pre-wrap;font-size:12px">' + d.full_prompt.substring(0, 500) + '...</div>';
+    result.innerHTML = html;
+  }).catch(() => { result.innerHTML = '<div style="color:#C62828">请求失败</div>'; });
+}
+
+function checkPhaseDocs() {
+  const phase = document.getElementById('schedulePhase').value;
+  const result = document.getElementById('scheduleResult');
+  result.style.display = 'block';
+  result.innerHTML = '<div>检查中...</div>';
+  fetch(API_BASE + '/api/mining-schedule-doc/check?phase=' + encodeURIComponent(phase)).then(r => r.json()).then(d => {
+    let html = '<div style="font-weight:600">' + d.phase + '资料检查</div>';
+    html += '<div>应备：' + d.total_required + ' | 已有：' + d.total_existing + ' | 完成率：' + d.completion_rate + '%</div>';
+    html += '<div>能否进入下一阶段：<span style="color:' + (d.can_proceed?'#2E7D32':'#C62828') + ';font-weight:600">' + (d.can_proceed?'可以':'不可以') + '</span></div>';
+    if (d.missing_high_list && d.missing_high_list.length > 0) {
+      html += '<div style="margin-top:6px;color:#C62828">缺失必备：</div>';
+      html += d.missing_high_list.map(x => '<div>• ' + x.doc_type + '</div>').join('');
+    }
+    result.innerHTML = html;
+  }).catch(() => { result.innerHTML = '<div style="color:#C62828">检查失败</div>'; });
+}
+
+function genPhaseDocs() {
+  const phase = document.getElementById('schedulePhase').value;
+  const result = document.getElementById('scheduleResult');
+  result.style.display = 'block';
+  fetch(API_BASE + '/api/mining-schedule-doc/generate?phase=' + encodeURIComponent(phase)).then(r => r.json()).then(d => {
+    let html = '<div style="font-weight:600">' + d.phase + '资料清单</div>';
+    html += '<div>共' + d.total_docs + '项（必备' + d.high_priority + '项）</div>';
+    html += d.docs_to_generate.map(x => '<div>• <span class="tag ' + x.priority + '">' + (x.priority==='high'?'必备':x.priority==='medium'?'可选':'参考') + '</span> ' + x.doc_type + '</div>').join('');
+    result.innerHTML = html;
+  }).catch(() => {});
+}
+
+function checkFullSchedule() {
+  const result = document.getElementById('scheduleResult');
+  result.style.display = 'block';
+  result.innerHTML = '<div>检查中...</div>';
+  fetch(API_BASE + '/api/mining-schedule-doc/check-full').then(r => r.json()).then(d => {
+    let html = '<div style="font-weight:600">全进度资料检查</div>';
+    html += '<div>阶段：' + d.phases_checked + ' | 应备：' + d.total_required + ' | 已有：' + d.total_existing + '</div>';
+    html += '<div>总完成率：' + d.overall_completion_rate + '%</div>';
+    html += '<div class="progress-bar"><div class="progress-fill" style="width:' + d.overall_completion_rate + '%"></div></div>';
+    d.phase_results.forEach(p => {
+      html += '<div class="stat-row"><span class="stat-label">' + p.phase + '</span><span class="stat-value" style="color:' + (p.can_proceed?'#2E7D32':'#C62828') + '">' + p.completion_rate + '%</span></div>';
+    });
+    result.innerHTML = html;
+  }).catch(() => {});
+}
+
+function genSchedule() {
+  const result = document.getElementById('scheduleResult');
+  result.style.display = 'block';
+  fetch(API_BASE + '/api/mining-schedule/generate').then(r => r.json()).then(d => {
+    let html = '<div style="font-weight:600">矿山施工进度计划</div>';
+    html += '<div>流程：' + d.process_count + ' | 阶段：' + d.total_phases + ' | 总工期：' + d.total_duration_days + '天</div>';
+    html += '<div>开工：' + d.start_date + ' | 竣工：' + d.end_date + '</div>';
+    d.processes.forEach(p => {
+      html += '<div class="stat-row"><span class="stat-label">' + p.process + '</span><span class="stat-value">' + p.phase_count + '阶段/' + p.duration_days + '天</span></div>';
+    });
+    result.innerHTML = html;
+  }).catch(() => {});
+}
+
+function showMerge() { alert('多电脑并库功能：在更多→多电脑并库中查看'); }
+function showCompleteness() { switchTab('schedule'); checkFullSchedule(); }
+function showEquipment() { alert('设备知识库：包含458种矿山/选矿/冶炼设备'); }
+function showWordExport() { switchTab('docs'); }
+function showPlatform() { alert('平台规范库：包含国家标准、行业规范等'); }
+function showSettings() { alert('设置功能开发中'); }
+
+// 初始化
+loadHome();
+</script>
+
+<script>
+// 离线模式管理
+var isOfflineMode = false;
+var pendingUploadCount = 0;
+
+function updateOfflineStatus(offline, pending) {
+    isOfflineMode = offline;
+    pendingUploadCount = pending;
+    var banner = document.getElementById('offlineBanner');
+    var text = document.getElementById('offlineText');
+    
+    if (offline) {
+        banner.classList.add('show');
+        if (pending > 0) {
+            text.textContent = '离线模式 - 待上传 ' + pending + ' 项，联网后自动上传';
+        } else {
+            text.textContent = '离线模式 - 数据将保存在手机本地，联网后自动上传';
+        }
+    } else {
+        banner.classList.remove('show');
+    }
+    
+    // 更新底部导航的待上传标记
+    updatePendingBadges();
+}
+
+function showOfflineMode() {
+    var banner = document.getElementById('offlineBanner');
+    banner.classList.add('show');
+    document.getElementById('offlineText').textContent = '无法连接电脑端 - 可继续拍照记录，联网后自动上传';
+}
+
+function manualSync() {
+    if (typeof AndroidNative !== 'undefined') {
+        AndroidNative.startSync();
+    } else {
+        alert('请在繁工AI APP中使用此功能');
+    }
+}
+
+function updatePendingBadges() {
+    // 在记录/上传标签上显示待上传数量
+    var badges = document.querySelectorAll('.pending-badge');
+    badges.forEach(function(b) { b.remove(); });
+    
+    if (pendingUploadCount > 0) {
+        var navItems = document.querySelectorAll('.nav-item, .tab-item');
+        navItems.forEach(function(item) {
+            if (item.textContent.indexOf('记录') >= 0 || item.textContent.indexOf('上传') >= 0) {
+                var badge = document.createElement('span');
+                badge.className = 'pending-badge';
+                badge.textContent = pendingUploadCount;
+                item.appendChild(badge);
+            }
+        });
+    }
+}
+
+// 检测是否在APP中运行
+function isInApp() {
+    return typeof AndroidNative !== 'undefined';
+}
+
+// 页面加载完成后检查离线状态
+document.addEventListener('DOMContentLoaded', function() {
+    if (isInApp()) {
+        try {
+            var offline = AndroidNative.isOfflineMode();
+            var pending = AndroidNative.getPendingUploadCount();
+            updateOfflineStatus(offline, pending);
+        } catch(e) {
+            console.log('获取离线状态失败', e);
+        }
+    }
+});
+
+// 定时检查离线状态（每30秒）
+setInterval(function() {
+    if (isInApp()) {
+        try {
+            var offline = AndroidNative.isOfflineMode();
+            var pending = AndroidNative.getPendingUploadCount();
+            updateOfflineStatus(offline, pending);
+        } catch(e) {}
+    }
+}, 30000);
+
+// 离线时保存文字记录到原生缓存
+function saveTextOffline(text, recordType, projectId, uploader) {
+    if (isInApp() && isOfflineMode) {
+        AndroidNative.cacheText(text, recordType, projectId, uploader, '');
+        return true;
+    }
+    return false;
+}
+</script>
+
+<script>
+// 手机端网页独立运行配置
+var API_BASE_URL = localStorage.getItem('fangong_api_url') || '';
+
+// 页面加载时检查API配置
+document.addEventListener('DOMContentLoaded', function() {
+    checkApiConfig();
+});
+
+function checkApiConfig() {
+    // 如果在APP中运行，使用APP的服务器地址
+    if (typeof AndroidNative !== 'undefined') {
+        try {
+            API_BASE_URL = AndroidNative.getServerUrl();
+            localStorage.setItem('fangong_api_url', API_BASE_URL);
+            return;
+        } catch(e) {}
+    }
+    
+    // 如果没有配置API地址，显示配置界面
+    if (!API_BASE_URL) {
+        showApiConfigDialog();
+    }
+}
+
+function showApiConfigDialog() {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:99999;';
+    overlay.innerHTML = '<div style="background:#fff;padding:24px;border-radius:12px;width:90%;max-width:360px;">' +
+        '<h3 style="margin:0 0 16px;color:#1E5AA8;">连接电脑端工作台</h3>' +
+        '<p style="font-size:13px;color:#666;margin:0 0 12px;">请输入电脑端工作台的IP地址和端口</p>' +
+        '<input type="text" id="apiUrlInput" placeholder="例如：192.168.1.100:8756" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;margin-bottom:16px;">' +
+        '<button onclick="saveApiConfig()" style="width:100%;padding:12px;background:#1E5AA8;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:500;">连接</button>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    setTimeout(function() { document.getElementById('apiUrlInput').focus(); }, 100);
+}
+
+function saveApiConfig() {
+    var url = document.getElementById('apiUrlInput').value.trim();
+    if (!url) { alert('请输入IP地址'); return; }
+    if (!url.startsWith('http')) url = 'http://' + url;
+    while (url.endsWith('/')) url = url.substring(0, url.length - 1);
+    
+    API_BASE_URL = url;
+    localStorage.setItem('fangong_api_url', url);
+    
+    // 测试连接
+    fetch(url + '/api/status')
+        .then(r => r.json())
+        .then(data => {
+            alert('连接成功！工作台版本：' + (data.version || '未知'));
+            location.reload();
+        })
+        .catch(e => {
+            if (confirm('无法连接到电脑端。\n\n请检查：\n1. 电脑端工作台是否已启动\n2. 手机和电脑是否在同一WiFi\n3. IP地址是否正确\n\n是否仍要保存此地址？')) {
+                location.reload();
+            } else {
+                API_BASE_URL = '';
+                localStorage.removeItem('fangong_api_url');
+            }
+        });
+}
+
+// 重写fetch，自动添加API前缀
+var originalFetch = window.fetch;
+window.fetch = function(url, options) {
+    if (url.startsWith('/api/') && API_BASE_URL) {
+        url = API_BASE_URL + url;
+    }
+    return originalFetch(url, options);
+};
+</script>
+
+<script>
+// ===== 语音录制 + 组合上传 =====
+var mediaRecorder = null;
+var audioChunks = [];
+var audioBlob = null;
+var audioUrl = null;
+var isRecording = false;
+var recordStartTime = 0;
+var recordTimerInterval = null;
+var selectedImages = [];
+
+// 切换录音状态
+function toggleRecording() {
+    if (isRecording) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
+}
+
+// 开始录音
+function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('您的浏览器不支持录音功能，请使用APP或最新版Chrome浏览器');
+        return;
+    }
+    
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(function(stream) {
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = function(e) {
+                if (e.data.size > 0) audioChunks.push(e.data);
+            };
+            
+            mediaRecorder.onstop = function() {
+                audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                audioUrl = URL.createObjectURL(audioBlob);
+                document.getElementById('voiceAudio').src = audioUrl;
+                document.getElementById('voicePreview').classList.add('show');
+                document.getElementById('btnPlayVoice').style.display = '';
+                document.getElementById('btnDeleteVoice').style.display = '';
+                updateCombinedStatus();
+                
+                // 停止所有音轨
+                stream.getTracks().forEach(function(track) { track.stop(); });
+            };
+            
+            mediaRecorder.start();
+            isRecording = true;
+            recordStartTime = Date.now();
+            
+            document.getElementById('btnRecord').classList.add('recording');
+            document.getElementById('recordIcon').textContent = '■';
+            document.getElementById('recordText').textContent = '停止录音';
+            
+            // 计时器
+            recordTimerInterval = setInterval(function() {
+                var elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
+                var mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                var secs = (elapsed % 60).toString().padStart(2, '0');
+                document.getElementById('voiceTimer').textContent = mins + ':' + secs;
+            }, 1000);
+        })
+        .catch(function(err) {
+            alert('无法访问麦克风：' + err.message + '\n请在设置中允许麦克风权限');
+        });
+}
+
+// 停止录音
+function stopRecording() {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        isRecording = false;
+        clearInterval(recordTimerInterval);
+        
+        document.getElementById('btnRecord').classList.remove('recording');
+        document.getElementById('recordIcon').textContent = '●';
+        document.getElementById('recordText').textContent = '开始录音';
+    }
+}
+
+// 回放语音
+function playVoice() {
+    var audio = document.getElementById('voiceAudio');
+    if (audio.paused) {
+        audio.play();
+    } else {
+        audio.pause();
+    }
+}
+
+// 删除语音
+function deleteVoice() {
+    if (confirm('确定要删除当前录音吗？')) {
+        audioBlob = null;
+        audioUrl = null;
+        document.getElementById('voicePreview').classList.remove('show');
+        document.getElementById('btnPlayVoice').style.display = 'none';
+        document.getElementById('btnDeleteVoice').style.display = 'none';
+        document.getElementById('voiceTimer').textContent = '00:00';
+        updateCombinedStatus();
+    }
+}
+
+// 图片选择预览
+document.addEventListener('DOMContentLoaded', function() {
+    var imageInput = document.getElementById('imageInput');
+    if (imageInput) {
+        imageInput.addEventListener('change', function(e) {
+            var files = e.target.files;
+            for (var i = 0; i < files.length; i++) {
+                selectedImages.push(files[i]);
+            }
+            renderImagePreview();
+            updateCombinedStatus();
+            e.target.value = ''; // 重置以便重复选择
+        });
+    }
+    
+    // 文字输入监听
+    var textInput = document.getElementById('uploadText');
+    if (textInput) {
+        textInput.addEventListener('input', updateCombinedStatus);
+    }
+});
+
+// 渲染图片预览
+function renderImagePreview() {
+    var grid = document.getElementById('imagePreviewGrid');
+    grid.innerHTML = '';
+    selectedImages.forEach(function(file, index) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var item = document.createElement('div');
+            item.className = 'image-preview-item';
+            item.innerHTML = '<img src="' + e.target.result + '">' +
+                '<button class="remove-btn" onclick="removeImage(' + index + ')">×</button>';
+            grid.appendChild(item);
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// 移除图片
+function removeImage(index) {
+    selectedImages.splice(index, 1);
+    renderImagePreview();
+    updateCombinedStatus();
+}
+
+// 更新组合状态
+function updateCombinedStatus() {
+    var voiceChip = document.getElementById('statusVoice');
+    var textChip = document.getElementById('statusText');
+    var imageChip = document.getElementById('statusImage');
+    
+    if (audioBlob) {
+        voiceChip.className = 'status-chip has';
+        voiceChip.textContent = '🎤 语音: 已录制 ✓';
+    } else {
+        voiceChip.className = 'status-chip empty';
+        voiceChip.textContent = '🎤 语音: 未录制';
+    }
+    
+    var text = document.getElementById('uploadText') ? document.getElementById('uploadText').value.trim() : '';
+    if (text) {
+        textChip.className = 'status-chip has';
+        textChip.textContent = '📝 文字: 已填写 ✓';
+    } else {
+        textChip.className = 'status-chip empty';
+        textChip.textContent = '📝 文字: 未填写';
+    }
+    
+    if (selectedImages.length > 0) {
+        imageChip.className = 'status-chip has';
+        imageChip.textContent = '🖼️ 图片: ' + selectedImages.length + '张 ✓';
+    } else {
+        imageChip.className = 'status-chip empty';
+        imageChip.textContent = '🖼️ 图片: 0张';
+    }
+}
+
+// 组合上传（语音+文字+图片同步）
+function submitCombinedUpload() {
+    var uploader = document.getElementById('uploaderName').value.trim();
+    var workshop = document.getElementById('uploadWorkshop').value;
+    var text = document.getElementById('uploadText').value.trim();
+    
+    // 检查是否有内容
+    if (!audioBlob && !text && selectedImages.length === 0) {
+        alert('请至少录制语音、填写文字或选择图片');
+        return;
+    }
+    
+    if (!uploader) {
+        alert('请填写上传人姓名');
+        return;
+    }
+    
+    var btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '上传中...';
+    
+    var formData = new FormData();
+    formData.append('uploader', uploader);
+    formData.append('workshop', workshop);
+    formData.append('text', text);
+    formData.append('record_type', 'combined');
+    
+    // 添加语音文件
+    if (audioBlob) {
+        var voiceFile = new File([audioBlob], 'voice_' + Date.now() + '.webm', { type: 'audio/webm' });
+        formData.append('voice', voiceFile);
+    }
+    
+    // 添加图片
+    selectedImages.forEach(function(file, i) {
+        formData.append('images', file);
+    });
+    
+    var apiUrl = (window.API_BASE_URL || '') + '/api/mobile/combined-upload';
+    
+    fetch(apiUrl, {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="icon" style="font-size:16px;margin:0">↑</span>同步上传（语音+文字+图片）';
+        
+        if (data.ok) {
+            var resultDiv = document.getElementById('uploadResult');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div class="success">✅ 上传成功！' + 
+                (data.voice ? '语音 ' : '') + 
+                (data.images ? data.images + '张图片 ' : '') + 
+                (data.text ? '文字 ' : '') + 
+                '已提交解析</div>';
+            
+            // 清空表单
+            deleteVoice();
+            selectedImages = [];
+            renderImagePreview();
+            document.getElementById('uploadText').value = '';
+            updateCombinedStatus();
+            
+            setTimeout(function() { resultDiv.style.display = 'none'; }, 5000);
+        } else {
+            alert('上传失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(function(e) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="icon" style="font-size:16px;margin:0">↑</span>同步上传（语音+文字+图片）';
+        
+        // 离线模式：保存到本地缓存
+        if (typeof AndroidNative !== 'undefined') {
+            if (text) AndroidNative.cacheText(text, 'combined', '', uploader, workshop);
+            alert('当前离线，文字已保存到本地缓存，联网后自动上传\n（语音和图片请在APP内使用原生上传）');
+        } else {
+            alert('上传请求失败：' + e.message);
+        }
+    });
+}
+</script>
+</body>
+</html>

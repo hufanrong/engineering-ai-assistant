@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FanGong" parent="Theme.MaterialComponents.Light.DarkActionBar">
+        <item name="colorPrimary">@color/fangong_blue</item>
+        <item name="colorPrimaryDark">@color/fangong_blue_dark</item>
+        <item name="colorAccent">@color/fangong_orange</item>
+        <item name="android:statusBarColor">@color/fangong_blue_dark</item>
+        <item name="android:windowBackground">@color/white</item>
+    </style>
+</resources>
