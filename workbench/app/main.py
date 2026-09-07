@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.91")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.93")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2708,6 +2708,43 @@ def mining_field_record_generate(record_type: str = "", device_type: str = "", d
     from . import mining_field_record as _mfr
     return _mfr.generate_field_record(record_type, device_type, device_tag, workshop, date, recorder)
 
+
+
+@app.get("/api/mining-doc-record/mapping")
+def mining_doc_record_mapping():
+    """v0.1.93：获取现场记录到工程资料的映射关系。"""
+    from . import mining_doc_record_link as _mdrl
+    return _mdrl.get_record_doc_mapping()
+
+
+@app.post("/api/mining-doc-record/generate")
+def mining_doc_record_generate(data: dict):
+    """v0.1.93：根据现场记录生成工程资料。"""
+    from . import mining_doc_record_link as _mdrl
+    return _mdrl.generate_doc_from_record(
+        data.get("record_type", ""),
+        data.get("record_data", {}),
+        data.get("device_type", ""),
+        data.get("device_tag", ""),
+        data.get("workshop", ""),
+    )
+
+
+@app.post("/api/mining-doc-record/batch-generate")
+def mining_doc_record_batch_generate(data: dict):
+    """v0.1.93：批量根据现场记录生成工程资料。"""
+    from . import mining_doc_record_link as _mdrl
+    return _mdrl.batch_generate_docs_from_records(data.get("records", []))
+
+
+@app.post("/api/mining-doc-record/check-completeness")
+def mining_doc_record_check_completeness(data: dict):
+    """v0.1.93：检查现场记录是否足够生成完整工程资料。"""
+    from . import mining_doc_record_link as _mdrl
+    return _mdrl.check_record_completeness_for_doc(
+        data.get("record_type", ""),
+        data.get("record_data", {}),
+    )
 
 @app.get("/api/mining-field-record/equipment-points")
 def mining_field_record_equipment_points(device_type: str = ""):

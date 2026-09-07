@@ -4797,3 +4797,96 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnFrPoints");
   if (b3) b3.addEventListener("click", frPoints);
 });
+
+// v0.1.93：资料记录联动
+function drMapping() {
+  fetch("/api/mining-doc-record/mapping").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("drMappingResult");
+    el.style.display = "block";
+    ["drGenerateResult","drCheckResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>现场记录到工程资料映射（' + d.total + '种）：</strong><br>';
+    d.mappings.forEach(function(m) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + esc(m.record_type) + '</strong> → ' + esc(m.doc_type) + '（' + m.field_count + '个字段）<br>';
+      html += '<span style="color:#6B7280">' + esc(m.description) + '</span>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function drGenerate() {
+  var type = document.getElementById("drRecordType").value;
+  var devType = document.getElementById("drDeviceType").value;
+  // 构造示例记录数据
+  var recordData = {
+    date: "2026-09-07",
+    workshop: "示例车间",
+    equipment_name: devType || "示例设备",
+    equipment_model: "示例型号",
+    equipment_tag: "P-001",
+    conclusion: "合格",
+  };
+  fetch("/api/mining-doc-record/generate", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({record_type: type, record_data: recordData, device_type: devType, workshop: "示例车间"})
+  }).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("drGenerateResult");
+    el.style.display = "block";
+    ["drMappingResult","drCheckResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.doc_type) + '</strong><br>';
+    if (d.device_type) html += '<span style="color:#1E5AA8">设备：' + esc(d.device_type) + '</span> ';
+    var color = d.completion_rate >= 80 ? '#52C41A' : (d.completion_rate >= 50 ? '#FAAD14' : '#EA6668');
+    html += '完成率：<span style="color:' + color + ';font-weight:bold">' + d.completion_rate + '%</span>（' + d.filled_count + '/' + d.total_fields + '）<br><br>';
+    if (d.equipment_specific_points && d.equipment_specific_points.length > 0) {
+      html += '<span style="color:#FF7A00">设备专用要点：</span><br>';
+      d.equipment_specific_points.forEach(function(p) {
+        html += '  • ' + esc(p) + '<br>';
+      });
+      html += '<br>';
+    }
+    html += '<span style="font-weight:bold">资料字段：</span><br>';
+    d.fields.forEach(function(f) {
+      var fc = f.status === 'filled' ? '#52C41A' : '#FAAD14';
+      html += '  <span style="color:' + fc + '">[' + (f.status === 'filled' ? '✓' : '待填') + ']</span> ' + esc(f.label) + '：' + esc(f.value) + '<br>';
+    });
+    if (d.missing_fields && d.missing_fields.length > 0) {
+      html += '<br><span style="color:#FAAD14">待补充字段：' + d.missing_fields.join('、') + '</span>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function drCheck() {
+  var type = document.getElementById("drRecordType").value;
+  var recordData = {date: "2026-09-07", equipment_name: "示例设备", conclusion: "合格"};
+  fetch("/api/mining-doc-record/check-completeness", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({record_type: type, record_data: recordData})
+  }).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("drCheckResult");
+    el.style.display = "block";
+    ["drMappingResult","drGenerateResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var color = d.can_generate ? '#52C41A' : '#EA6668';
+    var html = '<strong>' + esc(d.doc_type) + '完整性检查：</strong><br>';
+    html += '必填项：' + d.filled_required + '/' + d.required_fields + '（' + d.required_completion_rate + '%）<br>';
+    html += '可选项：' + d.filled_optional + '/' + d.optional_fields + '<br>';
+    html += '是否可生成：<span style="color:' + color + ';font-weight:bold">' + (d.can_generate ? '可以' : '暂不可以') + '</span><br>';
+    html += '建议：' + esc(d.suggestion);
+    if (d.missing_required_fields && d.missing_required_fields.length > 0) {
+      html += '<br><span style="color:#EA6668">缺失必填项：' + d.missing_required_fields.join('、') + '</span>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnDrMapping");
+  if (b1) b1.addEventListener("click", drMapping);
+  var b2 = document.getElementById("btnDrGenerate");
+  if (b2) b2.addEventListener("click", drGenerate);
+  var b3 = document.getElementById("btnDrCheck");
+  if (b3) b3.addEventListener("click", drCheck);
+});
