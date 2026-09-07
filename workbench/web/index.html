@@ -514,6 +514,30 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.85：矿山设备施工方案/吊装方案生成 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山设备施工方案/吊装方案生成（v0.1.85）</h3>
+  <div class="msg" style="margin-bottom:6px">针对矿山设备重量大、尺寸大、安装要求特殊的特点，生成专用施工方案和吊装方案。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="planTagInput" placeholder="设备位号如：M-101" style="flex:1;min-width:100px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+    <select id="planTypeSelect" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+      <option value="">选择设备类型</option>
+      <option value="破碎机">破碎机</option>
+      <option value="球磨机">球磨机</option>
+      <option value="半自磨机">半自磨机</option>
+      <option value="浮选机">浮选机</option>
+      <option value="高压釜">高压釜</option>
+      <option value="闪速炉">闪速炉</option>
+      <option value="转炉">转炉</option>
+      <option value="余热锅炉">余热锅炉</option>
+    </select>
+    <button class="btn" id="btnGenConstructionPlan" style="background:#1E5AA8">施工方案</button>
+    <button class="btn" id="btnGenLiftingPlan" style="background:#FF7A00">吊装方案</button>
+  </div>
+  <div id="constructionPlanResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="liftingPlanResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.84：矿山/选矿/冶炼设备知识库 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山/选矿/冶炼设备知识库（v0.1.84）</h3>

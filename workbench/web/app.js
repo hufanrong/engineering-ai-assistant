@@ -4254,3 +4254,67 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnMiningLifting");
   if (b3) b3.addEventListener("click", miningQueryLifting);
 });
+
+// v0.1.85：矿山设备施工方案/吊装方案生成
+function genConstructionPlan() {
+  var tag = document.getElementById("planTagInput").value.trim();
+  var type = document.getElementById("planTypeSelect").value;
+  if (!type) { alert("请选择设备类型"); return; }
+  var url = "/api/mining-plan/construction?type=" + encodeURIComponent(type);
+  if (tag) url += "&tag=" + encodeURIComponent(tag);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("constructionPlanResult");
+    el.style.display = "block";
+    document.getElementById("liftingPlanResult").style.display = "none";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.plan_title) + '</strong><br>';
+    if (d.spatial_info && d.spatial_info.workshop) {
+      html += '位置：' + esc(d.spatial_info.workshop) + ' | 标高：' + (d.spatial_info.elevation != null ? d.spatial_info.elevation + 'm' : '未知') + '<br>';
+    }
+    html += '<br><strong>一、方案大纲：</strong><br>';
+    d.plan_outline.forEach(function(item, i) { html += (i+1) + '. ' + esc(item) + '<br>'; });
+    html += '<br><strong>二、关键施工要点：</strong><br>';
+    d.key_construction_points.forEach(function(item) { html += '• ' + esc(item) + '<br>'; });
+    html += '<br><strong>三、质量控制：</strong><br>';
+    d.quality_control.forEach(function(item) { html += '• ' + esc(item) + '<br>'; });
+    html += '<br><strong>四、安全注意事项：</strong><br>';
+    d.safety_points.forEach(function(item) { html += '• ' + esc(item) + '<br>'; });
+    html += '<br><strong>五、人员配置：</strong><br>' + d.personnel_config.map(function(x){return esc(x);}).join('、') + '<br>';
+    html += '<br><strong>六、机具配置：</strong><br>' + d.equipment_config.map(function(x){return esc(x);}).join('、') + '<br>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function genLiftingPlan() {
+  var tag = document.getElementById("planTagInput").value.trim();
+  var type = document.getElementById("planTypeSelect").value;
+  if (!type) { alert("请选择设备类型"); return; }
+  var url = "/api/mining-plan/lifting?type=" + encodeURIComponent(type);
+  if (tag) url += "&tag=" + encodeURIComponent(tag);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("liftingPlanResult");
+    el.style.display = "block";
+    document.getElementById("constructionPlanResult").style.display = "none";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.plan_title) + '</strong><br>';
+    if (d.spatial_info && d.spatial_info.workshop) {
+      html += '位置：' + esc(d.spatial_info.workshop) + ' | 标高：' + (d.spatial_info.elevation != null ? d.spatial_info.elevation + 'm' : '未知') + '<br>';
+    }
+    html += '<br><strong>吊装方法：</strong>' + esc(d.lifting_method) + '<br>';
+    html += '<strong>吊车选型：</strong>' + esc(d.crane_selection) + '<br>';
+    html += '<strong>吊点：</strong>' + esc(d.lifting_points) + '<br>';
+    html += '<strong>索具：</strong>' + esc(d.slings) + '<br>';
+    html += '<br><strong>吊装顺序：</strong><br>';
+    d.lifting_sequence.forEach(function(item, i) { html += (i+1) + '. ' + esc(item) + '<br>'; });
+    html += '<br><strong>关键要点：</strong><br>';
+    d.key_points.forEach(function(item) { html += '• ' + esc(item) + '<br>'; });
+    html += '<br><strong>安全注意事项：</strong><br>';
+    d.safety_points.forEach(function(item) { html += '• ' + esc(item) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnGenConstructionPlan");
+  if (b1) b1.addEventListener("click", genConstructionPlan);
+  var b2 = document.getElementById("btnGenLiftingPlan");
+  if (b2) b2.addEventListener("click", genLiftingPlan);
+});

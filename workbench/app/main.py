@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.84")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.85")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2477,6 +2477,47 @@ def mining_equipment_category(type: str = ""):
     from . import mining_equipment as _me
     return {"ok": True, "type": type, "category": _me.get_mining_equipment_category(type), "is_mining": _me.is_mining_equipment(type)}
 
+
+
+@app.get("/api/mining-plan/types")
+def mining_plan_types():
+    """v0.1.85：列出支持施工方案/吊装方案的矿山设备类型。"""
+    from . import mining_plan_templates as _mpt
+    return {"ok": True, "types": _mpt.list_mining_plan_types()}
+
+
+@app.get("/api/mining-plan/construction")
+def mining_plan_construction(tag: str = "", type: str = ""):
+    """v0.1.85：生成矿山设备施工方案。"""
+    from . import mining_plan_templates as _mpt
+    from . import installation_plan as _ip
+    spatial_info = {}
+    if tag:
+        try:
+            si = _ip.get_device_spatial_info(tag)
+            if si.get("ok"):
+                spatial_info = si
+        except Exception:
+            pass
+    result = _mpt.generate_mining_construction_plan(tag, type, spatial_info)
+    return result
+
+
+@app.get("/api/mining-plan/lifting")
+def mining_plan_lifting(tag: str = "", type: str = ""):
+    """v0.1.85：生成矿山设备吊装方案。"""
+    from . import mining_plan_templates as _mpt
+    from . import installation_plan as _ip
+    spatial_info = {}
+    if tag:
+        try:
+            si = _ip.get_device_spatial_info(tag)
+            if si.get("ok"):
+                spatial_info = si
+        except Exception:
+            pass
+    result = _mpt.generate_mining_lifting_plan(tag, type, spatial_info)
+    return result
 
 @app.get("/api/mining-equipment/lifting-params")
 def mining_equipment_lifting_params(type: str = ""):
