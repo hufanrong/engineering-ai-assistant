@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.97")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.100")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2854,6 +2854,163 @@ def mining_mobile_detect_type(filename: str = ""):
     from . import mining_mobile_upload as _mmu
     return _mmu.detect_upload_type(filename)
 
+
+
+@app.post("/api/mining-field-merge/merge")
+def mining_field_merge_merge(data: dict):
+    """v0.1.98：合并现场记录（多电脑并库）。"""
+    from . import mining_field_record_merge as _mfrm
+    return _mfrm.merge_field_records(
+        data.get("source_records", []),
+        data.get("source_node", "unknown"),
+        data.get("conflict_strategy", "latest"),
+    )
+
+
+@app.get("/api/mining-field-merge/stats")
+def mining_field_merge_stats():
+    """v0.1.98：获取合并统计信息。"""
+    from . import mining_field_record_merge as _mfrm
+    return _mfrm.get_merge_stats()
+
+
+@app.get("/api/mining-field-merge/pending")
+def mining_field_merge_pending():
+    """v0.1.98：获取待人工确认列表。"""
+    from . import mining_field_record_merge as _mfrm
+    return _mfrm.get_pending_confirmations()
+
+
+@app.post("/api/mining-field-merge/resolve")
+def mining_field_merge_resolve(data: dict):
+    """v0.1.98：处理待人工确认。"""
+    from . import mining_field_record_merge as _mfrm
+    return _mfrm.resolve_pending_confirmation(
+        data.get("pending_id", ""),
+        data.get("action", ""),
+    )
+
+
+@app.get("/api/mining-field-merge/log")
+def mining_field_merge_log(limit: int = 50):
+    """v0.1.98：获取合并日志。"""
+    from . import mining_field_record_merge as _mfrm
+    return _mfrm.get_merge_log(limit)
+
+
+
+@app.get("/api/mobile/config")
+def mobile_config():
+    """v0.1.99：获取移动端配置。"""
+    return {
+        "ok": True,
+        "app_name": "繁工AI · 工程助手",
+        "version": "0.1.99",
+        "theme": {"primary": "#1E5AA8", "accent": "#FF7A00"},
+        "features": ["upload", "records", "docs", "ai", "schedule", "merge"],
+        "workshops": ["破碎车间","磨矿车间","浮选车间","脱水车间","火法冶炼车间","湿法冶炼车间","公用辅助"],
+        "record_types": ["施工日志","开箱检验","隐蔽验收","设备安装","试运转","安全检查","吊装作业","焊接记录"],
+    }
+
+
+
+@app.get("/api/mining-equipment-detail/list")
+def mining_equipment_detail_list():
+    """v0.1.100：获取所有设备详细信息列表。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_all_equipment_details()
+
+
+@app.get("/api/mining-equipment-detail/detail")
+def mining_equipment_detail_detail(equipment: str = ""):
+    """v0.1.100：获取设备详细信息。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_equipment_detail(equipment)
+
+
+@app.get("/api/mining-equipment-detail/construction-points")
+def mining_equipment_detail_construction_points(equipment: str = "", phase: str = ""):
+    """v0.1.100：获取设备施工要点。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_equipment_construction_points(equipment, phase)
+
+
+@app.get("/api/mining-equipment-detail/quality-standards")
+def mining_equipment_detail_quality_standards(equipment: str = ""):
+    """v0.1.100：获取设备质量标准。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_equipment_quality_standards(equipment)
+
+
+@app.get("/api/mining-equipment-detail/common-faults")
+def mining_equipment_detail_common_faults(equipment: str = ""):
+    """v0.1.100：获取设备常见故障。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_equipment_common_faults(equipment)
+
+
+@app.get("/api/mining-equipment-detail/acceptance-items")
+def mining_equipment_detail_acceptance_items(equipment: str = ""):
+    """v0.1.100：获取设备验收项目。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_equipment_acceptance_items(equipment)
+
+
+@app.get("/api/mining-equipment-detail/phase-points")
+def mining_equipment_detail_phase_points(equipment: str = "", phase: str = ""):
+    """v0.1.100：获取设备分阶段施工要点。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_equipment_phase_points(equipment, phase)
+
+
+@app.get("/api/mining-equipment-detail/stats")
+def mining_equipment_detail_stats():
+    """v0.1.100：获取知识库统计。"""
+    from . import mining_equipment_detail as _med
+    return _med.get_knowledge_base_stats()
+
+@app.get("/api/mobile/dashboard")
+def mobile_dashboard():
+    """v0.1.99：移动端仪表盘数据。"""
+    from . import relations as _rel
+    from . import mining_mobile_upload as _mmu
+    try:
+        rel = _rel.load_relations()
+        devices = len(rel.get("devices", {}))
+        workshops = len(rel.get("workshops", []))
+    except Exception:
+        devices = 0
+        workshops = 0
+    try:
+        recs = _mmu.get_upload_records(limit=1)
+        total_records = recs.get("stats", {}).get("total", 0)
+        pending = recs.get("stats", {}).get("pending_parse", 0)
+    except Exception:
+        total_records = 0
+        pending = 0
+    return {
+        "ok": True,
+        "devices": devices,
+        "workshops": workshops,
+        "records": total_records,
+        "pending": pending,
+        "quick_actions": [
+            {"id": "photo", "name": "拍照上传", "icon": "📷"},
+            {"id": "voice", "name": "语音记录", "icon": "🎤"},
+            {"id": "text", "name": "文字记录", "icon": "📝"},
+            {"id": "records", "name": "记录列表", "icon": "📋"},
+            {"id": "docs", "name": "资料生成", "icon": "📄"},
+            {"id": "ai", "name": "AI助手", "icon": "🤖"},
+            {"id": "schedule", "name": "施工进度", "icon": "📅"},
+            {"id": "merge", "name": "多电脑并库", "icon": "🔄"},
+        ],
+    }
+
+@app.get("/api/mining-field-merge/integrity")
+def mining_field_merge_integrity():
+    """v0.1.98：检查现场记录完整性。"""
+    from . import mining_field_record_merge as _mfrm
+    return _mfrm.check_field_record_integrity()
 
 @app.get("/api/mining-mobile/detect-doc-type")
 def mining_mobile_detect_doc_type(content: str = "", filename: str = ""):

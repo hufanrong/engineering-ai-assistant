@@ -5207,3 +5207,232 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnMbBatchParse");
   if (b4) b4.addEventListener("click", mbBatchParse);
 });
+
+// v0.1.98：多电脑并库现场记录合并
+function frmStats() {
+  fetch("/api/mining-field-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("frmStatsResult");
+    el.style.display = "block";
+    ["frmPendingResult","frmLogResult","frmIntegrityResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>合并统计：</strong><br>';
+    html += '主库记录：' + d.main_records_count + ' | 待确认：' + d.pending_count + ' | 日志：' + d.merge_log_count + '<br>';
+    html += '<br>按记录类型：<br>';
+    for (var k in d.by_type) { html += '  • ' + esc(k) + '：' + d.by_type[k] + '<br>'; }
+    html += '<br>按源节点：<br>';
+    for (var k in d.by_node) { html += '  • ' + esc(k) + '：' + d.by_node[k] + '<br>'; }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function frmPending() {
+  fetch("/api/mining-field-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("frmPendingResult");
+    el.style.display = "block";
+    ["frmStatsResult","frmLogResult","frmIntegrityResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>待人工确认（' + d.pending_count + '条）：</strong><br>';
+    if (d.pending_list.length === 0) html += '<span style="color:#52C41A">暂无待确认记录</span>';
+    d.pending_list.forEach(function(p) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #FAAD14">';
+      html += '<strong>' + esc(p.record_type) + '</strong>（' + esc(p.source_node) + '）<br>';
+      html += '时间：' + esc(p.time) + '<br>';
+      html += '<button onclick="resolvePending(\'' + p.id + '\',\'accept_incoming\')" style="font-size:11px;padding:2px 6px;margin-right:4px">接受传入</button>';
+      html += '<button onclick="resolvePending(\'' + p.id + '\',\'keep_existing\')" style="font-size:11px;padding:2px 6px;margin-right:4px">保留现有</button>';
+      html += '<button onclick="resolvePending(\'' + p.id + '\',\'merge_both\')" style="font-size:11px;padding:2px 6px">合并两者</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function resolvePending(id, action) {
+  fetch("/api/mining-field-merge/resolve", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pending_id:id,action:action})}).then(function(r){return r.json();}).then(function(d){
+    alert(d.ok ? "处理成功：" + d.status : "处理失败：" + d.error);
+    frmPending();
+  }).catch(function(){});
+}
+function frmLog() {
+  fetch("/api/mining-field-merge/log?limit=20").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("frmLogResult");
+    el.style.display = "block";
+    ["frmStatsResult","frmPendingResult","frmIntegrityResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>合并日志（共' + d.total + '条，显示' + d.returned + '条）：</strong><br>';
+    d.logs.forEach(function(l) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02)">';
+      html += '<span style="color:#6B7280">' + esc(l.time) + '</span> ';
+      html += '<strong>' + esc(l.action) + '</strong> ';
+      if (l.record_type) html += '(' + esc(l.record_type) + ') ';
+      if (l.source_node) html += '[' + esc(l.source_node) + ']';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function frmIntegrity() {
+  fetch("/api/mining-field-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("frmIntegrityResult");
+    el.style.display = "block";
+    ["frmStatsResult","frmPendingResult","frmLogResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>完整性检查：</strong><br>';
+    html += '总记录：' + d.total_records + ' | 问题数：' + d.issues_count + '<br>';
+    html += '<br>按记录类型：<br>';
+    for (var k in d.record_types) { html += '  • ' + esc(k) + '：' + d.record_types[k] + '<br>'; }
+    if (d.issues.length > 0) {
+      html += '<br><span style="color:#EA6668">问题列表：</span><br>';
+      d.issues.forEach(function(i) { html += '  • ' + esc(i.issue) + '（' + esc(i.record_type) + '）<br>'; });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function frmMerge() {
+  var strategy = document.getElementById("frmStrategy").value;
+  var testRecords = [
+    {record_type:"施工日志", device_type:"球磨机", date:"2026-09-01", content:"测试记录1", uploader:"测试员A"},
+    {record_type:"开箱检验记录", device_type:"高压釜", date:"2026-09-02", content:"测试记录2", uploader:"测试员B"},
+  ];
+  fetch("/api/mining-field-merge/merge", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({source_records:testRecords,source_node:"测试节点",conflict_strategy:strategy})}).then(function(r){return r.json();}).then(function(d){
+    alert("合并完成：新增" + d.stats.new_added + "条，重复" + d.stats.duplicates_skipped + "条，冲突" + d.stats.conflicts + "条");
+    frmStats();
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnFrmStats"); if (b1) b1.addEventListener("click", frmStats);
+  var b2 = document.getElementById("btnFrmPending"); if (b2) b2.addEventListener("click", frmPending);
+  var b3 = document.getElementById("btnFrmLog"); if (b3) b3.addEventListener("click", frmLog);
+  var b4 = document.getElementById("btnFrmIntegrity"); if (b4) b4.addEventListener("click", frmIntegrity);
+  var b5 = document.getElementById("btnFrmMerge"); if (b5) b5.addEventListener("click", frmMerge);
+});
+
+// v0.1.99：移动端
+function mobileConfig() {
+  fetch("/api/mobile/config").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mobileConfigResult");
+    el.style.display = "block";
+    document.getElementById("mobileDashboardResult").style.display = "none";
+    var html = '<strong>移动端配置：</strong><br>';
+    html += '应用名：' + esc(d.app_name) + ' | 版本：' + esc(d.version) + '<br>';
+    html += '主题色：' + esc(d.theme.primary) + '<br>';
+    html += '功能：' + d.features.join('、') + '<br>';
+    html += '车间：' + d.workshops.join('、') + '<br>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function mobileDashboard() {
+  fetch("/api/mobile/dashboard").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mobileDashboardResult");
+    el.style.display = "block";
+    document.getElementById("mobileConfigResult").style.display = "none";
+    var html = '<strong>移动端数据：</strong><br>';
+    html += '设备：' + d.devices + ' | 车间：' + d.workshops + ' | 记录：' + d.records + ' | 待处理：' + d.pending + '<br>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnMobileConfig"); if (b1) b1.addEventListener("click", mobileConfig);
+  var b2 = document.getElementById("btnMobileDashboard"); if (b2) b2.addEventListener("click", mobileDashboard);
+});
+
+// v0.1.100：设备详细知识库
+function eqDetail() {
+  var name = document.getElementById("eqDetailName").value;
+  fetch("/api/mining-equipment-detail/detail?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("eqDetailResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var det = d.detail;
+    var html = '<strong>' + esc(d.equipment) + '详细信息：</strong><br>';
+    html += '分类：' + esc(det.category) + ' / ' + esc(det.subcategory) + '<br>';
+    html += '典型型号：' + det.typical_models.join('、') + '<br>';
+    html += '<br>关键参数：<br>';
+    for (var k in det.key_parameters) { html += '  • ' + esc(k) + '：' + esc(det.key_parameters[k]) + '<br>'; }
+    html += '<br>主要部件：' + det.main_components.join('、') + '<br>';
+    html += '<br>施工要点（' + det.construction_key_points.length + '条）：<br>';
+    det.construction_key_points.forEach(function(p, i) { html += '  ' + (i+1) + '. ' + esc(p) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function eqPoints() {
+  var name = document.getElementById("eqDetailName").value;
+  fetch("/api/mining-equipment-detail/construction-points?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("eqDetailResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.equipment) + '施工要点（' + d.total + '条）：</strong><br>';
+    d.construction_points.forEach(function(p, i) { html += (i+1) + '. ' + esc(p) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function eqStandards() {
+  var name = document.getElementById("eqDetailName").value;
+  fetch("/api/mining-equipment-detail/quality-standards?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("eqDetailResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.equipment) + '质量标准（' + d.total + '项）：</strong><br>';
+    d.quality_standards.forEach(function(s) { html += '  • ' + esc(s) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function eqFaults() {
+  var name = document.getElementById("eqDetailName").value;
+  fetch("/api/mining-equipment-detail/common-faults?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("eqDetailResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.equipment) + '常见故障（' + d.total + '条）：</strong><br>';
+    d.common_faults.forEach(function(f) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #EA6668">';
+      html += '<strong>' + esc(f.fault) + '</strong><br>';
+      html += '原因：' + esc(f.cause) + '<br>';
+      html += '处理：' + esc(f.solution);
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function eqAcceptance() {
+  var name = document.getElementById("eqDetailName").value;
+  fetch("/api/mining-equipment-detail/acceptance-items?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("eqDetailResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.equipment) + '验收项目（' + d.total + '项）：</strong><br>';
+    d.acceptance_items.forEach(function(a, i) { html += (i+1) + '. ' + esc(a) + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function eqPhasePoints() {
+  var name = document.getElementById("eqDetailName").value;
+  fetch("/api/mining-equipment-detail/phase-points?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("eqDetailResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.equipment) + '分阶段施工要点（' + d.total_phases + '阶段）：</strong><br>';
+    for (var phase in d.phase_data) {
+      html += '<br><strong>' + esc(phase) + '：</strong><br>';
+      d.phase_data[phase].forEach(function(p, i) { html += '  ' + (i+1) + '. ' + esc(p) + '<br>'; });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function eqStats() {
+  fetch("/api/mining-equipment-detail/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("eqDetailResult");
+    el.style.display = "block";
+    var html = '<strong>知识库统计：</strong><br>';
+    html += '详细设备：' + d.detailed_equipment_count + '种<br>';
+    html += '分阶段要点设备：' + d.phase_points_equipment_count + '种<br>';
+    html += '施工要点总数：' + d.total_construction_points + '条<br>';
+    html += '质量标准总数：' + d.total_quality_standards + '项<br>';
+    html += '常见故障总数：' + d.total_common_faults + '条<br>';
+    html += '验收项目总数：' + d.total_acceptance_items + '项<br>';
+    html += '分类：' + d.categories.join('、') + '<br>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnEqDetail"); if (b1) b1.addEventListener("click", eqDetail);
+  var b2 = document.getElementById("btnEqPoints"); if (b2) b2.addEventListener("click", eqPoints);
+  var b3 = document.getElementById("btnEqStandards"); if (b3) b3.addEventListener("click", eqStandards);
+  var b4 = document.getElementById("btnEqFaults"); if (b4) b4.addEventListener("click", eqFaults);
+  var b5 = document.getElementById("btnEqAcceptance"); if (b5) b5.addEventListener("click", eqAcceptance);
+  var b6 = document.getElementById("btnEqPhasePoints"); if (b6) b6.addEventListener("click", eqPhasePoints);
+  var b7 = document.getElementById("btnEqStats"); if (b7) b7.addEventListener("click", eqStats);
+});

@@ -514,6 +514,71 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.98：多电脑并库现场记录合并 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库现场记录合并（v0.1.98）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑上传的现场记录合并，自动去重，冲突处理，待人工确认。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnFrmStats" style="background:#1E5AA8">合并统计</button>
+    <button class="btn" id="btnFrmPending">待人工确认</button>
+    <button class="btn" id="btnFrmLog">合并日志</button>
+    <button class="btn" id="btnFrmIntegrity">完整性检查</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="frmStrategy" style="padding:4px 8px;font-size:12px">
+      <option value="latest">最新优先</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">人工确认</option>
+    </select>
+    <button class="btn" id="btnFrmMerge">模拟合并</button>
+  </div>
+  <div id="frmStatsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="frmPendingResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="frmLogResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="frmIntegrityResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.99：移动端APP界面 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+  <h3 style="margin:0 0 6px;font-size:15px">移动端APP界面（v0.1.99）</h3>
+  <div class="msg" style="margin-bottom:6px">移动端专用界面，自适应手机屏幕，底部Tab导航。</div>
+  <div class="row" style="margin-bottom:6px">
+    <a href="/mobile/index.html" target="_blank" style="text-decoration:none"><button class="btn" style="background:#FF7A00">📱 打开移动端界面</button></a>
+    <button class="btn" id="btnMobileConfig">移动端配置</button>
+    <button class="btn" id="btnMobileDashboard">移动端数据</button>
+  </div>
+  <div id="mobileConfigResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mobileDashboardResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.100：设备详细知识库 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备详细知识库（v0.1.100）</h3>
+  <div class="msg" style="margin-bottom:6px">8种典型设备详细参数、施工要点、质量标准、常见故障、验收项目。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="eqDetailName" style="padding:4px 8px;font-size:12px">
+      <option value="球磨机">球磨机</option>
+      <option value="半自磨机">半自磨机</option>
+      <option value="高压釜">高压釜</option>
+      <option value="闪速炉">闪速炉</option>
+      <option value="浮选机">浮选机</option>
+      <option value="颚式破碎机">颚式破碎机</option>
+      <option value="浓缩机">浓缩机</option>
+      <option value="压滤机">压滤机</option>
+    </select>
+    <button class="btn" id="btnEqDetail" style="background:#1E5AA8">设备详情</button>
+    <button class="btn" id="btnEqPoints">施工要点</button>
+    <button class="btn" id="btnEqStandards">质量标准</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnEqFaults">常见故障</button>
+    <button class="btn" id="btnEqAcceptance">验收项目</button>
+    <button class="btn" id="btnEqPhasePoints">分阶段要点</button>
+    <button class="btn" id="btnEqStats">知识库统计</button>
+  </div>
+  <div id="eqDetailResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.96：施工进度资料联动 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">施工进度与资料生成联动（v0.1.96）</h3>
