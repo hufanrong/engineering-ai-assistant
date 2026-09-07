@@ -3270,7 +3270,7 @@ def restore_backup(data: dict):
 
 # ========== v0.1.118：手机端语音+文字+图片组合上传 ==========
 @app.post("/api/mobile/combined-upload")
-async def mobile_combined_upload(request):
+async def mobile_combined_upload(request: Request):
     """接收手机端组合上传（语音+文字+图片同步），自动归入当前项目解析。"""
     from . import project_manager as _pm
     from . import scanner as _scanner
