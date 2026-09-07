@@ -1789,5 +1789,236 @@ setTimeout(checkForUpdates, 3000);
 // 每小时检查一次
 setInterval(checkForUpdates, 3600000);
 </script>
+
+<script>
+// ========== 项目管理功能 ==========
+var currentProject = null;
+var projectList = [];
+
+// 页面加载时初始化项目管理
+document.addEventListener('DOMContentLoaded', function() {
+    loadProjects();
+    initProjectButtons();
+});
+
+function initProjectButtons() {
+    // 新建项目按钮
+    var btnNew = document.getElementById('btnNewProject');
+    if (btnNew) btnNew.onclick = showNewProjectForm;
+    
+    // 创建项目按钮
+    var btnCreate = document.getElementById('btnCreateProject');
+    if (btnCreate) btnCreate.onclick = createProject;
+    
+    // 取消新建按钮
+    var btnCancel = document.getElementById('btnCancelNewProject');
+    if (btnCancel) btnCancel.onclick = hideNewProjectForm;
+    
+    // 切换项目按钮
+    var btnSwitch = document.getElementById('btnSwitchProject');
+    if (btnSwitch) btnSwitch.onclick = showProjectSelector;
+    
+    // 数据目录按钮
+    var btnDataDir = document.getElementById('btnProjectDataDir');
+    if (btnDataDir) btnDataDir.onclick = showProjectDataDir;
+}
+
+// 加载项目列表
+function loadProjects() {
+    fetch('/api/projects')
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                projectList = data.projects || [];
+                updateProjectUI();
+            }
+        })
+        .catch(e => console.log('加载项目列表失败', e));
+    
+    // 加载当前项目
+    fetch('/api/projects/current')
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.project) {
+                currentProject = data.project;
+                updateProjectUI();
+            }
+        })
+        .catch(e => console.log('加载当前项目失败', e));
+}
+
+// 更新项目相关UI显示
+function updateProjectUI() {
+    // 当前项目名称
+    var nameEl = document.getElementById('currentProjectName');
+    if (nameEl) {
+        if (currentProject) {
+            nameEl.textContent = currentProject.name;
+            nameEl.style.color = '#1E5AA8';
+        } else {
+            nameEl.textContent = '未选择项目';
+            nameEl.style.color = '#EA6668';
+        }
+    }
+    
+    // 项目选择下拉框
+    var selector = document.getElementById('projectSelector');
+    if (selector) {
+        selector.innerHTML = '<option value="">-- 选择项目 --</option>';
+        projectList.forEach(function(p) {
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name + (p.file_count > 0 ? ' (' + p.file_count + '文件)' : '');
+            if (currentProject && p.id === currentProject.id) {
+                opt.selected = true;
+            }
+            selector.appendChild(opt);
+        });
+        selector.onchange = function() {
+            if (this.value) {
+                switchProject(this.value);
+            }
+        };
+    }
+}
+
+// 显示新建项目表单
+function showNewProjectForm() {
+    var form = document.getElementById('newProjectForm');
+    if (form) {
+        form.style.display = 'block';
+        document.getElementById('newProjectName').value = '';
+        document.getElementById('newProjectClient').value = '';
+        document.getElementById('newProjectLocation').value = '';
+        document.getElementById('newProjectDesc').value = '';
+        document.getElementById('newProjectName').focus();
+    }
+}
+
+// 隐藏新建项目表单
+function hideNewProjectForm() {
+    var form = document.getElementById('newProjectForm');
+    if (form) {
+        form.style.display = 'none';
+    }
+}
+
+// 创建项目
+function createProject() {
+    var name = document.getElementById('newProjectName').value.trim();
+    if (!name) {
+        alert('请输入项目名称');
+        return;
+    }
+    
+    var btn = document.getElementById('btnCreateProject');
+    btn.disabled = true;
+    btn.textContent = '创建中...';
+    
+    var data = {
+        name: name,
+        client: document.getElementById('newProjectClient').value.trim(),
+        location: document.getElementById('newProjectLocation').value.trim(),
+        description: document.getElementById('newProjectDesc').value.trim()
+    };
+    
+    fetch('/api/projects/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        btn.disabled = false;
+        btn.textContent = '创建项目';
+        
+        if (result.ok) {
+            alert('项目「' + name + '」创建成功！已自动切换为当前项目。\n\n现在上传的文件都会归入这个项目。');
+            hideNewProjectForm();
+            currentProject = result.project;
+            loadProjects();
+        } else {
+            alert('创建失败：' + (result.error || '未知错误'));
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.textContent = '创建项目';
+        alert('创建请求失败：' + e.message);
+    });
+}
+
+// 切换项目
+function switchProject(projectId) {
+    fetch('/api/projects/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: projectId})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            currentProject = data.project;
+            updateProjectUI();
+            alert('已切换到项目：' + currentProject.name + '\n\n后续上传的文件将归入此项目。');
+            // 刷新页面数据
+            location.reload();
+        } else {
+            alert('切换失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(e => alert('切换请求失败：' + e.message));
+}
+
+// 显示项目选择器
+function showProjectSelector() {
+    var selector = document.getElementById('projectSelector');
+    if (selector) {
+        selector.style.display = selector.style.display === 'none' ? 'block' : 'none';
+        if (selector.style.display === 'block') {
+            selector.focus();
+        }
+    }
+}
+
+// 显示项目数据目录
+function showProjectDataDir() {
+    if (!currentProject) {
+        alert('请先选择或创建一个项目');
+        return;
+    }
+    var infoEl = document.getElementById('projectDataDirInfo');
+    if (infoEl) {
+        infoEl.style.display = 'block';
+        infoEl.innerHTML = '<strong>当前项目数据目录：</strong><br>' +
+            'data/projects/' + currentProject.id + '/<br><br>' +
+            '<small>所有上传的文件、解析结果、向量库都存储在此目录下。<br>' +
+            '可将此路径复制给外部Agent使用。</small>';
+    }
+}
+
+// 删除项目（带确认）
+function deleteProject(projectId) {
+    if (!confirm('确定要删除这个项目吗？\n\n删除前会自动备份到 updates/backups/ 目录。\n删除后不可恢复（除非从备份恢复）。')) {
+        return;
+    }
+    fetch('/api/projects/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: projectId, backup: true})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            alert('项目已删除，备份保存在：' + (data.backup_path || 'updates/backups/'));
+            currentProject = null;
+            loadProjects();
+        } else {
+            alert('删除失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(e => alert('删除请求失败：' + e.message));
+}
+</script>
 </body>
 </html>
