@@ -7,7 +7,7 @@ import json
 import threading
 from typing import Union, List
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
+from fastapi import Request, FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.110")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.111")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -3215,6 +3215,113 @@ def merge_projects(data: dict):
         conflict_strategy=data.get("conflict_strategy", "manual"),
     )
 
+
+
+# ========== v0.1.111：手机端离线数据批量接收 ==========
+@app.post("/api/mobile/offline-batch-upload")
+async def mobile_offline_batch_upload(request: Request):
+    """接收手机端离线缓存的数据（文件或文字记录），自动归入当前项目。"""
+    from . import project_manager as _pm
+    from . import scanner as _scanner
+    import tempfile
+    
+    content_type = request.headers.get("content-type", "")
+    
+    # 处理multipart/form-data（文件上传）
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        file = form.get("file")
+        if not file:
+            return {"ok": False, "error": "未收到文件"}
+        
+        file_name = form.get("file_name", file.filename if hasattr(file, 'filename') else "uploaded_file")
+        file_type = form.get("file_type", "file")
+        project_id = form.get("project_id", "")
+        uploader = form.get("uploader", "")
+        remark = form.get("remark", "")
+        
+        # 保存临时文件
+        suffix = os.path.splitext(file_name)[1]
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        try:
+            # 如果指定了项目，切换到该项目
+            if project_id:
+                _pm.set_current_project(project_id)
+            
+            # 扫描解析该文件
+            import os as _os
+            tmp_dir = _os.path.dirname(tmp_path)
+            stats = _scanner.scan_folder(tmp_dir, force=True)
+            
+            return {
+                "ok": True,
+                "file_name": file_name,
+                "file_type": file_type,
+                "uploader": uploader,
+                "project_id": project_id,
+                "parsed": stats.get("parsed", 0),
+                "message": f"文件「{file_name}」已接收并解析",
+            }
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+    
+    # 处理JSON（文字记录上传）
+    else:
+        try:
+            data = await request.json()
+        except Exception:
+            return {"ok": False, "error": "请求格式错误"}
+        
+        text = data.get("text", "")
+        record_type = data.get("record_type", "text")
+        project_id = data.get("project_id", "")
+        uploader = data.get("uploader", "")
+        location = data.get("location", "")
+        created_at = data.get("created_at", 0)
+        
+        if not text:
+            return {"ok": False, "error": "文字内容为空"}
+        
+        # 如果指定了项目，切换到该项目
+        if project_id:
+            _pm.set_current_project(project_id)
+        
+        # 保存文字记录到项目
+        current = _pm.get_current_project()
+        if current:
+            ddir = _pm.get_project_data_dir(current["id"])
+            records_dir = os.path.join(ddir, "mobile_records")
+            os.makedirs(records_dir, exist_ok=True)
+            
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            record_file = os.path.join(records_dir, f"{record_type}_{timestamp}.txt")
+            
+            with open(record_file, "w", encoding="utf-8") as f:
+                f.write(f"类型: {record_type}\n")
+                f.write(f"上传人: {uploader}\n")
+                f.write(f"位置: {location}\n")
+                f.write(f"时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"原始时间戳: {created_at}\n")
+                f.write("="*50 + "\n\n")
+                f.write(text)
+            
+            # 扫描解析
+            _scanner.scan_folder(records_dir, force=True)
+        
+        return {
+            "ok": True,
+            "record_type": record_type,
+            "uploader": uploader,
+            "project_id": project_id,
+            "text_length": len(text),
+            "message": f"文字记录已接收（{len(text)}字）",
+        }
 
 @app.post("/api/projects/merge/resolve-conflict")
 def resolve_merge_conflict(data: dict):

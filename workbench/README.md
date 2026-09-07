@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.110）
+# 繁工AI · 本地解析工作台（MVP v0.1.111）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.111**：**手机端离线缓存+自动同步**（电脑端新增/api/mobile/offline-batch-upload批量接收手机端离线数据API，支持文件和文字记录两种格式，自动归入指定项目并解析入库；手机端Android APP新增OfflineCacheManager离线缓存管理器：无网络时拍照/语音/文字自动保存到手机本地，网络恢复后自动检测电脑端可达性并批量上传，支持上传进度回调和失败重试；MainActivity新增NativeBridge JS接口，网页可调用AndroidNative.isOfflineMode()/getPendingUploadCount()/cacheText()/cacheFile()/startSync()等原生方法；手机端网页支持离线模式提示和待上传数量显示；手机端APP更新到v1.1.0）
 - **v0.1.110**：**项目数据备份/导入 + 项目间设备对比合并 + 删除自动备份**（新增app/project_backup.py项目备份模块：export_project导出项目所有数据为.fgbak文件（含index.json/relations.json/解析缓存/向量库/上传文件/导出文件），import_project从备份文件恢复项目（支持新建或覆盖），list_backups/delete_backup备份管理，backup_before_delete删除前自动备份；新增app/project_merge.py项目对比合并模块：compare_projects对比两个项目设备数据（相同设备/仅A有/仅B有/数据冲突四类），merge_devices将源项目设备合并到目标项目（三种冲突策略source/target/manual），resolve_manual_conflict人工确认冲突；改造project_manager.py delete_project增加backup参数默认True，删除前自动备份到data/backups/目录，返回结果包含备份文件信息；新增/api/projects/{export,backups,import,backups/delete,compare,merge,merge/resolve-conflict}端点）
 - **v0.1.109**：**项目关联上传扫描 - 选中项目后资料自动归入**（改造scanner.py支持项目级数据目录：新增_get_data_dir()自动检测当前项目，scan_folder新增data_dir参数，索引文件/解析缓存/向量库全部使用项目目录；改造relations.py支持项目级数据目录：build_relations新增data_dir参数，关系图谱/确认记录/拒绝记录使用项目目录；改造upload_queue.py使用当前项目目录：上传队列/上传日志/节点ID使用项目目录；改造main.py /api/scan端点：扫描前检查是否已选择项目，未选择则提示先新建/选择项目；扫描完成后自动更新项目统计（文件数/设备数/车间数）；/api/upload/log使用当前项目目录；效果：在顶部选择某个项目后，所有文件夹扫描、文件上传、解析入库、关系构建、向量存储全部自动归入该项目的独立目录data/projects/{id}/，不同项目数据完全隔离）
 - **v0.1.108**：**模板引擎 - 基于资料库模板生成文件**（新增app/template_engine.py模板引擎；支持上传Word模板到平台，自动解析模板结构和占位符（{{字段名}}格式）；用项目数据库中的数据自动填充模板，生成最终Word文件；支持28种占位符字段（设备名称/型号/项目名称/车间/施工单位/日期/供货厂家/基础编号/隐蔽部位/编制人/审核人/设备位号/安装位置/标高/重量/外形尺寸/电机功率/电压/转速等）；支持表格占位符填充；模板按文件类型分类管理（安全交底/技术交底/施工方案等）；根据文件类型自动选择匹配模板生成；未填充的占位符会列出提示人工补充；模板使用次数统计；新增/api/templates/{list,fields,upload,parse,render,generate-by-type,delete}端点；前端新增模板管理区（上传/列表/解析/生成/删除））
