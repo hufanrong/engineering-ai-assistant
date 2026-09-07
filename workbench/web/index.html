@@ -105,6 +105,65 @@
     <div style="margin-top:6px;font-size:11px;color:#6B7280">
       支持类型：<span id="smartDocTypes"></span>
     </div>
+  <!-- v0.1.108：模板管理 -->
+  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
+    <h3 style="margin:0 0 6px;font-size:15px">📋 模板管理 - 基于模板生成文件（v0.1.108）</h3>
+    <div class="msg" style="margin-bottom:6px">上传Word模板（.docx），模板中使用 {{字段名}} 作为占位符，系统自动用项目数据库数据填充生成文件。支持字段：设备名称、项目名称、车间、施工单位、日期、供货厂家、设备型号、安装位置等28种。</div>
+    
+    <!-- 上传模板 -->
+    <div style="margin-bottom:10px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px">
+      <strong style="font-size:13px">上传模板：</strong>
+      <div class="row" style="margin-top:6px">
+        <input type="file" id="templateFile" accept=".docx" style="font-size:12px">
+        <input type="text" id="templateName" placeholder="模板名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+        <select id="templateDocType" style="padding:4px 8px;font-size:12px">
+          <option value="">选择类型...</option>
+          <option value="安全交底">安全交底</option>
+          <option value="技术交底">技术交底</option>
+          <option value="施工方案">施工方案</option>
+          <option value="吊装方案">吊装方案</option>
+          <option value="基础验收">基础验收</option>
+          <option value="开箱检验">开箱检验</option>
+          <option value="隐蔽工程">隐蔽工程</option>
+          <option value="施工日志">施工日志</option>
+          <option value="竣工资料">竣工资料</option>
+          <option value="安装记录">安装记录</option>
+          <option value="试运转">试运转记录</option>
+        </select>
+        <button class="btn" id="btnUploadTemplate" style="background:#FF7A00;font-size:12px;padding:4px 10px">上传</button>
+      </div>
+    </div>
+
+    <!-- 模板列表 -->
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong style="font-size:13px">模板列表：</strong>
+        <button class="btn" id="btnRefreshTemplates" style="background:#6B7280;font-size:11px;padding:2px 8px">刷新</button>
+      </div>
+      <div id="templateList" style="font-size:12px;max-height:300px;overflow-y:auto">加载中...</div>
+    </div>
+
+    <!-- 用模板生成 -->
+    <div style="padding:8px;background:rgba(30,90,168,0.03);border-radius:6px">
+      <strong style="font-size:13px">用模板生成文件：</strong>
+      <div class="row" style="margin-top:6px;margin-bottom:6px">
+        <select id="genTemplateId" style="padding:4px 8px;font-size:12px;min-width:150px">
+          <option value="">选择模板...</option>
+        </select>
+        <input type="text" id="genEquipment" placeholder="设备名称（如：球磨机）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+        <input type="text" id="genExtraData" placeholder="额外数据（JSON，如：{&quot;施工单位&quot;:&quot;XX公司&quot;}）" style="flex:2;min-width:150px;padding:4px 8px;font-size:12px">
+        <button class="btn" id="btnRenderTemplate" style="background:#1E5AA8;font-size:12px;padding:4px 10px">生成文件</button>
+      </div>
+      <div id="templateResult" style="font-size:12px;display:none"></div>
+    </div>
+
+    <!-- 支持字段 -->
+    <details style="margin-top:8px">
+      <summary style="font-size:12px;color:#6B7280;cursor:pointer">查看支持的占位符字段（28种）</summary>
+      <div id="templateFields" style="font-size:11px;margin-top:6px;padding:6px;background:rgba(0,0,0,0.02);border-radius:4px"></div>
+    </details>
+  </div>
+
   </div>
 
 

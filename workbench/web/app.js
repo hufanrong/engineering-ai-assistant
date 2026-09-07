@@ -5983,3 +5983,114 @@ document.addEventListener("DOMContentLoaded", function () {
   var b6 = document.getElementById("btnSmartDocAnalyze"); if (b6) b6.addEventListener("click", analyzeSmartDoc);
   var b7 = document.getElementById("btnSmartDocGenerate"); if (b7) b7.addEventListener("click", generateSmartDoc);
 });
+
+// v0.1.108：模板管理
+function loadTemplates() {
+  fetch("/api/templates").then(function(r){return r.json();}).then(function(d) {
+    var el = document.getElementById("templateList");
+    var sel = document.getElementById("genTemplateId");
+    if (!el) return;
+    if (d.total === 0) {
+      el.innerHTML = '<span style="color:#6B7280">暂无模板，请先上传Word模板</span>';
+      if (sel) sel.innerHTML = '<option value="">选择模板...</option>';
+      return;
+    }
+    var html = '';
+    if (sel) sel.innerHTML = '<option value="">选择模板...</option>';
+    d.templates.forEach(function(t) {
+      var dt = t.doc_type ? '<span style="background:#FF7A00;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px">' + esc(t.doc_type) + '</span>' : '';
+      html += '<div style="padding:6px;margin-bottom:4px;background:rgba(0,0,0,0.02);border-radius:4px;border-left:3px solid #FF7A00">';
+      html += '<strong>' + esc(t.name) + '</strong> ' + dt + '<br>';
+      html += '<span style="color:#6B7280;font-size:11px">占位符' + t.placeholder_count + '个 | 表格' + t.table_count + '个 | 段落' + t.paragraph_count + '个 | 使用' + (t.use_count||0) + '次</span><br>';
+      if (t.placeholders && t.placeholders.length > 0) {
+        html += '<span style="font-size:11px;color:#1E5AA8">字段：' + t.placeholders.slice(0,8).map(esc).join("、") + (t.placeholders.length > 8 ? '...' : '') + '</span><br>';
+      }
+      html += '<button class="btn" style="background:#EA6668;font-size:10px;padding:2px 6px;margin-top:2px" onclick="deleteTemplate(\'' + t.id + '\')">删除</button>';
+      html += '</div>';
+      if (sel) {
+        var opt = document.createElement("option");
+        opt.value = t.id;
+        opt.textContent = t.name + (t.doc_type ? '（' + t.doc_type + '）' : '');
+        sel.appendChild(opt);
+      }
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function uploadTemplate() {
+  var fileInput = document.getElementById("templateFile");
+  if (!fileInput.files || fileInput.files.length === 0) { alert("请选择Word模板文件"); return; }
+  var formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+  formData.append("name", document.getElementById("templateName").value);
+  formData.append("doc_type", document.getElementById("templateDocType").value);
+  fetch("/api/templates/upload", {method:"POST", body:formData}).then(function(r){return r.json();}).then(function(d) {
+    if (d.ok) {
+      alert(d.message + "\n解析到占位符：" + d.template.placeholders.join("、"));
+      loadTemplates();
+      document.getElementById("templateFile").value = "";
+      document.getElementById("templateName").value = "";
+    } else {
+      alert("上传失败：" + d.error);
+    }
+  }).catch(function(e){ alert("上传出错：" + e); });
+}
+function renderTemplate() {
+  var tid = document.getElementById("genTemplateId").value;
+  if (!tid) { alert("请选择模板"); return; }
+  var equipment = document.getElementById("genEquipment").value.trim();
+  var extraStr = document.getElementById("genExtraData").value.trim();
+  var extraData = {};
+  if (extraStr) {
+    try { extraData = JSON.parse(extraStr); } catch(e) { alert("额外数据格式错误，请输入合法JSON"); return; }
+  }
+  var el = document.getElementById("templateResult");
+  el.style.display = "block";
+  el.innerHTML = '<span style="color:#6B7280">正在生成...</span>';
+  fetch("/api/templates/render", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template_id:tid, equipment:equipment, extra_data:extraData})}).then(function(r){return r.json();}).then(function(d) {
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<div style="padding:8px;background:rgba(30,90,168,0.05);border-radius:6px">';
+    html += '<strong>' + esc(d.message) + '</strong><br>';
+    html += '输出文件：<span style="font-family:monospace;font-size:11px">' + esc(d.output_path) + '</span><br>';
+    html += '已填充字段（' + d.filled_count + '个）：' + d.filled_fields.map(esc).join("、") + '<br>';
+    if (d.has_unfilled) {
+      html += '<strong style="color:#FF7A00">未填充字段（' + d.unfilled_count + '个，数据缺失）：</strong>' + d.unfilled_fields.map(esc).join("、") + '<br>';
+      html += '<span style="color:#6B7280;font-size:11px">请在生成的Word文件中手动补充以上内容，或在额外数据中提供后重新生成</span>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  }).catch(function(e){ el.innerHTML = '<span style="color:#EA6668">生成出错：' + e + '</span>'; });
+}
+function deleteTemplate(tid) {
+  if (!confirm("确定删除此模板？")) return;
+  fetch("/api/templates/delete", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template_id:tid})}).then(function(r){return r.json();}).then(function(d) {
+    if (d.ok) { alert(d.message); loadTemplates(); }
+    else alert(d.error);
+  }).catch(function(){});
+}
+function loadTemplateFields() {
+  fetch("/api/templates/fields").then(function(r){return r.json();}).then(function(d) {
+    var el = document.getElementById("templateFields");
+    if (!el) return;
+    var html = '<table style="width:100%;font-size:11px;border-collapse:collapse">';
+    html += '<tr style="background:rgba(0,0,0,0.05)"><th style="padding:3px;text-align:left">字段</th><th style="padding:3px;text-align:left">说明</th><th style="padding:3px;text-align:left">来源</th><th style="padding:3px;text-align:left">示例</th></tr>';
+    d.fields.forEach(function(f) {
+      var srcColor = f.source === 'auto' ? '#52C41A' : (f.source === 'manual' ? '#FF7A00' : '#1E5AA8');
+      html += '<tr><td style="padding:3px;border-top:1px solid #ddd"><code>{{' + esc(f.field) + '}}</code></td>';
+      html += '<td style="padding:3px;border-top:1px solid #ddd">' + esc(f.description) + '</td>';
+      html += '<td style="padding:3px;border-top:1px solid #ddd;color:' + srcColor + '">' + esc(f.source) + '</td>';
+      html += '<td style="padding:3px;border-top:1px solid #ddd">' + esc(f.example) + '</td></tr>';
+    });
+    html += '</table>';
+    html += '<div style="margin-top:4px;color:#6B7280">来源说明：auto=自动填充（日期等），project=从项目信息获取，equipment=从设备数据获取，equipment_detail=从设备知识库获取，manual=需人工补充</div>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  loadTemplates();
+  loadTemplateFields();
+  var b1 = document.getElementById("btnUploadTemplate"); if (b1) b1.addEventListener("click", uploadTemplate);
+  var b2 = document.getElementById("btnRefreshTemplates"); if (b2) b2.addEventListener("click", loadTemplates);
+  var b3 = document.getElementById("btnRenderTemplate"); if (b3) b3.addEventListener("click", renderTemplate);
+});

@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.107")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.108")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -3162,6 +3162,91 @@ def analyze_smart_doc_input(text: str = ""):
     from . import smart_doc_generator as _sdg
     return _sdg.analyze_input(text)
 
+
+
+# ========== v0.1.108：模板引擎 ==========
+@app.get("/api/templates")
+def list_templates(doc_type: str = None):
+    """获取模板列表，可按文件类型筛选。"""
+    from . import template_engine as _te
+    return _te.list_templates(doc_type)
+
+
+@app.get("/api/templates/fields")
+def get_template_fields():
+    """获取支持的占位符字段列表。"""
+    from . import template_engine as _te
+    return _te.get_supported_fields()
+
+
+@app.post("/api/templates/upload")
+async def upload_template(request):
+    """上传Word模板，自动解析占位符。"""
+    from . import template_engine as _te
+    import tempfile
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        return {"ok": False, "error": "未上传文件"}
+    template_name = form.get("name", "")
+    doc_type = form.get("doc_type", "")
+    description = form.get("description", "")
+    # 保存临时文件
+    suffix = os.path.splitext(file.filename)[1]
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        result = _te.upload_template(tmp_path, template_name, doc_type, description)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    return result
+
+
+@app.get("/api/templates/parse")
+def parse_template_file(path: str):
+    """解析指定路径的Word模板。"""
+    from . import template_engine as _te
+    return _te.parse_template(path)
+
+
+@app.post("/api/templates/render")
+def render_template(data: dict):
+    """
+    用项目数据填充模板，生成最终文件。
+    输入：{"template_id": "xxx", "equipment": "球磨机", "extra_data": {"施工单位": "XX公司"}}
+    """
+    from . import template_engine as _te
+    return _te.render_template(
+        template_id=data.get("template_id", ""),
+        equipment=data.get("equipment", ""),
+        project_id=data.get("project_id"),
+        extra_data=data.get("extra_data"),
+    )
+
+
+@app.post("/api/templates/generate-by-type")
+def generate_by_template_type(data: dict):
+    """
+    根据文件类型自动选择模板并生成文件。
+    输入：{"doc_type": "安全交底", "equipment": "球磨机", "extra_data": {...}}
+    """
+    from . import template_engine as _te
+    return _te.generate_from_template_by_type(
+        doc_type=data.get("doc_type", ""),
+        equipment=data.get("equipment", ""),
+        project_id=data.get("project_id"),
+        extra_data=data.get("extra_data"),
+    )
+
+
+@app.post("/api/templates/delete")
+def delete_template(data: dict):
+    """删除模板。"""
+    from . import template_engine as _te
+    return _te.delete_template(data.get("template_id", ""))
 
 @app.post("/api/smart-doc/generate")
 def generate_smart_doc(data: dict):
