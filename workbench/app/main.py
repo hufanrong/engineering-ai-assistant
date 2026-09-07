@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.82")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.83")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2418,6 +2418,56 @@ def progress_enhanced_dashboard():
     from . import progress_enhanced as _pe
     return {"ok": True, **_pe.get_progress_dashboard()}
 
+
+
+@app.get("/api/archive-enhanced/checklist")
+def archive_enhanced_checklist():
+    """v0.1.83：生成竣工资料清单。"""
+    from . import archive_enhanced as _ae
+    return {"ok": True, **_ae.generate_archive_checklist()}
+
+
+@app.get("/api/archive-enhanced/integrity")
+def archive_enhanced_integrity():
+    """v0.1.83：竣工资料完整性检查。"""
+    from . import archive_enhanced as _ae
+    return {"ok": True, **_ae.check_archive_integrity()}
+
+
+@app.get("/api/archive-enhanced/organize")
+def archive_enhanced_organize():
+    """v0.1.83：竣工资料组卷优化。"""
+    from . import archive_enhanced as _ae
+    return {"ok": True, **_ae.organize_archive_volumes()}
+
+
+@app.get("/api/archive-enhanced/summary")
+def archive_enhanced_summary():
+    """v0.1.83：竣工资料总览。"""
+    from . import archive_enhanced as _ae
+    return {"ok": True, **_ae.get_archive_summary()}
+
+
+@app.post("/api/archive-enhanced/update-doc")
+def archive_enhanced_update_doc(body: dict):
+    """v0.1.83：更新竣工资料状态。"""
+    from . import archive_enhanced as _ae
+    tag = body.get("tag", "")
+    doc_type = body.get("doc_type", "")
+    status = body.get("status", "")
+    file_path = body.get("file_path")
+    if not tag or not doc_type or not status:
+        raise HTTPException(status_code=400, detail="缺少tag/doc_type/status")
+    if status not in ["pending", "complete", "missing"]:
+        raise HTTPException(status_code=400, detail="status必须是pending/complete/missing")
+    return {"ok": True, **_ae.update_archive_doc_status(tag, doc_type, status, file_path)}
+
+
+@app.get("/api/archive-enhanced/requirements")
+def archive_enhanced_requirements(type: str = ""):
+    """v0.1.83：获取设备类型竣工资料要求。"""
+    from . import archive_enhanced as _ae
+    return {"ok": True, "requirements": _ae.get_archive_requirements(type)}
 
 @app.post("/api/progress-enhanced/update-status")
 def progress_enhanced_update_status(body: dict):

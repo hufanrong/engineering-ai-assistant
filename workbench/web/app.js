@@ -4115,3 +4115,88 @@ document.addEventListener("DOMContentLoaded", function () {
   var b5 = document.getElementById("btnProgressUpdateStatus");
   if (b5) b5.addEventListener("click", progressUpdateStatus);
 });
+
+// v0.1.83：设备安装位置与竣工资料联动增强
+function archiveLoadSummary() {
+  fetch("/api/archive-enhanced/summary").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveSummary");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>竣工资料总览：</strong>总设备' + d.total_devices + '台 | 车间' + d.total_workshops + '个 | 资料总数' + d.total_docs + '项（必备' + d.total_required_docs + '/可选' + d.total_optional_docs + '）<br>';
+    html += '设备完整率:' + d.device_completion_rate + '% | 完整设备:' + d.devices_complete + '台 | 不完整设备:' + d.devices_incomplete + '台<br>';
+    html += '缺失必备资料:' + d.total_missing_required + '项 | 缺失可选资料:' + d.total_missing_optional + '项<br>';
+    if (d.by_workshop) {
+      html += '<strong>按车间：</strong><br>';
+      for (var ws in d.by_workshop) {
+        var wsd = d.by_workshop[ws];
+        html += '- ' + esc(ws) + ': ' + wsd.device_count + '台设备, ' + wsd.completed_docs + '/' + wsd.total_docs + '项资料, 完成率' + wsd.completion_rate + '%<br>';
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function archiveLoadChecklist() {
+  fetch("/api/archive-enhanced/checklist").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveChecklist");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>竣工资料清单：</strong>总设备' + d.total_devices + '台 | 资料总数' + d.total_docs + '项<br>';
+    if (d.checklist) {
+      for (var ws in d.checklist) {
+        html += '<strong>' + esc(ws) + '：</strong><br>';
+        var ws_devices = d.checklist[ws];
+        for (var tag in ws_devices) {
+          var dev = ws_devices[tag];
+          html += '- <strong>' + esc(tag) + '</strong> ' + esc(dev.name || '') + ' (' + esc(dev.type || '') + '/标高' + (dev.elevation != null ? dev.elevation : '未知') + 'm/' + esc(dev.status || '') + ') ' + dev.completed_docs + '/' + dev.total_docs + '项<br>';
+        }
+      }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function archiveLoadIntegrity() {
+  fetch("/api/archive-enhanced/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveIntegrity");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>竣工资料完整性检查：</strong>总设备' + d.total_devices + '台 | 完整' + d.devices_complete + '台 | 不完整' + d.devices_incomplete + '台 | 完整率' + d.completion_rate + '%<br>';
+    html += '缺失必备资料:' + d.total_missing_required + '项 | 缺失可选资料:' + d.total_missing_optional + '项 | 问题总数:' + d.issues_count + '个（高危' + d.high_severity + '/中危' + d.medium_severity + '）<br>';
+    if (d.issues && d.issues.length > 0) {
+      d.issues.slice(0, 15).forEach(function(iss) {
+        var color = iss.severity === 'high' ? '#e74c3c' : (iss.severity === 'medium' ? '#f39c12' : '#27ae60');
+        html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+        html += '<span style="color:' + color + '">[' + esc(iss.severity) + ']</span> ' + esc(iss.message) + '</div>';
+      });
+    } else {
+      html += '<span style="color:#27ae60">所有资料完整</span>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function archiveLoadOrganize() {
+  fetch("/api/archive-enhanced/organize").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("archiveOrganize");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>竣工资料组卷优化：</strong>总卷册' + d.total_volumes + '卷 | 总设备' + d.total_devices + '台 | 资料总数' + d.total_docs + '项<br>';
+    if (d.volumes) {
+      d.volumes.forEach(function(vol) {
+        html += '<strong>' + esc(vol.volume_number) + ' - ' + esc(vol.workshop) + '：</strong>' + vol.device_count + '台设备, ' + vol.total_docs + '项资料<br>';
+        vol.devices.forEach(function(dev) {
+          html += '  - ' + esc(dev.tag) + ' ' + esc(dev.name || '') + ' (' + esc(dev.type || '') + ') ' + dev.total_docs + '项资料<br>';
+        });
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnArchiveSummary");
+  if (b1) b1.addEventListener("click", archiveLoadSummary);
+  var b2 = document.getElementById("btnArchiveChecklist");
+  if (b2) b2.addEventListener("click", archiveLoadChecklist);
+  var b3 = document.getElementById("btnArchiveIntegrity");
+  if (b3) b3.addEventListener("click", archiveLoadIntegrity);
+  var b4 = document.getElementById("btnArchiveOrganize");
+  if (b4) b4.addEventListener("click", archiveLoadOrganize);
+});
