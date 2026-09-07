@@ -514,6 +514,64 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.104：技术交底生成 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">技术交底自动生成（v0.1.104）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成技术交底记录（8个标准章节，含精度要求和签字栏）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="tdName" style="padding:4px 8px;font-size:12px">
+      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
+      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
+      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
+    </select>
+    <input type="text" id="tdProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="tdWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnTdGenerate" style="background:#1E5AA8">生成交底</button>
+  </div>
+  <div id="tdResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.105：安全交底生成 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+  <h3 style="margin:0 0 6px;font-size:15px">安全交底自动生成（v0.1.105）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库和危险源库自动生成安全交底记录（8个标准章节，含危险源辨识和应急预案）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="sdName" style="padding:4px 8px;font-size:12px">
+      <option value="球磨机">球磨机</option><option value="高压釜">高压釜</option>
+      <option value="闪速炉">闪速炉</option><option value="颚式破碎机">颚式破碎机</option>
+      <option value="浮选机">浮选机</option><option value="半自磨机">半自磨机</option>
+    </select>
+    <input type="text" id="sdProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="sdWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnSdGenerate" style="background:#FF7A00">生成交底</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnSdHazards">通用危险源库</button>
+  </div>
+  <div id="sdResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.106：竣工资料组卷增强 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">竣工资料自动组卷增强（v0.1.106）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成竣工资料组卷目录（8卷80+项资料，根据设备类型自动调整）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="aeName" style="padding:4px 8px;font-size:12px">
+      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
+      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
+      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
+    </select>
+    <input type="text" id="aeProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="aeWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnAeGenerate" style="background:#1E5AA8">生成组卷</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnAeCheck">完整性检查</button>
+    <button class="btn" id="btnAeTransmittal">移交单</button>
+  </div>
+  <div id="aeResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.101：施工方案增强 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">施工方案自动生成增强（v0.1.101）</h3>

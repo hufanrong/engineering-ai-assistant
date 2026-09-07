@@ -5657,3 +5657,169 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnFdStats"); if (b4) b4.addEventListener("click", fdStats);
   var b5 = document.getElementById("btnFdPrompt"); if (b5) b5.addEventListener("click", fdPrompt);
 });
+
+// v0.1.104：技术交底生成
+function tdGenerate() {
+  var name = document.getElementById("tdName").value;
+  var project = document.getElementById("tdProject").value || "矿山工程项目";
+  var workshop = document.getElementById("tdWorkshop").value;
+  var url = "/api/mining-disclosure-enhanced/generate?equipment=" + encodeURIComponent(name) + "&project=" + encodeURIComponent(project);
+  if (workshop) url += "&workshop=" + encodeURIComponent(workshop);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("tdResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.title) + '</strong>（完成率' + d.completion_rate + '%）<br>';
+    html += '设备：' + esc(d.equipment) + ' | 项目：' + esc(d.disclosure.project_name) + '<br><br>';
+    d.disclosure.sections.forEach(function(s) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + esc(s.section) + '</strong><br>';
+      var c = s.content;
+      if (c.key_points) html += '施工要点：' + c.key_points.length + '条<br>';
+      if (c.precision_requirements) { c.precision_requirements.forEach(function(p){html += '  • ' + esc(p) + '<br>';}); }
+      if (c.standards) html += '质量标准：' + c.standards.length + '项<br>';
+      if (c.acceptance_items) html += '验收项目：' + c.acceptance_items.length + '项<br>';
+      if (c.general_safety) html += '安全措施：' + c.general_safety.length + '条<br>';
+      if (c.equipment_specific_safety) html += '设备专用安全：' + c.equipment_specific_safety.length + '条<br>';
+      if (c.risk_analysis) html += '风险分析：' + c.risk_analysis.length + '项<br>';
+      if (c.recipients) html += '签字栏：' + c.recipients.length + '类岗位<br>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b = document.getElementById("btnTdGenerate"); if (b) b.addEventListener("click", tdGenerate);
+});
+
+// v0.1.105：安全交底生成
+function sdGenerate() {
+  var name = document.getElementById("sdName").value;
+  var project = document.getElementById("sdProject").value || "矿山工程项目";
+  var workshop = document.getElementById("sdWorkshop").value;
+  var url = "/api/mining-safety-disclosure/generate?equipment=" + encodeURIComponent(name) + "&project=" + encodeURIComponent(project);
+  if (workshop) url += "&workshop=" + encodeURIComponent(workshop);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("sdResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.title) + '</strong>（完成率' + d.completion_rate + '%）<br>';
+    html += '设备：' + esc(d.equipment) + ' | 项目：' + esc(d.disclosure.project_name) + '<br><br>';
+    d.disclosure.sections.forEach(function(s) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #FF7A00">';
+      html += '<strong>' + esc(s.section) + '</strong><br>';
+      var c = s.content;
+      if (c.total_hazards) html += '危险源：' + c.total_hazards + '个（高风险' + c.high_risk_count + '，中风险' + c.medium_risk_count + '）<br>';
+      if (c.general_measures) html += '通用安全措施：' + c.general_measures.length + '条<br>';
+      if (c.equipment_specific_measures) html += '设备专用安全：' + c.equipment_specific_measures.length + '条<br>';
+      if (c.high_risk_control) html += '高风险控制：' + c.high_risk_control.length + '项<br>';
+      if (c.general_rules) html += '安全操作规程：' + c.general_rules.length + '条<br>';
+      if (c.equipment_specific_rules) html += '设备专用规程：' + c.equipment_specific_rules.length + '条<br>';
+      if (c.ppe_requirements) html += '个人防护：' + c.ppe_requirements.length + '种<br>';
+      if (c.emergency_types) html += '应急预案：' + c.emergency_types.length + '类<br>';
+      if (c.daily_inspection) html += '日常检查：' + c.daily_inspection.length + '项<br>';
+      if (c.recipients) html += '签字栏：' + c.recipients.length + '类岗位<br>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function sdHazards() {
+  fetch("/api/mining-safety-disclosure/hazards").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("sdResult");
+    el.style.display = "block";
+    var html = '<strong>通用危险源库（' + d.total + '个）：</strong><br>';
+    d.hazards.forEach(function(h) {
+      var sc = h.risk_level === '高' ? '#EA6668' : (h.risk_level === '中' ? '#FAAD14' : '#52C41A');
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + sc + '">';
+      html += '<strong>' + esc(h.hazard) + '</strong>（<span style="color:' + sc + '">' + h.risk_level + '风险</span>）<br>';
+      html += '位置：' + esc(h.location) + ' | 后果：' + esc(h.consequence) + '<br>';
+      html += '控制措施：' + esc(h.control_measure);
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnSdGenerate"); if (b1) b1.addEventListener("click", sdGenerate);
+  var b2 = document.getElementById("btnSdHazards"); if (b2) b2.addEventListener("click", sdHazards);
+});
+
+// v0.1.106：竣工资料组卷增强
+function aeGenerate() {
+  var name = document.getElementById("aeName").value;
+  var project = document.getElementById("aeProject").value || "矿山工程项目";
+  var workshop = document.getElementById("aeWorkshop").value;
+  var url = "/api/mining-archive-enhanced/generate?equipment=" + encodeURIComponent(name) + "&project=" + encodeURIComponent(project);
+  if (workshop) url += "&workshop=" + encodeURIComponent(workshop);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("aeResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.title) + '</strong><br>';
+    html += '卷册：' + d.total_volumes + '卷 | 资料：' + d.total_documents + '项（必备' + d.required_documents + '，可选' + d.optional_documents + '）<br><br>';
+    d.volumes.forEach(function(v) {
+      if (v.applicable === false) {
+        html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid #999;opacity:0.6">';
+        html += '<strong>' + esc(v.volume) + '</strong>（不适用：' + esc(v.note) + '）';
+        html += '</div>';
+        return;
+      }
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + esc(v.volume) + '</strong>（' + v.documents.length + '项）：' + esc(v.description) + '<br>';
+      v.documents.forEach(function(doc) {
+        var req = doc.required ? '<span style="color:#EA6668">[必备]</span>' : '<span style="color:#6B7280">[可选]</span>';
+        html += '  ' + req + ' ' + esc(doc.name) + ' - ' + esc(doc.description) + '<br>';
+      });
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function aeCheck() {
+  var name = document.getElementById("aeName").value;
+  fetch("/api/mining-archive-enhanced/check-completeness", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({equipment:name,existing_documents:[]})}).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("aeResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>竣工资料完整性检查：</strong><br>';
+    html += '必备资料：' + d.total_required + '项 | 已有：' + d.total_existing + '项 | 缺失：' + d.missing_count + '项<br>';
+    var color = d.can_archive ? '#52C41A' : '#EA6668';
+    html += '总完成率：<span style="color:' + color + '">' + d.overall_completion_rate + '%</span> | 能否组卷：<span style="color:' + color + '">' + (d.can_archive ? '可以' : '不可以') + '</span><br>';
+    html += '建议：' + esc(d.suggestion) + '<br><br>';
+    d.volume_results.forEach(function(v) {
+      var vc = v.completion_rate >= 95 ? '#52C41A' : '#EA6668';
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + vc + '">';
+      html += '<strong>' + esc(v.volume) + '</strong>：' + v.completion_rate + '%（' + v.existing + '/' + v.required + '，缺' + v.missing + '）';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function aeTransmittal() {
+  var name = document.getElementById("aeName").value;
+  var project = document.getElementById("aeProject").value || "矿山工程项目";
+  var url = "/api/mining-archive-enhanced/transmittal?equipment=" + encodeURIComponent(name) + "&project=" + encodeURIComponent(project);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("aeResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.title) + '</strong><br>';
+    html += '项目：' + esc(d.project_name) + ' | 设备：' + esc(d.equipment) + ' | 日期：' + esc(d.transfer_date) + '<br>';
+    html += '资料：' + d.archive_summary.total_volumes + '卷' + d.archive_summary.total_documents + '项<br><br>';
+    html += '<strong>移交物品：</strong><br>';
+    d.transfer_items.forEach(function(t) {
+      html += '  • ' + esc(t.item) + '：' + esc(t.quantity) + '<br>';
+    });
+    html += '<br><strong>签字栏：</strong><br>';
+    d.signatures.forEach(function(s) {
+      html += '  • ' + esc(s.role) + '：____________<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnAeGenerate"); if (b1) b1.addEventListener("click", aeGenerate);
+  var b2 = document.getElementById("btnAeCheck"); if (b2) b2.addEventListener("click", aeCheck);
+  var b3 = document.getElementById("btnAeTransmittal"); if (b3) b3.addEventListener("click", aeTransmittal);
+});

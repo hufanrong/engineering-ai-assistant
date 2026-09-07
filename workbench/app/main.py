@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.103")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.106")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -3039,6 +3039,69 @@ def mining_fault_diagnose(data: dict):
         data.get("description", ""),
     )
 
+
+
+@app.get("/api/mining-disclosure-enhanced/template")
+def mining_disclosure_enhanced_template():
+    """v0.1.104：获取技术交底模板结构。"""
+    from . import mining_technical_disclosure_enhanced as _mtde
+    return _mtde.get_disclosure_template()
+
+
+
+@app.get("/api/mining-safety-disclosure/template")
+def mining_safety_disclosure_template():
+    """v0.1.105：获取安全交底模板结构。"""
+    from . import mining_safety_disclosure as _msd
+    return _msd.get_safety_disclosure_template()
+
+
+@app.get("/api/mining-safety-disclosure/generate")
+def mining_safety_disclosure_generate(equipment: str = "", project: str = "矿山工程项目", workshop: str = "", unit: str = "", person: str = ""):
+    """v0.1.105：基于详细知识库生成安全交底记录。"""
+    from . import mining_safety_disclosure as _msd
+    return _msd.generate_safety_disclosure(equipment, project, workshop, unit, person)
+
+
+
+@app.get("/api/mining-archive-enhanced/template")
+def mining_archive_enhanced_template():
+    """v0.1.106：获取竣工资料组卷模板。"""
+    from . import mining_completion_archive_enhanced as _mcae
+    return _mcae.get_archive_template()
+
+
+@app.get("/api/mining-archive-enhanced/generate")
+def mining_archive_enhanced_generate(equipment: str = "", project: str = "矿山工程项目", workshop: str = "", unit: str = ""):
+    """v0.1.106：基于详细知识库生成竣工资料组卷目录。"""
+    from . import mining_completion_archive_enhanced as _mcae
+    return _mcae.generate_completion_archive(equipment, project, workshop, unit)
+
+
+@app.post("/api/mining-archive-enhanced/check-completeness")
+def mining_archive_enhanced_check_completeness(data: dict):
+    """v0.1.106：检查竣工资料完整性。"""
+    from . import mining_completion_archive_enhanced as _mcae
+    return _mcae.check_archive_completeness(data.get("equipment", ""), data.get("existing_documents", []))
+
+
+@app.get("/api/mining-archive-enhanced/transmittal")
+def mining_archive_enhanced_transmittal(equipment: str = "", project: str = "矿山工程项目", workshop: str = "", unit: str = "", receiver: str = ""):
+    """v0.1.106：生成竣工资料移交单。"""
+    from . import mining_completion_archive_enhanced as _mcae
+    return _mcae.generate_transmittal(equipment, project, workshop, unit, receiver)
+
+@app.get("/api/mining-safety-disclosure/hazards")
+def mining_safety_disclosure_hazards():
+    """v0.1.105：获取通用危险源库。"""
+    from . import mining_safety_disclosure as _msd
+    return _msd.get_general_hazards()
+
+@app.get("/api/mining-disclosure-enhanced/generate")
+def mining_disclosure_enhanced_generate(equipment: str = "", project: str = "矿山工程项目", workshop: str = "", unit: str = "", person: str = ""):
+    """v0.1.104：基于详细知识库生成技术交底记录。"""
+    from . import mining_technical_disclosure_enhanced as _mtde
+    return _mtde.generate_technical_disclosure(equipment, project, workshop, unit, person)
 
 @app.post("/api/mining-fault/prompt")
 def mining_fault_prompt(data: dict):
