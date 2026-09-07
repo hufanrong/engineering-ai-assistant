@@ -3286,3 +3286,91 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnConcealmentStats");
   if (b3) b3.addEventListener("click", concealmentLoadStats);
 });
+
+// v0.1.75：多电脑并库施工日志合并
+function siteLogMergeFile() {
+  var file = document.getElementById("siteLogMergeFile").value.trim();
+  var pc = document.getElementById("siteLogMergePC").value.trim();
+  var strategy = document.getElementById("siteLogMergeStrategy").value;
+  if (!file) { alert("请输入源施工日志JSON文件路径"); return; }
+  fetch("/api/site-log-merge/merge-file", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({file_path: file, source_pc: pc, conflict_strategy: strategy})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.detail) { alert("合并失败：" + d.detail); return; }
+    var log = d.log || {};
+    var msg = "合并完成！源日志:" + log.source_logs + " 合并:" + log.merged_logs + " 跳过:" + log.skipped_duplicate + " 冲突:" + log.conflicts + " 内容合并:" + (log.content_merged || 0);
+    if (d.integrity_after_merge) {
+      var integ = d.integrity_after_merge;
+      msg += "\n合并后完整性：覆盖" + integ.coverage_percent + "% 日期跨度" + integ.date_span + " 问题" + integ.issues_count + "个";
+    }
+    alert(msg);
+    siteLogMergeLoadStats();
+    siteLogMergeLoadIntegrity();
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function siteLogMergeLoadStats() {
+  fetch("/api/site-log-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("siteLogMergeStats");
+    el.style.display = "block";
+    var html = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并日志' + d.total_logs_merged + '条 | 合并内容' + d.total_content_merged + '项 | 冲突' + d.total_conflicts + '次<br>';
+    html += '待处理冲突:' + d.pending_conflicts + ' | 已解决:' + d.resolved_conflicts + ' | 当前日志:' + d.current_total_logs + '条<br>';
+    if (d.current_by_date) {
+      var dates = Object.keys(d.current_by_date).sort().slice(-5);
+      html += '<strong>最近日期：</strong>' + dates.map(function(x){return x + ':' + d.current_by_date[x];}).join(' ');
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function siteLogMergeLoadPending() {
+  fetch("/api/site-log-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("siteLogMergePending");
+    var pending = d.pending || [];
+    if (pending.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#27ae60">无待处理冲突</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + pending.length + '个）：</strong><br>';
+    pending.slice(0, 10).forEach(function(p, i) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(231,76,60,0.05);border-radius:4px">';
+      html += '<strong>' + esc(p.tag) + '</strong> ' + esc(p.log_date || '') + ' 来源:' + esc(p.source_pc || '') + '<br>';
+      html += '源内容:' + p.source_content_count + '项 vs 当前:' + p.current_content_count + '项<br>';
+      html += '<button onclick="siteLogMergeResolve(' + i + ',\'use_source\')" style="font-size:11px;padding:2px 6px;margin-right:4px">用源数据</button>';
+      html += '<button onclick="siteLogMergeResolve(' + i + ',\'keep_existing\')" style="font-size:11px;padding:2px 6px;margin-right:4px">保留现有</button>';
+      html += '<button onclick="siteLogMergeResolve(' + i + ',\'skip\')" style="font-size:11px;padding:2px 6px">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function siteLogMergeResolve(index, decision) {
+  fetch("/api/site-log-merge/resolve", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({index: index, decision: decision})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("已处理：" + d.decision); siteLogMergeLoadPending(); siteLogMergeLoadStats(); }
+    else alert("处理失败：" + (d.error || ""));
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function siteLogMergeLoadIntegrity() {
+  fetch("/api/site-log-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("siteLogMergeIntegrity");
+    el.style.display = "block";
+    var html = '<strong>施工日志完整性：</strong>总设备' + d.total_devices + '台 | 有日志' + d.devices_with_logs + '台 | 日志总数' + d.total_logs + '条 | 覆盖率' + d.coverage_percent + '%<br>';
+    html += '日期跨度: ' + esc(d.date_span) + ' | 问题: ' + d.issues_count + '个<br>';
+    if (d.issues && d.issues.length > 0) {
+      d.issues.forEach(function(iss) {
+        html += '- ' + esc(iss.type) + ': ' + iss.count + (iss.devices ? '台 (' + iss.devices.slice(0,5).join(',') + '...)' : '条') + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnSiteLogMergeFile");
+  if (b1) b1.addEventListener("click", siteLogMergeFile);
+  var b2 = document.getElementById("btnSiteLogMergeStats");
+  if (b2) b2.addEventListener("click", siteLogMergeLoadStats);
+  var b3 = document.getElementById("btnSiteLogMergePending");
+  if (b3) b3.addEventListener("click", siteLogMergeLoadPending);
+  var b4 = document.getElementById("btnSiteLogMergeIntegrity");
+  if (b4) b4.addEventListener("click", siteLogMergeLoadIntegrity);
+});

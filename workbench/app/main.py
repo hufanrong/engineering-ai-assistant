@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.74")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.75")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1982,6 +1982,70 @@ def concealment_record_stats():
     from . import concealment_record as _cr
     return {"ok": True, **_cr.get_concealment_stats()}
 
+
+
+@app.post("/api/site-log-merge/merge")
+def site_log_merge_merge(body: dict):
+    """v0.1.75：合并源施工日志数据。"""
+    from . import site_log_merge as _slm
+    source = body.get("source_logs", {})
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    return {"ok": True, **_slm.merge_site_logs(source, source_pc, strategy)}
+
+
+@app.post("/api/site-log-merge/merge-file")
+def site_log_merge_merge_file(body: dict):
+    """v0.1.75：从文件合并施工日志。"""
+    from . import site_log_merge as _slm
+    file_path = body.get("file_path", "")
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    source = _slm.load_logs_from_file(file_path)
+    if "error" in source:
+        raise HTTPException(status_code=400, detail=source["error"])
+    return {"ok": True, **_slm.merge_site_logs(source, source_pc, strategy)}
+
+
+@app.get("/api/site-log-merge/pending")
+def site_log_merge_pending():
+    """v0.1.75：列出待人工确认的日志冲突。"""
+    from . import site_log_merge as _slm
+    return {"ok": True, "pending": _slm.list_pending()}
+
+
+@app.post("/api/site-log-merge/resolve")
+def site_log_merge_resolve(body: dict):
+    """v0.1.75：处理待人工确认的日志冲突。"""
+    from . import site_log_merge as _slm
+    index = body.get("index", 0)
+    decision = body.get("decision", "")
+    if decision not in ["use_source", "keep_existing", "skip"]:
+        raise HTTPException(status_code=400, detail="decision必须是use_source/keep_existing/skip")
+    return {"ok": True, **_slm.resolve_pending(index, decision)}
+
+
+@app.get("/api/site-log-merge/log")
+def site_log_merge_log():
+    """v0.1.75：列出合并日志。"""
+    from . import site_log_merge as _slm
+    return {"ok": True, "log": _slm.list_merge_log()}
+
+
+@app.get("/api/site-log-merge/stats")
+def site_log_merge_stats():
+    """v0.1.75：获取合并统计信息。"""
+    from . import site_log_merge as _slm
+    return {"ok": True, **_slm.merge_stats()}
+
+
+@app.get("/api/site-log-merge/integrity")
+def site_log_merge_integrity():
+    """v0.1.75：检查施工日志完整性。"""
+    from . import site_log_merge as _slm
+    return {"ok": True, **_slm.check_log_integrity()}
 
 @app.get("/api/concealment-record/content")
 def concealment_record_content(type: str = ""):
