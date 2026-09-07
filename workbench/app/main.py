@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.75")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.76")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2040,6 +2040,46 @@ def site_log_merge_stats():
     from . import site_log_merge as _slm
     return {"ok": True, **_slm.merge_stats()}
 
+
+
+@app.get("/api/design-change/generate")
+def design_change_generate(tag: str, date: str = None, reason: str = ""):
+    """v0.1.76：生成设备设计变更。"""
+    from . import design_change as _dc
+    return {"ok": True, **_dc.generate_design_change(tag, date, reason)}
+
+
+@app.post("/api/design-change/update")
+def design_change_update(body: dict):
+    """v0.1.76：更新设计变更。"""
+    from . import design_change as _dc
+    tag = body.get("tag", "")
+    date = body.get("date", "")
+    updates = body.get("updates", {})
+    if not tag or not date:
+        raise HTTPException(status_code=400, detail="缺少tag或date")
+    return {"ok": True, **_dc.update_design_change(tag, date, updates)}
+
+
+@app.get("/api/design-change/list")
+def design_change_list(tag: str = None):
+    """v0.1.76：列出生成的设计变更。"""
+    from . import design_change as _dc
+    return {"ok": True, "changes": _dc.list_design_changes(tag)}
+
+
+@app.get("/api/design-change/stats")
+def design_change_stats():
+    """v0.1.76：获取设计变更统计。"""
+    from . import design_change as _dc
+    return {"ok": True, **_dc.get_design_change_stats()}
+
+
+@app.get("/api/design-change/points")
+def design_change_points(type: str = ""):
+    """v0.1.76：获取设备类型设计变更要点。"""
+    from . import design_change as _dc
+    return {"ok": True, "points": _dc.get_change_points(type)}
 
 @app.get("/api/site-log-merge/integrity")
 def site_log_merge_integrity():

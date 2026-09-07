@@ -514,6 +514,23 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.76：设备安装位置与设计变更联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与设计变更联动（v0.1.76）</h3>
+  <div class="msg" style="margin-bottom:6px">根据设备位置自动生成设计变更，包含变更编号、变更原因、影响分析、处理措施、验收要求等完整要素。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="designChangeTag" placeholder="设备位号（如 P-101）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="designChangeDate" placeholder="变更日期(YYYY-MM-DD)" style="width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="designChangeReason" placeholder="变更原因" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <button class="btn" id="btnDesignChangeGenerate" style="background:#FF7A00">生成设计变更</button>
+    <button class="btn" id="btnDesignChangeList">变更列表</button>
+    <button class="btn" id="btnDesignChangeStats">统计</button>
+  </div>
+  <div id="designChangeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="designChangeList" style="font-size:12px;max-height:100px;overflow-y:auto;display:none"></div>
+  <div id="designChangeDetail" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.75：多电脑并库施工日志合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库施工日志合并（v0.1.75）</h3>

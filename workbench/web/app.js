@@ -3374,3 +3374,72 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnSiteLogMergeIntegrity");
   if (b4) b4.addEventListener("click", siteLogMergeLoadIntegrity);
 });
+
+// v0.1.76：设备安装位置与设计变更联动
+function designChangeGenerate() {
+  var tag = document.getElementById("designChangeTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  var date = document.getElementById("designChangeDate").value.trim();
+  var reason = document.getElementById("designChangeReason").value.trim();
+  var url = "/api/design-change/generate?tag=" + encodeURIComponent(tag);
+  if (date) url += "&date=" + encodeURIComponent(date);
+  if (reason) url += "&reason=" + encodeURIComponent(reason);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("designChangeDetail");
+    el.style.display = "block";
+    var html = '<strong>设计变更 - ' + esc(d.change_number) + '</strong><br>';
+    html += '设备: ' + esc(d.tag) + ' ' + esc(d.name || '') + ' | 类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配');
+    if (d.elevation != null) html += ' | 标高: ' + d.elevation + 'm';
+    html += '<br>';
+    html += '变更日期: ' + esc(d.change_date) + ' | 变更位置: ' + esc(d.change_location) + '<br>';
+    html += '变更原因: ' + esc(d.change_reason) + ' | 状态: <span style="color:#f39c12">' + esc(d.change_status) + '</span><br>';
+    html += '<strong>一、常见变更类型：</strong><br>';
+    (d.common_changes || []).forEach(function(c, i){ html += (i+1) + '. ' + esc(c) + '<br>'; });
+    html += '<strong>二、影响分析：</strong><br>';
+    (d.impact_analysis || []).forEach(function(a, i){ html += (i+1) + '. ' + esc(a) + '<br>'; });
+    html += '<strong>三、处理措施：</strong><br>';
+    (d.handling_measures || []).forEach(function(m, i){ html += (i+1) + '. ' + esc(m) + '<br>'; });
+    html += '<strong>四、验收要求：</strong><br>';
+    (d.acceptance_requirements || []).forEach(function(r, i){ html += (i+1) + '. ' + esc(r) + '<br>'; });
+    html += '<strong>五、参加人员：</strong><br>';
+    (d.participants || []).forEach(function(p){ html += '- ' + esc(p.role) + ': ' + (p.name ? esc(p.name) : '______') + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function designChangeLoadList() {
+  var tag = document.getElementById("designChangeTag").value.trim();
+  var url = "/api/design-change/list" + (tag ? "?tag=" + encodeURIComponent(tag) : "");
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("designChangeList");
+    var changes = d.changes || [];
+    if (changes.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无设计变更</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>设计变更（' + changes.length + '条）：</strong><br>';
+    changes.slice(0, 15).forEach(function(c) {
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'designChangeTag\').value=\'' + c.tag + '\';document.getElementById(\'designChangeDate\').value=\'' + c.change_date + '\';designChangeGenerate();" style="color:#1E5AA8">' + esc(c.change_number) + '</a> ' + esc(c.tag) + ' ' + esc(c.name || '') + ' (' + esc(c.type || '') + '/' + esc(c.workshop || '') + '/' + esc(c.change_status || '') + ')<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function designChangeLoadStats() {
+  fetch("/api/design-change/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("designChangeStats");
+    el.style.display = "block";
+    if (d.total_changes === 0) { el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    var html = '<strong>设计变更统计：</strong>共' + d.total_changes + '条 / 覆盖' + d.devices_with_changes + '台设备 / 总设备' + d.total_devices + '台（覆盖率' + d.coverage_percent + '%）<br>';
+    if (d.by_status) {
+      html += '<strong>按状态：</strong>';
+      for (var k in d.by_status) { html += esc(k) + ':' + d.by_status[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnDesignChangeGenerate");
+  if (b1) b1.addEventListener("click", designChangeGenerate);
+  var b2 = document.getElementById("btnDesignChangeList");
+  if (b2) b2.addEventListener("click", designChangeLoadList);
+  var b3 = document.getElementById("btnDesignChangeStats");
+  if (b3) b3.addEventListener("click", designChangeLoadStats);
+});
