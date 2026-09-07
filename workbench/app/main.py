@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.116")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.117")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 app.add_middleware(

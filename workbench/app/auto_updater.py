@@ -92,10 +92,40 @@ def is_git_repo() -> bool:
 def get_latest_version_from_github() -> Dict:
     """
     从GitHub获取最新版本信息。
-    通过最新commit信息解析版本号。
+    优先使用raw文件方式（无API频率限制），失败时回退到API方式。
     """
+    import re
+    
+    # 方式1：从raw.githubusercontent.com读取main.py中的版本号（无频率限制）
     try:
-        # 获取最新commit
+        raw_url = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/workbench/app/main.py"
+        req = urllib.request.Request(raw_url)
+        req.add_header("User-Agent", "FanGongAI-Updater")
+        
+        with urllib.request.urlopen(req, timeout=15) as response:
+            content = response.read().decode("utf-8")
+        
+        # 从main.py中提取版本号
+        version_match = re.search(r'version\s*=\s*"([^"]+)"', content)
+        if version_match:
+            latest_version = version_match.group(1)
+            current = get_current_version()
+            return {
+                "ok": True,
+                "latest_version": latest_version,
+                "latest_commit": "",
+                "latest_commit_msg": f"v{latest_version}",
+                "latest_commit_date": "",
+                "current_version": current,
+                "has_update": _compare_versions(latest_version, current) > 0,
+                "source": "raw",
+            }
+    except Exception as e:
+        # raw方式失败，继续尝试API方式
+        pass
+    
+    # 方式2：使用GitHub API（有频率限制）
+    try:
         commits_url = f"{GITHUB_API_URL}/commits/{GITHUB_BRANCH}"
         req = urllib.request.Request(commits_url)
         req.add_header("User-Agent", "FanGongAI-Updater")
@@ -108,8 +138,6 @@ def get_latest_version_from_github() -> Dict:
         commit_msg = data.get("commit", {}).get("message", "")
         commit_date = data.get("commit", {}).get("committer", {}).get("date", "")
         
-        # 从commit信息中解析版本号
-        import re
         version_match = re.search(r'v(\d+\.\d+\.\d+)', commit_msg)
         latest_version = version_match.group(1) if version_match else "0.0.0"
         
@@ -121,17 +149,25 @@ def get_latest_version_from_github() -> Dict:
             "latest_commit_date": commit_date,
             "current_version": get_current_version(),
             "has_update": _compare_versions(latest_version, get_current_version()) > 0,
+            "source": "api",
         }
-    except urllib.error.URLError as e:
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            return {
+                "ok": False,
+                "error": "GitHub API访问频率超限，请稍后重试或手动下载更新",
+                "suggestion": "可直接访问 https://github.com/hufanrong/engineering-ai-assistant 下载最新版",
+            }
         return {
             "ok": False,
-            "error": f"网络连接失败：{str(e)}",
-            "suggestion": "请检查网络连接，或手动下载更新",
+            "error": f"网络错误：HTTP {e.code}",
+            "suggestion": "请检查网络连接",
         }
     except Exception as e:
         return {
             "ok": False,
             "error": f"获取版本信息失败：{str(e)}",
+            "suggestion": "请检查网络连接，或手动下载更新",
         }
 
 

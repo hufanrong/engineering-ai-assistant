@@ -498,6 +498,7 @@
       <button class="btn" id="btnSwitchProject" style="background:#1E5AA8;font-size:12px;padding:4px 10px">切换</button>
       <button class="btn" id="btnNewProject" style="background:#FF7A00;font-size:12px;padding:4px 10px">+ 新建项目</button>
       <button class="btn" id="btnProjectDataDir" style="background:#6B7280;font-size:12px;padding:4px 10px">数据目录</button>
+      <button class="btn" onclick="manualCheckUpdate()" style="background:#52C41A;font-size:12px;padding:4px 10px">🔄 检查更新</button>
     </div>
     <div id="newProjectForm" style="display:none;margin-top:10px;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px">
       <div class="row" style="margin-bottom:6px">
@@ -2139,6 +2140,41 @@ function performUpdate() {
         btn.textContent = '立即更新';
         alert('更新请求失败：' + e.message);
     });
+}
+
+// 手动检查更新
+function manualCheckUpdate() {
+    var btn = event.target;
+    var oldText = btn.textContent;
+    btn.textContent = '检查中...';
+    btn.disabled = true;
+    
+    fetch('/api/update/check')
+        .then(r => r.json())
+        .then(data => {
+            btn.textContent = oldText;
+            btn.disabled = false;
+            
+            if (data.ok && data.has_update) {
+                updateInfo = data;
+                showUpdateBanner(data);
+                alert('发现新版本 v' + data.latest_version + '！
+当前版本：v' + data.current_version + '
+
+请点击顶部更新横幅中的「立即更新」按钮。');
+            } else if (data.ok && !data.has_update) {
+                alert('当前已是最新版本 v' + data.current_version);
+            } else {
+                alert('检查更新失败：' + (data.error || '未知错误') + '
+
+' + (data.suggestion || ''));
+            }
+        })
+        .catch(e => {
+            btn.textContent = oldText;
+            btn.disabled = false;
+            alert('检查更新请求失败：' + e.message);
+        });
 }
 
 // 页面加载后3秒检查更新
