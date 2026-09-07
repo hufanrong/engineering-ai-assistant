@@ -4643,3 +4643,74 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnCompletenessReq");
   if (b3) b3.addEventListener("click", completenessReq);
 });
+
+// v0.1.90：矿山AI助手优化
+function aiModes() {
+  fetch("/api/mining-ai/modes").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("aiModesResult");
+    el.style.display = "block";
+    ["aiPromptResult","aiEquipPromptResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>矿山AI问答模式（' + d.total + '种）：</strong><br>';
+    d.modes.forEach(function(m) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + m.icon + ' ' + esc(m.name) + '</strong>（' + esc(m.key) + '）<br>';
+      html += '<span style="color:#6B7280">' + esc(m.description) + '</span>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function aiPrompt() {
+  var mode = document.getElementById("aiModeSelect").value;
+  var question = document.getElementById("aiQuestion").value;
+  var deviceType = document.getElementById("aiDeviceType").value;
+  var url = "/api/mining-ai/prompt?mode=" + encodeURIComponent(mode);
+  if (question) url += "&question=" + encodeURIComponent(question);
+  if (deviceType) url += "&device_type=" + encodeURIComponent(deviceType);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("aiPromptResult");
+    el.style.display = "block";
+    ["aiModesResult","aiEquipPromptResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>生成的专业问答提示词：</strong><br>';
+    html += '<span style="color:#1E5AA8">模式：' + esc(d.mode_name) + '</span><br>';
+    if (d.device_type) html += '<span style="color:#6B7280">设备：' + esc(d.device_type) + '</span><br>';
+    html += '<hr style="margin:6px 0">';
+    html += '<div style="background:rgba(0,0,0,0.03);padding:8px;border-radius:4px;white-space:pre-wrap;font-family:monospace;font-size:11px">';
+    html += esc(d.full_prompt);
+    html += '</div>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function aiEquipPrompt() {
+  var deviceType = document.getElementById("aiDeviceType").value || "球磨机";
+  fetch("/api/mining-ai/equipment-prompt?device_type=" + encodeURIComponent(deviceType)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("aiEquipPromptResult");
+    el.style.display = "block";
+    ["aiModesResult","aiPromptResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.device_type) + '专用提示词：</strong><br>';
+    html += '<span style="color:#1E5AA8">关键技术要点：</span><br>';
+    d.key_points.forEach(function(kp) {
+      html += '  • ' + esc(kp) + '<br>';
+    });
+    html += '<span style="color:#EA6668">常见故障：</span><br>';
+    d.common_issues.forEach(function(ci) {
+      html += '  • ' + esc(ci) + '<br>';
+    });
+    html += '<hr style="margin:6px 0">';
+    html += '<div style="background:rgba(0,0,0,0.03);padding:8px;border-radius:4px;white-space:pre-wrap;font-family:monospace;font-size:11px">';
+    html += esc(d.prompt);
+    html += '</div>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnAiModes");
+  if (b1) b1.addEventListener("click", aiModes);
+  var b2 = document.getElementById("btnAiPrompt");
+  if (b2) b2.addEventListener("click", aiPrompt);
+  var b3 = document.getElementById("btnAiEquipPrompt");
+  if (b3) b3.addEventListener("click", aiEquipPrompt);
+});

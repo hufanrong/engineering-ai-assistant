@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.89")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.90")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2671,6 +2671,27 @@ def mining_completeness_check():
         pass
     return _mc.check_process_completeness(devices, existing_docs)
 
+
+
+@app.get("/api/mining-ai/modes")
+def mining_ai_modes():
+    """v0.1.90：获取矿山AI问答模式列表。"""
+    from . import mining_ai_assistant as _mai
+    return _mai.get_ai_modes()
+
+
+@app.get("/api/mining-ai/prompt")
+def mining_ai_prompt(mode: str = "general", question: str = "", device_type: str = "", process: str = "", context: str = ""):
+    """v0.1.90：生成矿山设备专业问答提示词。"""
+    from . import mining_ai_assistant as _mai
+    return _mai.generate_ai_prompt(mode, question, device_type, process, context)
+
+
+@app.get("/api/mining-ai/equipment-prompt")
+def mining_ai_equipment_prompt(device_type: str = "", question_type: str = "general"):
+    """v0.1.90：生成针对特定设备类型的专业问答提示词。"""
+    from . import mining_ai_assistant as _mai
+    return _mai.generate_equipment_specific_prompt(device_type, question_type)
 
 @app.get("/api/mining-completeness/requirements")
 def mining_completeness_requirements(process: str = ""):

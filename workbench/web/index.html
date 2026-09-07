@@ -514,6 +514,33 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.90：矿山AI助手优化 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山AI助手优化（v0.1.90）</h3>
+  <div class="msg" style="margin-bottom:6px">针对矿山设备特点优化问答提示词，支持7种专业问答模式和设备专用提示词。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnAiModes" style="background:#1E5AA8">问答模式</button>
+    <button class="btn" id="btnAiPrompt">生成提示词</button>
+    <button class="btn" id="btnAiEquipPrompt">设备专用提示词</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="aiModeSelect" style="padding:4px 8px;font-size:12px">
+      <option value="general">通用咨询</option>
+      <option value="construction_plan">施工方案咨询</option>
+      <option value="lifting_plan">吊装方案咨询</option>
+      <option value="technical_disclosure">技术交底咨询</option>
+      <option value="safety">安全咨询</option>
+      <option value="quality">质量咨询</option>
+      <option value="troubleshooting">故障诊断咨询</option>
+    </select>
+    <input type="text" id="aiQuestion" placeholder="输入问题（可选）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+    <input type="text" id="aiDeviceType" placeholder="设备类型（可选）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="aiModesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="aiPromptResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="aiEquipPromptResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.89：矿山资料完整性检查 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山资料完整性检查（v0.1.89）</h3>
