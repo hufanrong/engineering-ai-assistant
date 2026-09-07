@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.87）
+# 繁工AI · 本地解析工作台（MVP v0.1.88）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.88**：**矿山设备施工进度计划自动生成（按工艺流程排程）**（新增app/mining_schedule.py；7大工艺流程施工阶段定义破碎/磨矿/选别/脱水/火法冶炼/湿法冶炼/公用辅助各含10-15个施工阶段含工期和依赖关系；设备类型到施工阶段映射60+种设备；generate_mining_schedule按工艺流程自动排程考虑设备依赖关系和并行施工；_add_workdays/_workday_diff工作日计算支持5/6/7天工作制；_calculate_critical_path关键路径分析；_check_schedule_warnings施工进度预警含工期过长/高温熔融/腐蚀介质预警；generate_gantt_svg生成甘特图SVG含时间轴月份刻度流程分色阶段条形图；get_schedule_stats进度统计；新增/api/mining-schedule/{generate,gantt,stats}端点；前端新增矿山施工进度计划区含甘特图展示）
 - **v0.1.87**：**多电脑并库时矿山设备数据合并**（新增app/mining_equipment_merge.py；基于矿山设备知识库的设备类型识别；设计院编号与厂家编号映射合并；跨车间设备合并；设备空间位置合并；设备状态合并；自动去重位号精确匹配>设计院编号匹配>厂家编号匹配>名称+型号相似>名称高度相似候选；三种冲突策略latest/keep_existing/manual；合并日志保留100条；待人工确认pending管理；merge_stats统计；check_mining_equipment_integrity完整性检查位号唯一性/设备类型知识库检查/空间位置完整性/车间分配/设计院编号冲突/厂家编号冲突；新增/api/mining-equipment-merge/{merge,merge-file,pending,resolve/{id},log,stats,integrity}端点）
 - **v0.1.86**：**矿山设备竣工资料组卷优化（按工艺流程组卷）**（新增app/mining_archive_organize.py；7大工艺流程破碎/磨矿/选别/脱水/火法冶炼/湿法冶炼/公用辅助；10个资料阶段开箱→基础→安装→隐蔽→配管→电气→仪表→试运转→试验→资料；按工艺流程自动组卷统计每卷设备数资料数完成率；卷册目录/设备清单/移交单生成；新增/api/mining-archive/{process-flow,organize,catalog,process-equipment,transmittal}端点）
 - **v0.1.85**：**矿山设备施工方案/吊装方案模板优化**（新增app/mining_plan_templates.py；8种典型矿山设备专用施工方案破碎机/球磨机/半自磨机/浮选机/高压釜/闪速炉/转炉/余热锅炉各含方案大纲关键要点质量控制安全注意事项人员配置机具配置；8种专用吊装方案含吊装方法吊车选型吊点索具吊装顺序；生成方案自动关联设备空间位置标高>10m增加高处作业注意事项；新增/api/mining-plan/{types,construction,lifting}端点）

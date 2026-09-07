@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.87")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.88")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2589,6 +2589,82 @@ def mining_equipment_merge_stats():
     from . import mining_equipment_merge as _mem
     return {"ok": True, **_mem.get_merge_stats()}
 
+
+
+@app.get("/api/mining-schedule/generate")
+def mining_schedule_generate(start_date: str = "", work_days: int = 6):
+    """v0.1.88：生成矿山设备施工进度计划。"""
+    from . import mining_schedule as _ms
+    from . import relations as _rel
+    # 从relations获取设备列表
+    devices = []
+    try:
+        g = _rel.load_relations()
+        for tag, dev in g.get("devices", {}).items():
+            dev_dict = dev.copy()
+            dev_dict["tag"] = tag
+            devices.append(dev_dict)
+    except Exception:
+        pass
+    kwargs = {}
+    if start_date:
+        kwargs["start_date"] = start_date
+    if work_days:
+        kwargs["work_days_per_week"] = work_days
+    if devices:
+        kwargs["devices"] = devices
+    return _ms.generate_mining_schedule(**kwargs)
+
+
+@app.get("/api/mining-schedule/gantt")
+def mining_schedule_gantt(start_date: str = "", work_days: int = 6):
+    """v0.1.88：生成施工进度甘特图SVG。"""
+    from . import mining_schedule as _ms
+    from . import relations as _rel
+    devices = []
+    try:
+        g = _rel.load_relations()
+        for tag, dev in g.get("devices", {}).items():
+            dev_dict = dev.copy()
+            dev_dict["tag"] = tag
+            devices.append(dev_dict)
+    except Exception:
+        pass
+    kwargs = {}
+    if start_date:
+        kwargs["start_date"] = start_date
+    if work_days:
+        kwargs["work_days_per_week"] = work_days
+    if devices:
+        kwargs["devices"] = devices
+    schedule = _ms.generate_mining_schedule(**kwargs)
+    svg = _ms.generate_gantt_svg(schedule)
+    return {"ok": True, "svg": svg, "schedule": schedule}
+
+
+@app.get("/api/mining-schedule/stats")
+def mining_schedule_stats(start_date: str = "", work_days: int = 6):
+    """v0.1.88：获取施工进度统计。"""
+    from . import mining_schedule as _ms
+    from . import relations as _rel
+    devices = []
+    try:
+        g = _rel.load_relations()
+        for tag, dev in g.get("devices", {}).items():
+            dev_dict = dev.copy()
+            dev_dict["tag"] = tag
+            devices.append(dev_dict)
+    except Exception:
+        pass
+    kwargs = {}
+    if start_date:
+        kwargs["start_date"] = start_date
+    if work_days:
+        kwargs["work_days_per_week"] = work_days
+    if devices:
+        kwargs["devices"] = devices
+    schedule = _ms.generate_mining_schedule(**kwargs)
+    return _ms.get_schedule_stats(schedule)
 
 @app.get("/api/mining-equipment-merge/integrity")
 def mining_equipment_merge_integrity():

@@ -4509,3 +4509,61 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnMergeIntegrity");
   if (b4) b4.addEventListener("click", loadMergeIntegrity);
 });
+
+// v0.1.88：矿山施工进度计划
+function genSchedule() {
+  var startDate = document.getElementById("scheduleStartDate").value.trim();
+  var workDays = document.getElementById("scheduleWorkDays").value;
+  var url = "/api/mining-schedule/generate?work_days=" + workDays;
+  if (startDate) url += "&start_date=" + encodeURIComponent(startDate);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleResult");
+    el.style.display = "block";
+    document.getElementById("ganttResult").style.display = "none";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>施工进度计划：</strong><br>';
+    html += '开工：' + d.start_date + ' | 竣工：' + d.end_date + ' | 总工期：' + d.total_duration_days + '天<br>';
+    html += '工艺流程：' + d.process_count + '个 | 施工阶段：' + d.total_phases + '个<br><br>';
+    d.processes.forEach(function(ps) {
+      var color = ps.order <= 2 ? '#1E5AA8' : (ps.order <= 4 ? '#FF7A00' : '#52C41A');
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+      html += '<strong>' + esc(ps.process) + '</strong>（' + ps.phase_count + '个阶段）<br>';
+      html += '开始：' + ps.start + ' | 结束：' + ps.end + ' | 工期：' + ps.duration_days + '天<br>';
+      html += '阶段：' + ps.phases.map(function(p){return esc(p.phase) + '(' + p.duration + 'd)';}).join(' → ');
+      html += '</div>';
+    });
+    if (d.critical_path && d.critical_path.length > 0) {
+      html += '<br><strong>关键路径：</strong><br>';
+      d.critical_path.forEach(function(cp, i) {
+        html += (i+1) + '. ' + esc(cp.process) + ' - ' + esc(cp.phase) + '（' + cp.start + '~' + cp.end + '）<br>';
+      });
+    }
+    if (d.warnings && d.warnings.length > 0) {
+      html += '<br><strong>进度预警：</strong><br>';
+      d.warnings.forEach(function(w) {
+        var color = w.severity === 'high' ? '#EA6668' : (w.severity === 'medium' ? '#FAAD14' : '#52C41A');
+        html += '<span style="color:' + color + '">[' + esc(w.severity) + ']</span> ' + esc(w.message) + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function genGantt() {
+  var startDate = document.getElementById("scheduleStartDate").value.trim();
+  var workDays = document.getElementById("scheduleWorkDays").value;
+  var url = "/api/mining-schedule/gantt?work_days=" + workDays;
+  if (startDate) url += "&start_date=" + encodeURIComponent(startDate);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("ganttResult");
+    el.style.display = "block";
+    document.getElementById("scheduleResult").style.display = "none";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    el.innerHTML = d.svg;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnGenSchedule");
+  if (b1) b1.addEventListener("click", genSchedule);
+  var b2 = document.getElementById("btnGenGantt");
+  if (b2) b2.addEventListener("click", genGantt);
+});
