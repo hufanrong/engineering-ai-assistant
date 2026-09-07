@@ -8,6 +8,7 @@ import threading
 from typing import Union, List
 
 from fastapi import Request, FastAPI, HTTPException, UploadFile, File, Form, Body
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -35,7 +36,16 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.113")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.114")
+
+# 允许跨域请求（手机端网页从本地file://加载时需要）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}

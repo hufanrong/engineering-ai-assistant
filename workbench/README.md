@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.113）
+# 繁工AI · 本地解析工作台（MVP v0.1.114）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,7 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.114**：**手机端代码完全分离**（将web/mobile/手机端网页从电脑端工作台中移除，创建独立的mobile_web手机端网页项目，支持配置任意电脑端API地址，可独立部署或直接浏览器打开；电脑端工作台不再包含任何手机端前端代码，安装包更纯净；Android APP v1.3.0改为从assets内置加载手机端网页，不再依赖电脑端的网页服务，只通过API与电脑端交互；电脑端新增CORS中间件允许手机端网页跨域访问API；手机端和电脑端完全解耦，各自独立迭代）
 - **v0.1.113**：**修复项目管理前端**（v0.1.107添加了项目管理API和前端HTML元素，但缺少JavaScript交互逻辑导致新建项目/切换项目/删除项目按钮点击无反应；本次补全完整的项目管理前端JS：页面加载自动加载项目列表和当前项目、新建项目表单显示/隐藏/提交、项目切换下拉框、项目数据目录显示、删除项目带确认和自动备份；修复前端调用/api/projects/list应为/api/projects的端点错误；现在新建项目后自动切换为当前项目，上传文件自动归入该项目独立目录）
 - **v0.1.112**：**自动更新功能**（新增app/auto_updater.py自动更新模块；启动时自动检测GitHub最新版本，发现新版本后前端提示更新；支持两种更新方式：Git仓库直接git pull，非Git仓库从GitHub下载最新zip解压覆盖；更新前自动备份当前版本到updates/backups/目录，更新失败可从备份恢复；更新时保留data/、platform_data/、cloud_server/cloud_data/等所有数据目录不被覆盖；新增/api/update/{check,perform,log,backups,restore}端点；前端新增更新提示横幅和一键更新按钮，显示当前版本/最新版本/更新内容；更新完成后提示重启服务）
 - **v0.1.111**：**手机端离线缓存+自动同步**（电脑端新增/api/mobile/offline-batch-upload批量接收手机端离线数据API，支持文件和文字记录两种格式，自动归入指定项目并解析入库；手机端Android APP新增OfflineCacheManager离线缓存管理器：无网络时拍照/语音/文字自动保存到手机本地，网络恢复后自动检测电脑端可达性并批量上传，支持上传进度回调和失败重试；MainActivity新增NativeBridge JS接口，网页可调用AndroidNative.isOfflineMode()/getPendingUploadCount()/cacheText()/cacheFile()/startSync()等原生方法；手机端网页支持离线模式提示和待上传数量显示；手机端APP更新到v1.1.0）
