@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.90")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.91")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2686,6 +2686,36 @@ def mining_ai_prompt(mode: str = "general", question: str = "", device_type: str
     from . import mining_ai_assistant as _mai
     return _mai.generate_ai_prompt(mode, question, device_type, process, context)
 
+
+
+@app.get("/api/mining-field-record/types")
+def mining_field_record_types():
+    """v0.1.91：获取矿山现场记录类型列表。"""
+    from . import mining_field_record as _mfr
+    return _mfr.get_record_types()
+
+
+@app.get("/api/mining-field-record/template")
+def mining_field_record_template(record_type: str = ""):
+    """v0.1.91：获取指定类型的现场记录模板。"""
+    from . import mining_field_record as _mfr
+    return _mfr.get_record_template(record_type)
+
+
+@app.get("/api/mining-field-record/generate")
+def mining_field_record_generate(record_type: str = "", device_type: str = "", device_tag: str = "", workshop: str = "", date: str = "", recorder: str = ""):
+    """v0.1.91：生成现场记录（自动填充设备信息和专用要点）。"""
+    from . import mining_field_record as _mfr
+    return _mfr.generate_field_record(record_type, device_type, device_tag, workshop, date, recorder)
+
+
+@app.get("/api/mining-field-record/equipment-points")
+def mining_field_record_equipment_points(device_type: str = ""):
+    """v0.1.91：获取指定设备类型的专用现场记录要点。"""
+    from . import mining_field_record as _mfr
+    if not device_type:
+        return _mfr.get_all_equipment_with_record_points()
+    return _mfr.get_equipment_record_points(device_type)
 
 @app.get("/api/mining-ai/equipment-prompt")
 def mining_ai_equipment_prompt(device_type: str = "", question_type: str = "general"):

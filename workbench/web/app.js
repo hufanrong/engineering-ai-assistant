@@ -4714,3 +4714,86 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnAiEquipPrompt");
   if (b3) b3.addEventListener("click", aiEquipPrompt);
 });
+
+// v0.1.91：矿山现场记录
+function frTypes() {
+  fetch("/api/mining-field-record/types").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("frTypesResult");
+    el.style.display = "block";
+    ["frGenerateResult","frPointsResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>现场记录类型（' + d.total + '种）：</strong><br>';
+    d.types.forEach(function(t) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + t.icon + ' ' + esc(t.name) + '</strong>（' + t.field_count + '个字段）<br>';
+      html += '<span style="color:#6B7280">' + esc(t.description) + '</span>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function frGenerate() {
+  var type = document.getElementById("frTypeSelect").value;
+  var devType = document.getElementById("frDeviceType").value;
+  var workshop = document.getElementById("frWorkshop").value;
+  var url = "/api/mining-field-record/generate?record_type=" + encodeURIComponent(type);
+  if (devType) url += "&device_type=" + encodeURIComponent(devType);
+  if (workshop) url += "&workshop=" + encodeURIComponent(workshop);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("frGenerateResult");
+    el.style.display = "block";
+    ["frTypesResult","frPointsResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + d.icon + ' ' + esc(d.type_name) + '</strong><br>';
+    if (d.device_type) html += '<span style="color:#1E5AA8">设备：' + esc(d.device_type) + '</span> ';
+    if (d.workshop) html += '<span style="color:#6B7280">车间：' + esc(d.workshop) + '</span>';
+    html += '<br><br>';
+    if (d.equipment_specific_points && d.equipment_specific_points.length > 0) {
+      html += '<span style="color:#FF7A00;font-weight:bold">设备专用要点：</span><br>';
+      d.equipment_specific_points.forEach(function(p) {
+        html += '  • ' + esc(p) + '<br>';
+      });
+      html += '<br>';
+    }
+    html += '<span style="font-weight:bold">记录字段：</span><br>';
+    d.fields.forEach(function(f) {
+      var val = d.record_data[f.key] || '';
+      var req = f.required ? '<span style="color:#EA6668">*</span>' : '';
+      html += '  ' + req + ' ' + esc(f.label) + '：' + (val ? '<span style="color:#52C41A">' + esc(val) + '</span>' : '<span style="color:#FAAD14">待填写</span>') + '<br>';
+    });
+    if (d.fill_hints && d.fill_hints.length > 0) {
+      html += '<br><span style="color:#FAAD14">待填写项：</span><br>';
+      d.fill_hints.slice(0, 10).forEach(function(h) {
+        html += '  • ' + esc(h) + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function frPoints() {
+  var devType = document.getElementById("frDeviceType").value || "球磨机";
+  fetch("/api/mining-field-record/equipment-points?device_type=" + encodeURIComponent(devType)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("frPointsResult");
+    el.style.display = "block";
+    ["frTypesResult","frGenerateResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.device_type) + '专用现场记录要点：</strong><br><br>';
+    var pointNames = {"unboxing":"开箱检验","installation":"安装","concealment":"隐蔽工程","trial_run":"试运转"};
+    for (var key in d.points) {
+      html += '<span style="color:#1E5AA8;font-weight:bold">' + (pointNames[key] || key) + '：</span><br>';
+      d.points[key].forEach(function(p) {
+        html += '  • ' + esc(p) + '<br>';
+      });
+      html += '<br>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnFrTypes");
+  if (b1) b1.addEventListener("click", frTypes);
+  var b2 = document.getElementById("btnFrGenerate");
+  if (b2) b2.addEventListener("click", frGenerate);
+  var b3 = document.getElementById("btnFrPoints");
+  if (b3) b3.addEventListener("click", frPoints);
+});

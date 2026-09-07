@@ -514,6 +514,34 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.91：矿山现场记录 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山现场记录（v0.1.91）</h3>
+  <div class="msg" style="margin-bottom:6px">针对矿山设备特点优化现场记录模板，8种记录类型，自动填充设备信息和专用要点。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnFrTypes" style="background:#1E5AA8">记录类型</button>
+    <button class="btn" id="btnFrGenerate">生成记录</button>
+    <button class="btn" id="btnFrPoints">设备专用要点</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="frTypeSelect" style="padding:4px 8px;font-size:12px">
+      <option value="construction_log">施工日志</option>
+      <option value="unboxing_record">设备开箱检验记录</option>
+      <option value="concealment_record">隐蔽工程验收记录</option>
+      <option value="installation_record">设备安装记录</option>
+      <option value="trial_run_record">设备试运转记录</option>
+      <option value="safety_check">安全检查记录</option>
+      <option value="lifting_record">吊装作业记录</option>
+      <option value="welding_record">焊接记录</option>
+    </select>
+    <input type="text" id="frDeviceType" placeholder="设备类型（如球磨机）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="frWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="frTypesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="frGenerateResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+  <div id="frPointsResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.90：矿山AI助手优化 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山AI助手优化（v0.1.90）</h3>
