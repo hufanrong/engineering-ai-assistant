@@ -5436,3 +5436,224 @@ document.addEventListener("DOMContentLoaded", function () {
   var b6 = document.getElementById("btnEqPhasePoints"); if (b6) b6.addEventListener("click", eqPhasePoints);
   var b7 = document.getElementById("btnEqStats"); if (b7) b7.addEventListener("click", eqStats);
 });
+
+// v0.1.101：施工方案增强
+function cpeGenerate() {
+  var name = document.getElementById("cpeName").value;
+  var project = document.getElementById("cpeProject").value || "矿山工程项目";
+  var workshop = document.getElementById("cpeWorkshop").value;
+  var url = "/api/mining-plan-enhanced/generate?equipment=" + encodeURIComponent(name) + "&project=" + encodeURIComponent(project);
+  if (workshop) url += "&workshop=" + encodeURIComponent(workshop);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("cpeResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.title) + '</strong>（完成率' + d.completion_rate + '%）<br>';
+    html += '设备：' + esc(d.equipment) + ' | 项目：' + esc(d.plan.project_name) + '<br><br>';
+    d.plan.sections.forEach(function(s) {
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + esc(s.section) + '</strong><br>';
+      var c = s.content;
+      if (c.engineering_scope) html += esc(c.engineering_scope) + '<br>';
+      if (c.flow) html += '流程：' + c.flow.join(' → ') + '<br>';
+      if (c.key_points) c.key_points.forEach(function(p, i) { html += (i+1) + '. ' + esc(p) + '<br>'; });
+      if (c.standards) html += '标准：' + c.standards.map(function(x){return esc(x);}).join('、') + '<br>';
+      if (c.acceptance_items) html += '验收：' + c.acceptance_items.map(function(x){return esc(x);}).join('、') + '<br>';
+      if (c.general_measures) html += '安全措施：' + c.general_measures.length + '条<br>';
+      if (c.schedule_items) html += '进度：' + c.schedule_items.length + '阶段，总工期' + esc(c.total_duration) + '<br>';
+      if (c.personnel) html += '人员：' + c.personnel.length + '类岗位<br>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b = document.getElementById("btnCpeGenerate"); if (b) b.addEventListener("click", cpeGenerate);
+});
+
+// v0.1.102：吊装方案增强
+function lpeGenerate() {
+  var name = document.getElementById("lpeName").value;
+  var w = document.getElementById("lpeWeight").value;
+  var h = document.getElementById("lpeHeight").value;
+  var r = document.getElementById("lpeRadius").value;
+  var url = "/api/mining-lifting-enhanced/generate?equipment=" + encodeURIComponent(name);
+  if (w) url += "&weight=" + w;
+  if (h) url += "&height=" + h;
+  if (r) url += "&radius=" + r;
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("lpeResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.title) + '</strong>（完成率' + d.completion_rate + '%）<br>';
+    html += '设备：' + esc(d.equipment) + ' | 重量：' + d.equipment_weight + 't | 高度：' + d.lifting_height + 'm | 半径：' + d.working_radius + 'm<br><br>';
+    // 吊车选型
+    var crane = d.plan.sections.find(function(s){return s.section === "吊车选型及参数";});
+    if (crane) {
+      var c = crane.content;
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(255,122,0,0.1);border-left:3px solid #FF7A00">';
+      html += '<strong>吊车选型：</strong>' + esc(c.selected_crane) + '<br>';
+      html += '额定载荷：' + esc(c.capacity_at_radius) + ' | 需要：' + esc(c.required_capacity) + ' | 利用率：' + esc(c.utilization_rate) + '<br>';
+      html += '安全余量：' + esc(c.safety_margin) + ' | ' + esc(c.selection_reason);
+      html += '</div>';
+    }
+    // 吊装计算
+    var calc = d.plan.sections.find(function(s){return s.section === "吊装计算";});
+    if (calc) {
+      var c = calc.content;
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>吊装计算：</strong><br>';
+      html += '计算载荷：' + esc(c.calculated_load) + ' | 载荷率：' + esc(c.load_rate) + '（' + esc(c.load_rate_status) + '）<br>';
+      html += '单根钢丝绳受力：' + esc(c.sling_force_per_rope) + ' | 吊点受力：' + esc(c.lifting_point_force);
+      html += '</div>';
+    }
+    // 其他章节
+    d.plan.sections.forEach(function(s) {
+      if (s.section === "吊车选型及参数" || s.section === "吊装计算") return;
+      html += '<div style="margin-bottom:6px;padding:4px;background:rgba(0,0,0,0.02);border-left:2px solid #999">';
+      html += '<strong>' + esc(s.section) + '</strong>';
+      if (s.content.lifting_sequence) html += '：' + s.content.lifting_sequence.length + '步';
+      if (s.content.general_measures) html += '：' + s.content.general_measures.length + '条措施';
+      if (s.content.personnel) html += '：' + s.content.personnel.length + '类岗位';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function lpeCraneDb() {
+  fetch("/api/mining-lifting-enhanced/crane-database").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("lpeResult");
+    el.style.display = "block";
+    var html = '<strong>吊车参数库（' + d.total + '种）：</strong><br>';
+    d.cranes.forEach(function(c) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02)">';
+      html += '<strong>' + esc(c.model) + '</strong>：最大起重量' + c.max_capacity + 't，最长臂' + c.max_boom + 'm<br>';
+      html += '典型半径载荷：';
+      for (var r in c.capacity_at_radius) {
+        html += r + 'm=' + c.capacity_at_radius[r] + 't ';
+      }
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function lpeRiggingDb() {
+  fetch("/api/mining-lifting-enhanced/rigging-database").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("lpeResult");
+    el.style.display = "block";
+    var html = '<strong>索具参数库（' + d.total + '种）：</strong><br>';
+    d.rigging.forEach(function(r) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02)">';
+      html += '<strong>' + esc(r.type) + '</strong>：安全系数' + r.safety_factor + '，用途：' + esc(r.typical_uses) + '<br>';
+      html += '规格：' + r.specs.join('、');
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnLpeGenerate"); if (b1) b1.addEventListener("click", lpeGenerate);
+  var b2 = document.getElementById("btnLpeCraneDb"); if (b2) b2.addEventListener("click", lpeCraneDb);
+  var b3 = document.getElementById("btnLpeRiggingDb"); if (b3) b3.addEventListener("click", lpeRiggingDb);
+});
+
+// v0.1.103：故障诊断AI助手
+function fdDiagnose() {
+  var name = document.getElementById("fdName").value;
+  var symptomsStr = document.getElementById("fdSymptoms").value;
+  var symptoms = symptomsStr ? symptomsStr.split(/[,，]/).map(function(s){return s.trim();}).filter(function(s){return s;}) : [];
+  fetch("/api/mining-fault/diagnose", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({equipment:name,symptoms:symptoms})}).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("fdResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>故障诊断结果：</strong><br>';
+    html += '设备：' + esc(d.equipment) + ' | 匹配故障：' + d.total_matched + '个<br>';
+    if (d.most_likely_fault) {
+      html += '<span style="color:#1E5AA8;font-weight:600">最可能故障：' + esc(d.most_likely_fault) + '</span><br>';
+    }
+    html += '建议：' + esc(d.suggestion) + '<br><br>';
+    d.possible_faults.forEach(function(f, i) {
+      var sc = f.severity === 'high' ? '#EA6668' : (f.severity === 'medium' ? '#FAAD14' : '#52C41A');
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid ' + sc + '">';
+      html += '<strong>' + (i+1) + '. ' + esc(f.fault) + '</strong>（匹配度' + f.match_rate + '%，严重程度：<span style="color:' + sc + '">' + esc(f.severity) + '</span>）<br>';
+      html += '紧急程度：' + esc(f.urgency) + '<br>';
+      html += '匹配症状：' + f.matched_symptoms.map(function(s){return esc(s);}).join('、') + '<br>';
+      html += '<strong>可能原因：</strong><br>';
+      f.causes.forEach(function(c, i) { html += '  ' + (i+1) + '. ' + esc(c) + '<br>'; });
+      html += '<strong>处理方法：</strong><br>';
+      f.solutions.forEach(function(s, i) { html += '  ' + (i+1) + '. ' + esc(s) + '<br>'; });
+      html += '<strong>预防措施：</strong><br>';
+      f.prevention.forEach(function(p, i) { html += '  ' + (i+1) + '. ' + esc(p) + '<br>'; });
+      html += '</div>';
+    });
+    if (d.monitoring_parameters && d.monitoring_parameters.length > 0) {
+      html += '<strong>监测参数：</strong><br>';
+      d.monitoring_parameters.forEach(function(p) {
+        html += '  • ' + esc(p.name) + '：正常' + esc(p.normal_range) + '，报警' + esc(p.alarm_threshold) + '，停机' + esc(p.shutdown_threshold) + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function fdFaults() {
+  var name = document.getElementById("fdName").value;
+  fetch("/api/mining-fault/equipment-faults?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("fdResult");
+    el.style.display = "block";
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.equipment) + '常见故障（' + d.total_faults + '个）：</strong><br>';
+    d.common_faults.forEach(function(f, i) {
+      html += '<div style="margin-bottom:6px;padding:4px;background:rgba(0,0,0,0.02)">';
+      html += '<strong>' + (i+1) + '. ' + esc(f.fault) + '</strong><br>';
+      html += '症状：' + f.symptoms.map(function(s){return esc(s);}).join('、') + '<br>';
+      html += '原因：' + f.causes.length + '条 | 处理：' + f.solutions.length + '条 | 预防：' + f.prevention.length + '条';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function fdMonitoring() {
+  var name = document.getElementById("fdName").value;
+  fetch("/api/mining-fault/monitoring?equipment=" + encodeURIComponent(name)).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("fdResult");
+    el.style.display = "block";
+    var html = '<strong>' + esc(d.equipment) + '监测参数（' + d.total_parameters + '项）：</strong><br>';
+    d.monitoring_parameters.forEach(function(p) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02)">';
+      html += '<strong>' + esc(p.name) + '</strong>：正常' + esc(p.normal_range) + ' | 报警' + esc(p.alarm_threshold) + ' | 停机' + esc(p.shutdown_threshold);
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function fdStats() {
+  fetch("/api/mining-fault/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("fdResult");
+    el.style.display = "block";
+    var html = '<strong>故障诊断库统计：</strong><br>';
+    html += '设备数：' + d.total_equipment + ' | 故障数：' + d.total_faults + ' | 监测参数：' + d.total_monitoring_parameters + '<br><br>';
+    d.equipment_stats.forEach(function(e) {
+      html += '  • ' + esc(e.equipment) + '：故障' + e.faults_count + '个，监测参数' + e.monitoring_count + '项<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function fdPrompt() {
+  var name = document.getElementById("fdName").value;
+  var symptomsStr = document.getElementById("fdSymptoms").value;
+  var symptoms = symptomsStr ? symptomsStr.split(/[,，]/).map(function(s){return s.trim();}).filter(function(s){return s;}) : [];
+  fetch("/api/mining-fault/prompt", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({equipment:name,symptoms:symptoms})}).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("fdResult");
+    el.style.display = "block";
+    var html = '<strong>故障诊断AI提示词：</strong><br>';
+    html += '<div style="white-space:pre-wrap;font-size:11px;background:rgba(0,0,0,0.03);padding:8px;border-radius:4px">' + esc(d.full_prompt) + '</div>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnFdDiagnose"); if (b1) b1.addEventListener("click", fdDiagnose);
+  var b2 = document.getElementById("btnFdFaults"); if (b2) b2.addEventListener("click", fdFaults);
+  var b3 = document.getElementById("btnFdMonitoring"); if (b3) b3.addEventListener("click", fdMonitoring);
+  var b4 = document.getElementById("btnFdStats"); if (b4) b4.addEventListener("click", fdStats);
+  var b5 = document.getElementById("btnFdPrompt"); if (b5) b5.addEventListener("click", fdPrompt);
+});

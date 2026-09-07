@@ -514,6 +514,65 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.101：施工方案增强 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">施工方案自动生成增强（v0.1.101）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成完整施工方案（11个标准章节）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="cpeName" style="padding:4px 8px;font-size:12px">
+      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
+      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
+      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
+    </select>
+    <input type="text" id="cpeProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="cpeWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnCpeGenerate" style="background:#1E5AA8">生成方案</button>
+  </div>
+  <div id="cpeResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.102：吊装方案增强 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.05)">
+  <h3 style="margin:0 0 6px;font-size:15px">吊装方案自动生成增强（v0.1.102）</h3>
+  <div class="msg" style="margin-bottom:6px">基于设备详细参数和吊装参数库自动生成完整吊装方案（12个标准章节，含吊车选型和吊装计算）。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="lpeName" style="padding:4px 8px;font-size:12px">
+      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
+      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
+      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
+    </select>
+    <input type="number" id="lpeWeight" placeholder="重量(t)" style="width:80px;padding:4px 8px;font-size:12px">
+    <input type="number" id="lpeHeight" placeholder="高度(m)" style="width:80px;padding:4px 8px;font-size:12px">
+    <input type="number" id="lpeRadius" placeholder="半径(m)" style="width:80px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnLpeGenerate" style="background:#FF7A00">生成方案</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnLpeCraneDb">吊车参数库</button>
+    <button class="btn" id="btnLpeRiggingDb">索具参数库</button>
+  </div>
+  <div id="lpeResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.103：故障诊断AI助手 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">故障诊断AI助手（v0.1.103）</h3>
+  <div class="msg" style="margin-bottom:6px">基于常见故障库进行智能故障诊断，支持症状匹配、原因排查、处理建议、预防措施。</div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="fdName" style="padding:4px 8px;font-size:12px">
+      <option value="球磨机">球磨机</option><option value="高压釜">高压釜</option>
+    </select>
+    <input type="text" id="fdSymptoms" placeholder="故障症状（逗号分隔，如：温度过高,异响）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
+    <button class="btn" id="btnFdDiagnose" style="background:#1E5AA8">故障诊断</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnFdFaults">常见故障</button>
+    <button class="btn" id="btnFdMonitoring">监测参数</button>
+    <button class="btn" id="btnFdStats">诊断库统计</button>
+    <button class="btn" id="btnFdPrompt">生成AI提示词</button>
+  </div>
+  <div id="fdResult" style="font-size:12px;max-height:600px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.98：多电脑并库现场记录合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库现场记录合并（v0.1.98）</h3>

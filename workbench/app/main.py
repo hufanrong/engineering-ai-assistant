@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.100")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.103")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2962,6 +2962,105 @@ def mining_equipment_detail_phase_points(equipment: str = "", phase: str = ""):
     from . import mining_equipment_detail as _med
     return _med.get_equipment_phase_points(equipment, phase)
 
+
+
+@app.get("/api/mining-plan-enhanced/template")
+def mining_plan_enhanced_template():
+    """v0.1.101：获取施工方案模板结构。"""
+    from . import mining_construction_plan_enhanced as _mcpe
+    return _mcpe.get_plan_template()
+
+
+@app.get("/api/mining-plan-enhanced/equipment-list")
+def mining_plan_enhanced_equipment_list():
+    """v0.1.101：获取可生成施工方案的设备列表。"""
+    from . import mining_construction_plan_enhanced as _mcpe
+    return _mcpe.get_available_equipment_for_plan()
+
+
+
+@app.get("/api/mining-lifting-enhanced/template")
+def mining_lifting_enhanced_template():
+    """v0.1.102：获取吊装方案模板结构。"""
+    from . import mining_lifting_plan_enhanced as _mlpe
+    return _mlpe.get_lifting_plan_template()
+
+
+@app.get("/api/mining-lifting-enhanced/crane-database")
+def mining_lifting_enhanced_crane_database():
+    """v0.1.102：获取吊车参数库。"""
+    from . import mining_lifting_plan_enhanced as _mlpe
+    return _mlpe.get_crane_database()
+
+
+@app.get("/api/mining-lifting-enhanced/rigging-database")
+def mining_lifting_enhanced_rigging_database():
+    """v0.1.102：获取索具参数库。"""
+    from . import mining_lifting_plan_enhanced as _mlpe
+    return _mlpe.get_rigging_database()
+
+
+
+@app.get("/api/mining-fault/stats")
+def mining_fault_stats():
+    """v0.1.103：获取故障诊断库统计。"""
+    from . import mining_fault_diagnosis as _mfd
+    return _mfd.get_fault_diagnosis_stats()
+
+
+@app.get("/api/mining-fault/equipment-faults")
+def mining_fault_equipment_faults(equipment: str = ""):
+    """v0.1.103：获取设备常见故障列表。"""
+    from . import mining_fault_diagnosis as _mfd
+    return _mfd.get_equipment_faults(equipment)
+
+
+@app.get("/api/mining-fault/fault-detail")
+def mining_fault_fault_detail(equipment: str = "", fault: str = ""):
+    """v0.1.103：获取故障详细信息。"""
+    from . import mining_fault_diagnosis as _mfd
+    return _mfd.get_fault_detail(equipment, fault)
+
+
+@app.get("/api/mining-fault/monitoring")
+def mining_fault_monitoring(equipment: str = ""):
+    """v0.1.103：获取设备监测参数。"""
+    from . import mining_fault_diagnosis as _mfd
+    return _mfd.get_monitoring_parameters(equipment)
+
+
+@app.post("/api/mining-fault/diagnose")
+def mining_fault_diagnose(data: dict):
+    """v0.1.103：基于症状进行故障诊断。"""
+    from . import mining_fault_diagnosis as _mfd
+    return _mfd.diagnose_fault(
+        data.get("equipment", ""),
+        data.get("symptoms", []),
+        data.get("description", ""),
+    )
+
+
+@app.post("/api/mining-fault/prompt")
+def mining_fault_prompt(data: dict):
+    """v0.1.103：生成故障诊断AI提示词。"""
+    from . import mining_fault_diagnosis as _mfd
+    return _mfd.generate_fault_diagnosis_prompt(
+        data.get("equipment", ""),
+        data.get("symptoms", []),
+        data.get("description", ""),
+    )
+
+@app.get("/api/mining-lifting-enhanced/generate")
+def mining_lifting_enhanced_generate(equipment: str = "", weight: float = 0, height: float = 0, radius: float = 0, project: str = "矿山工程项目", workshop: str = ""):
+    """v0.1.102：基于详细参数生成吊装方案。"""
+    from . import mining_lifting_plan_enhanced as _mlpe
+    return _mlpe.generate_lifting_plan(equipment, weight, height, radius, project, workshop)
+
+@app.get("/api/mining-plan-enhanced/generate")
+def mining_plan_enhanced_generate(equipment: str = "", project: str = "矿山工程项目", workshop: str = "", unit: str = ""):
+    """v0.1.101：基于详细知识库生成施工方案。"""
+    from . import mining_construction_plan_enhanced as _mcpe
+    return _mcpe.generate_construction_plan(equipment, project, workshop, unit)
 
 @app.get("/api/mining-equipment-detail/stats")
 def mining_equipment_detail_stats():
