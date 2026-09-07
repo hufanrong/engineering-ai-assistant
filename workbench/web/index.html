@@ -514,6 +514,20 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.89：矿山资料完整性检查 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山资料完整性检查（v0.1.89）</h3>
+  <div class="msg" style="margin-bottom:6px">按工艺流程（破碎/磨矿/选别/脱水/火法/湿法/公用辅助）检查各系统资料完整性，生成待补充清单。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnCompletenessCheck" style="background:#1E5AA8">完整性检查</button>
+    <button class="btn" id="btnCompletenessTodo">待补充清单</button>
+    <button class="btn" id="btnCompletenessReq">资料要求</button>
+  </div>
+  <div id="completenessResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="completenessTodoResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="completenessReqResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.88：矿山施工进度计划 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山施工进度计划（v0.1.88）</h3>

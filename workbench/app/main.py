@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.88")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.89")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2641,6 +2641,44 @@ def mining_schedule_gantt(start_date: str = "", work_days: int = 6):
     svg = _ms.generate_gantt_svg(schedule)
     return {"ok": True, "svg": svg, "schedule": schedule}
 
+
+
+@app.get("/api/mining-completeness/check")
+def mining_completeness_check():
+    """v0.1.89：按工艺流程检查资料完整性。"""
+    from . import mining_completeness as _mc
+    from . import relations as _rel
+    # 从relations获取设备列表
+    devices = []
+    try:
+        g = _rel.load_relations()
+        for tag, dev in g.get("devices", {}).items():
+            dev_dict = dev.copy()
+            dev_dict["tag"] = tag
+            devices.append(dev_dict)
+    except Exception:
+        pass
+    # 从archive获取已有资料列表
+    existing_docs = []
+    try:
+        from . import archive as _archive
+        status = _archive.get_archive_status()
+        if status.get("ok"):
+            for vol in status.get("volumes", []):
+                for doc in vol.get("docs", []):
+                    existing_docs.append(doc.get("name", ""))
+    except Exception:
+        pass
+    return _mc.check_process_completeness(devices, existing_docs)
+
+
+@app.get("/api/mining-completeness/requirements")
+def mining_completeness_requirements(process: str = ""):
+    """v0.1.89：获取指定工艺流程的资料要求清单。"""
+    from . import mining_completeness as _mc
+    if not process:
+        return _mc.get_all_processes()
+    return _mc.get_process_doc_requirements(process)
 
 @app.get("/api/mining-schedule/stats")
 def mining_schedule_stats(start_date: str = "", work_days: int = 6):

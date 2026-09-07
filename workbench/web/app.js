@@ -4567,3 +4567,79 @@ document.addEventListener("DOMContentLoaded", function () {
   var b2 = document.getElementById("btnGenGantt");
   if (b2) b2.addEventListener("click", genGantt);
 });
+
+// v0.1.89：矿山资料完整性检查
+function completenessCheck() {
+  fetch("/api/mining-completeness/check").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("completenessResult");
+    el.style.display = "block";
+    ["completenessTodoResult","completenessReqResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>资料完整性检查：</strong><br>';
+    html += '工艺流程：' + d.total_processes + '个 | 应备资料：' + d.total_required_docs + '项 | 已有：' + d.total_existing_docs + '项<br>';
+    html += '缺失必备：' + d.total_missing_required + '项 | 缺失可选：' + d.total_missing_optional + '项<br>';
+    var color = d.overall_completion_rate >= 80 ? '#52C41A' : (d.overall_completion_rate >= 50 ? '#FAAD14' : '#EA6668');
+    html += '总完成率：<span style="color:' + color + ';font-weight:bold">' + d.overall_completion_rate + '%</span><br><br>';
+    d.processes.forEach(function(ps) {
+      var pcolor = ps.completion_rate >= 80 ? '#52C41A' : (ps.completion_rate >= 50 ? '#FAAD14' : '#EA6668');
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid ' + pcolor + '">';
+      html += '<strong>' + esc(ps.process) + '</strong><br>';
+      html += '应备：' + ps.required_docs + '项 | 已有：' + ps.existing_docs + '项 | 缺失必备：' + ps.missing_required + '项 | 缺失可选：' + ps.missing_optional + '项<br>';
+      html += '完成率：<span style="color:' + pcolor + '">' + ps.completion_rate + '%</span>';
+      if (ps.missing_required > 0) {
+        html += '<br><span style="color:#EA6668">缺失必备资料：</span>';
+        ps.missing_required_list.slice(0, 5).forEach(function(doc) {
+          html += '<br>  • ' + esc(doc.doc_type) + (doc.equipment_type ? '（' + esc(doc.equipment_type) + '）' : '');
+        });
+        if (ps.missing_required_list.length > 5) {
+          html += '<br>  ...等' + ps.missing_required_list.length + '项';
+        }
+      }
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function completenessTodo() {
+  fetch("/api/mining-completeness/check").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("completenessTodoResult");
+    el.style.display = "block";
+    ["completenessResult","completenessReqResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>待补充资料清单（' + d.todo_list.length + '项）：</strong><br>';
+    d.todo_list.slice(0, 30).forEach(function(item, i) {
+      var color = item.priority === 'high' ? '#EA6668' : '#FAAD14';
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+      html += '<span style="color:' + color + '">[' + (item.priority === 'high' ? '必备' : '可选') + ']</span> ';
+      html += '[' + esc(item.process) + '] ' + esc(item.action);
+      if (item.equipment_type) html += '（' + esc(item.equipment_type) + '）';
+      html += '</div>';
+    });
+    if (d.todo_list.length > 30) {
+      html += '<br>...等' + d.todo_list.length + '项';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function completenessReq() {
+  fetch("/api/mining-completeness/requirements").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("completenessReqResult");
+    el.style.display = "block";
+    ["completenessResult","completenessTodoResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>工艺流程列表（' + d.total + '个）：</strong><br>';
+    d.processes.forEach(function(p, i) {
+      html += (i+1) + '. ' + esc(p) + '<br>';
+    });
+    html += '<br><span style="color:#6B7280">点击具体工艺流程可查看详细资料要求（通过API /api/mining-completeness/requirements?process=流程名）</span>';
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnCompletenessCheck");
+  if (b1) b1.addEventListener("click", completenessCheck);
+  var b2 = document.getElementById("btnCompletenessTodo");
+  if (b2) b2.addEventListener("click", completenessTodo);
+  var b3 = document.getElementById("btnCompletenessReq");
+  if (b3) b3.addEventListener("click", completenessReq);
+});
