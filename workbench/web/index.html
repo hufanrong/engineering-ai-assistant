@@ -514,6 +514,22 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.87：多电脑并库矿山设备合并 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库矿山设备合并（v0.1.87）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析同一矿山项目设备数据的合并，支持设计院/厂家编号映射、跨车间合并、空间位置合并。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnMergeStats" style="background:#1E5AA8">合并统计</button>
+    <button class="btn" id="btnMergePending">待确认</button>
+    <button class="btn" id="btnMergeLog">合并日志</button>
+    <button class="btn" id="btnMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="mergeStatsResult" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="mergePendingResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mergeLogResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mergeIntegrityResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.86：矿山竣工资料组卷管理 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">矿山竣工资料组卷管理（v0.1.86）</h3>

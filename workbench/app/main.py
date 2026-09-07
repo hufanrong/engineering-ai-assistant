@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.86")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.87")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2531,6 +2531,70 @@ def mining_archive_process_equipment(process: str = ""):
     from . import mining_archive_organize as _mao
     return _mao.get_process_equipment_list(process)
 
+
+
+@app.post("/api/mining-equipment-merge/merge")
+def mining_equipment_merge_merge(body: dict):
+    """v0.1.87：合并矿山设备数据。"""
+    from . import mining_equipment_merge as _mem
+    existing = body.get("existing_devices", [])
+    incoming = body.get("incoming_devices", [])
+    strategy = body.get("strategy", "latest")
+    source_node = body.get("source_node", "unknown")
+    if not incoming:
+        raise HTTPException(status_code=400, detail="缺少incoming_devices")
+    return _mem.merge_mining_equipment(existing, incoming, strategy, source_node)
+
+
+@app.post("/api/mining-equipment-merge/merge-file")
+def mining_equipment_merge_file(body: dict):
+    """v0.1.87：从文件合并矿山设备数据。"""
+    from . import mining_equipment_merge as _mem
+    file_path = body.get("file_path", "")
+    strategy = body.get("strategy", "latest")
+    source_node = body.get("source_node", "unknown")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    return _mem.merge_mining_equipment_file(file_path, strategy, source_node)
+
+
+@app.get("/api/mining-equipment-merge/pending")
+def mining_equipment_merge_pending():
+    """v0.1.87：列出待人工确认的合并项。"""
+    from . import mining_equipment_merge as _mem
+    return {"ok": True, "pending": _mem.list_pending()}
+
+
+@app.post("/api/mining-equipment-merge/resolve/{pending_id}")
+def mining_equipment_merge_resolve(pending_id: str, body: dict):
+    """v0.1.87：处理待人工确认的合并项。"""
+    from . import mining_equipment_merge as _mem
+    action = body.get("action", "")
+    strategy = body.get("strategy", "latest")
+    if action not in ["confirm", "reject", "keep_existing"]:
+        raise HTTPException(status_code=400, detail="action必须是confirm/reject/keep_existing")
+    return _mem.resolve_pending(pending_id, action, strategy)
+
+
+@app.get("/api/mining-equipment-merge/log")
+def mining_equipment_merge_log(limit: int = 50):
+    """v0.1.87：获取合并日志。"""
+    from . import mining_equipment_merge as _mem
+    return {"ok": True, "log": _mem.get_merge_log(limit)}
+
+
+@app.get("/api/mining-equipment-merge/stats")
+def mining_equipment_merge_stats():
+    """v0.1.87：获取合并统计。"""
+    from . import mining_equipment_merge as _mem
+    return {"ok": True, **_mem.get_merge_stats()}
+
+
+@app.get("/api/mining-equipment-merge/integrity")
+def mining_equipment_merge_integrity():
+    """v0.1.87：检查矿山设备数据完整性。"""
+    from . import mining_equipment_merge as _mem
+    return _mem.check_mining_equipment_integrity()
 
 @app.get("/api/mining-archive/transmittal")
 def mining_archive_transmittal(process: str = "", volume_name: str = ""):

@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.45）
+# 繁工AI · 本地解析工作台（MVP v0.1.87）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -107,6 +107,49 @@ fangong-workbench/
 | 模型下载失败 | 检查网络；或科学设置后重跑 install.bat 里 pip 步骤 |
 
 ## 版本记录
+
+- **v0.1.87**：**多电脑并库时矿山设备数据合并**（新增app/mining_equipment_merge.py；基于矿山设备知识库的设备类型识别；设计院编号与厂家编号映射合并；跨车间设备合并；设备空间位置合并；设备状态合并；自动去重位号精确匹配>设计院编号匹配>厂家编号匹配>名称+型号相似>名称高度相似候选；三种冲突策略latest/keep_existing/manual；合并日志保留100条；待人工确认pending管理；merge_stats统计；check_mining_equipment_integrity完整性检查位号唯一性/设备类型知识库检查/空间位置完整性/车间分配/设计院编号冲突/厂家编号冲突；新增/api/mining-equipment-merge/{merge,merge-file,pending,resolve/{id},log,stats,integrity}端点）
+- **v0.1.86**：**矿山设备竣工资料组卷优化（按工艺流程组卷）**（新增app/mining_archive_organize.py；7大工艺流程破碎/磨矿/选别/脱水/火法冶炼/湿法冶炼/公用辅助；10个资料阶段开箱→基础→安装→隐蔽→配管→电气→仪表→试运转→试验→资料；按工艺流程自动组卷统计每卷设备数资料数完成率；卷册目录/设备清单/移交单生成；新增/api/mining-archive/{process-flow,organize,catalog,process-equipment,transmittal}端点）
+- **v0.1.85**：**矿山设备施工方案/吊装方案模板优化**（新增app/mining_plan_templates.py；8种典型矿山设备专用施工方案破碎机/球磨机/半自磨机/浮选机/高压釜/闪速炉/转炉/余热锅炉各含方案大纲关键要点质量控制安全注意事项人员配置机具配置；8种专用吊装方案含吊装方法吊车选型吊点索具吊装顺序；生成方案自动关联设备空间位置标高>10m增加高处作业注意事项；新增/api/mining-plan/{types,construction,lifting}端点）
+- **v0.1.84**：**矿山/选矿/冶炼设备内容扩充**（新增app/mining_equipment.py矿山设备知识库；4大分类205种设备矿山设备39种/选矿厂48种/湿法冶炼48种/火法冶炼70种；8类工程要点吊装参数/技术交底/隐蔽工程/开箱验收/设计变更/货损/施工日志；11个模块合并矿山设备数据lifting_plan/technical_disclosure/concealment_record/unboxing_record/design_change/damage_report/site_log/installation_plan/completion_archive/archive_enhanced/equipment_types；新增/api/mining-equipment/{categories,category,lifting-params}端点）
+- **v0.1.83**：**设备安装位置与竣工资料联动增强**（新增app/archive_enhanced.py；10类设备竣工资料要求清单；generate_archive_checklist竣工资料清单根据设备状态判断资料是否应该已完成；check_archive_integrity完整性检查标记缺失必备/可选资料按严重程度排序；organize_archive_volumes按车间组卷；update_archive_doc_status更新资料状态；get_archive_summary总览；新增/api/archive-enhanced/{checklist,integrity,organize,summary,update-doc,requirements}端点）
+- **v0.1.82**：**设备安装位置与施工进度联动增强**（新增app/progress_enhanced.py；analyze_critical_path关键路径分析；check_progress_warnings施工进度预警；optimize_installation_order施工顺序优化地下/低位/中位/高位四阶段；get_progress_dashboard施工进度总览；update_device_status_with_position更新设备状态带位置联动；新增/api/progress-enhanced/{critical-path,warnings,optimize-order,dashboard,update-status}端点）
+- **v0.1.81**：**多电脑并库时货损报告合并**（新增app/damage_report_merge.py；自动去重基于MD5；三种冲突策略latest/keep_existing/manual；合并常见损坏部位/损坏原因分析/处理措施/索赔要求；合并后自动触发完整性检查；新增/api/damage-report-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.80**：**多电脑并库时设计变更合并**（新增app/design_change_merge.py；自动去重；三种冲突策略；合并常见变更类型/影响分析/处理措施/验收要求；合并后自动触发完整性检查；新增/api/design-change-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.79**：**多电脑并库时隐蔽工程验收记录合并**（新增app/concealment_merge.py；自动去重；三种冲突策略；合并隐蔽部位/检查项目/质量标准/验收依据/环境注意事项；合并后自动触发完整性检查；新增/api/concealment-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.78**：**多电脑并库时开箱验收记录合并**（新增app/unboxing_merge.py；自动去重；三种冲突策略；合并附件清单/技术资料/缺件清单/损坏件清单；合并后自动触发完整性检查；新增/api/unboxing-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.77**：**设备安装位置与货损报告联动**（新增app/damage_report.py；10类设备货损要点；generate_damage_report完整要素含报告编号/货损描述/常见损坏部位/损坏原因分析/处理措施/索赔要求/损坏程度/责任认定/参加人员；新增/api/damage-report/{generate,update,list,stats,points}端点）
+- **v0.1.76**：**设备安装位置与设计变更联动**（新增app/design_change.py；10类设备设计变更要点；generate_design_change完整要素含变更编号/变更原因/常见变更类型/影响分析/处理措施/验收要求/变更状态/参加人员；新增/api/design-change/{generate,update,list,stats,points}端点）
+- **v0.1.75**：**多电脑并库时施工日志合并**（新增app/site_log_merge.py；自动去重基于MD5；三种冲突策略；合并施工内容/人员配置/机具设备/材料使用/问题及处理/明日计划；合并后自动触发完整性检查；新增/api/site-log-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.74**：**设备安装位置与隐蔽工程验收记录联动**（新增app/concealment_record.py；10类设备隐蔽工程内容；generate_concealment_record完整要素含验收依据/环境注意事项/设备类型特殊注意事项/参加人员4方；新增/api/concealment-record/{generate,update,list,stats,content}端点）
+- **v0.1.73**：**设备安装位置与开箱验收记录联动**（新增app/unboxing_record.py；10类设备开箱验收要点；generate_unboxing_record完整要素；新增/api/unboxing-record/{generate,update,list,stats,points}端点）
+- **v0.1.72**：**多电脑并库时竣工资料合并增强**（新增app/archive_merge_enhanced.py；按车间/标高分组合并；新增/api/archive-merge-enhanced/{merge,merge-file,pending,resolve,log,stats,integrity,group-workshop,group-elevation}端点）
+- **v0.1.71**：**设备安装位置与施工日志联动**（新增app/site_log.py；10类设备施工日志模板；generate_site_log；新增/api/site-log/{generate,list,stats,template}端点）
+- **v0.1.70**：**设备安装位置与技术交底联动**（新增app/technical_disclosure.py；10类设备技术交底模板；generate_technical_disclosure；新增/api/technical-disclosure/{generate,list,stats,template}端点）
+- **v0.1.69**：**多电脑并库时施工进度合并**（新增app/schedule_merge.py；合并施工进度数据；新增/api/schedule-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.68**：**设备安装位置与吊装方案联动**（新增app/lifting_plan.py；10类设备吊装参数；generate_lifting_plan；新增/api/lifting-plan/{generate,list,stats,params}端点）
+- **v0.1.67**：**设备安装位置与竣工资料联动**（新增app/completion_archive.py；10类设备竣工资料要求；generate_completion_archive；新增/api/completion-archive/{device,all,stats,missing,update-doc,requirements}端点）
+- **v0.1.66**：**多电脑并库时空间模型合并**（新增app/spatial_merge.py；合并空间模型数据；新增/api/spatial-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.65**：**设备安装位置与施工方案联动**（新增app/installation_plan.py；generate_installation_plan；get_device_spatial_info；新增/api/installation-plan/{generate,spatial-info,list,stats}端点）
+- **v0.1.64**：**设备安装位置与施工进度联动**（新增app/construction_schedule.py；auto_schedule_devices按车间→关键设备→标高→x排序；generate_gantt_svg甘特图；设备状态管理；新增/api/construction-schedule/{auto,gantt,stats,status,workshops}端点）
+- **v0.1.63**：**多电脑并库设备关系合并**（新增app/relations_merge.py；relations.py新增save_relations；合并设备关系数据；新增/api/relations-merge/{merge,merge-file,pending,resolve,log,stats,integrity}端点）
+- **v0.1.62**：**设备安装位置三维可视化增强（等轴测视图）**（spatial_visualization.py新增3d/isometric等轴测视图；3d/views多视角）
+- **v0.1.61**：**设备位置按标高分层可视化**（spatial_visualization.py新增elevation/list,elevation/layer,elevation/stack按标高分层）
+- **v0.1.60**：**施工计划与设备数据联动增强**（docgen增加辅助函数，全部10类工程文档完成设备数据联动增强）
+- **v0.1.59**：**多电脑并库竣工资料合并**（新增app/archive_merge.py；合并竣工资料数据；新增/api/archive-merge/{scan,merge,pending,resolve,log,stats}端点）
+- **v0.1.58**：**设备安装位置与管线联动可视化**（新增app/spatial_visualization.py；SVG/HTML可视化设备位置和管线连接）
+- **v0.1.57**：**竣工资料设备数据联动增强**（docgen竣工资料模板增加设备数据预填）
+- **v0.1.56**：**货损报告设备数据联动增强**
+- **v0.1.55**：**设计变更设备数据联动增强**
+- **v0.1.54**：**施工日志设备数据联动增强**
+- **v0.1.53**：**隐蔽工程验收记录设备数据联动增强**
+- **v0.1.52**：**开箱验收记录设备数据联动增强**
+- **v0.1.51**：**技术交底设备数据联动增强**
+- **v0.1.50**：**吊装方案设备数据联动增强**
+- **v0.1.49**：**施工方案设备数据联动增强**
+- **v0.1.48**：**竣工资料自动组卷增强**
+- **v0.1.47**：**设备间管线/连接关系**（新增app/piping_network.py；自动识别设备间管线连接；新增/api/piping/{build,pipes,connections,device/{tag},pipe/{pipe_no},stats}端点）
+- **v0.1.46**：**施工日志自动生成**（新增app/construction_log.py；aggregate/list/save/generate/stats/generate-enhanced；新增/api/construction-log/{aggregate,list,{date},save,generate,stats,generate-enhanced}端点）
 
 - **v0.1.45**：**设备台账多版本合并去重**（从所有解析文件提取设备清单Excel台账行/CAD图块/OCR铭牌；同一设备跨版本识别：位号精确匹配0.95>位号别名匹配0.85>名称+型号相似0.75>名称高度相似候选0.5；多版本合并最新版为准字段取并集冲突留人工确认；相同设备不同名称/编号自动辨认；字段冲突如重量不同默认取最新版可人工选择旧版；待确认匹配对支持确认合并/拒绝独立/合并为新设备；新模块app/equipment_merge.py；新增/api/equipment-merge/{run,list,pending,confirm/{index},resolve-conflict,stats}端点）
 - **v0.1.44**：**CAD图纸自动提取坐标增强**（CAD文字标注TEXT/MTEXT中的位号自动关联坐标x,y（之前cad_text无坐标）；图块无位号属性时自动查找附近300mm范围内的文字标注关联位号（cad_block_nearby，置信度0.6）；从CAD图纸自动提取标高标注EL+xxx/±0.000/+5.500，关联到500mm范围内的设备（elevation_hint）；坐标来源分级置信度：cad_block=0.9/cad_block_nearby=0.6/cad_text=0.4；多图纸同一设备坐标合并（cad_positions含confidence+elevation）；空间模型z坐标回退使用CAD附近标高标注（z_source=cad_nearby，置信度0.5）；relations._equipment_from_cache CAD分支全面增强）

@@ -4398,3 +4398,114 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnArchiveTransmittal");
   if (b3) b3.addEventListener("click", loadArchiveTransmittal);
 });
+
+// v0.1.87：多电脑并库矿山设备合并
+function loadMergeStats() {
+  fetch("/api/mining-equipment-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergeStatsResult");
+    el.style.display = "block";
+    ["mergePendingResult","mergeLogResult","mergeIntegrityResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>合并统计：</strong><br>';
+    html += '总合并次数：' + d.total_merges + '<br>';
+    html += '新设备数：' + d.new_devices + '<br>';
+    html += '自动合并数：' + d.auto_merged + '<br>';
+    html += '待确认数：' + d.pending_confirmation + '<br>';
+    html += '总冲突数：' + d.total_conflicts + '<br>';
+    if (d.source_nodes && d.source_nodes.length > 0) {
+      html += '来源节点：' + d.source_nodes.map(function(x){return esc(x);}).join('、') + '<br>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function loadMergePending() {
+  fetch("/api/mining-equipment-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergePendingResult");
+    el.style.display = "block";
+    ["mergeStatsResult","mergeLogResult","mergeIntegrityResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>待人工确认（' + d.pending.length + '项）：</strong><br>';
+    if (d.pending.length === 0) {
+      html += '<span style="color:#52C41A">暂无待确认项</span>';
+    }
+    d.pending.slice(0, 10).forEach(function(p) {
+      var inc = p.incoming_device || {};
+      var mat = p.matched_device || {};
+      var color = p.confidence >= 0.7 ? '#FAAD14' : '#EA6668';
+      html += '<div style="margin-bottom:8px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+      html += '<strong>新设备：</strong>' + esc(inc.tag || '') + ' ' + esc(inc.name || '') + ' (' + esc(inc.type || '') + ')<br>';
+      html += '<strong>匹配设备：</strong>' + esc(mat.tag || '') + ' ' + esc(mat.name || '') + '<br>';
+      html += '匹配级别：' + esc(p.match_level) + ' | 置信度：' + p.confidence + '<br>';
+      html += '<button class="btn" style="padding:2px 8px;font-size:11px;margin-right:4px" onclick="resolvePending(\'' + p.id + '\',\'confirm\')">确认合并</button>';
+      html += '<button class="btn" style="padding:2px 8px;font-size:11px;margin-right:4px" onclick="resolvePending(\'' + p.id + '\',\'reject\')">作为新设备</button>';
+      html += '<button class="btn" style="padding:2px 8px;font-size:11px" onclick="resolvePending(\'' + p.id + '\',\'keep_existing\')">保留现有</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function resolvePending(id, action) {
+  fetch("/api/mining-equipment-merge/resolve/" + id, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: action})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) {
+      alert("操作成功: " + action);
+      loadMergePending();
+    } else {
+      alert("操作失败: " + d.error);
+    }
+  }).catch(function(){});
+}
+function loadMergeLog() {
+  fetch("/api/mining-equipment-merge/log?limit=20").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergeLogResult");
+    el.style.display = "block";
+    ["mergeStatsResult","mergePendingResult","mergeIntegrityResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>合并日志（最近20条）：</strong><br>';
+    d.log.slice().reverse().forEach(function(entry) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02)">';
+      html += '<span style="color:#6B7280">' + esc(entry.timestamp) + '</span> ';
+      html += '<strong>' + esc(entry.action) + '</strong> ';
+      html += '<span style="color:#6B7280">来源:' + esc(entry.source_node) + '</span>';
+      if (entry.details && entry.details.tag) {
+        html += ' 设备:' + esc(entry.details.tag);
+      }
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function loadMergeIntegrity() {
+  fetch("/api/mining-equipment-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mergeIntegrityResult");
+    el.style.display = "block";
+    ["mergeStatsResult","mergePendingResult","mergeLogResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>矿山设备数据完整性检查：</strong><br>';
+    html += '总设备：' + d.total_devices + '台 | 问题总数：' + d.total_issues + '个';
+    html += '（高危' + d.high_severity + '/中危' + d.medium_severity + '/低危' + d.low_severity + '）<br>';
+    if (d.issues && d.issues.length > 0) {
+      d.issues.slice(0, 15).forEach(function(iss) {
+        var color = iss.severity === 'high' ? '#EA6668' : (iss.severity === 'medium' ? '#FAAD14' : '#52C41A');
+        html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+        html += '<span style="color:' + color + '">[' + esc(iss.severity) + ']</span> ' + esc(iss.message) + '</div>';
+      });
+    } else {
+      html += '<span style="color:#52C41A">所有设备数据完整</span>';
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnMergeStats");
+  if (b1) b1.addEventListener("click", loadMergeStats);
+  var b2 = document.getElementById("btnMergePending");
+  if (b2) b2.addEventListener("click", loadMergePending);
+  var b3 = document.getElementById("btnMergeLog");
+  if (b3) b3.addEventListener("click", loadMergeLog);
+  var b4 = document.getElementById("btnMergeIntegrity");
+  if (b4) b4.addEventListener("click", loadMergeIntegrity);
+});
