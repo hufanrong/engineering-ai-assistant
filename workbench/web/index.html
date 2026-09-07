@@ -16,12 +16,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 .topbar .spacer { flex:1; }
 .topbar .project-info { background:rgba(255,255,255,0.15); padding:6px 14px; border-radius:6px; font-size:13px; }
 
-/* Tab导航 */
-.tabbar { background:#fff; border-bottom:2px solid #e8e8e8; display:flex; padding:0 24px; position:sticky; top:56px; z-index:999; }
-.tab { padding:14px 24px; font-size:14px; cursor:pointer; border-bottom:3px solid transparent; color:#666; transition:all 0.2s; display:flex; align-items:center; gap:6px; }
-.tab:hover { color:#1E5AA8; background:#f0f4fa; }
-.tab.active { color:#1E5AA8; border-bottom-color:#FF7A00; font-weight:600; }
-.tab .icon { font-size:16px; }
+/* 整体布局 */
+.layout { display:flex; min-height:calc(100vh - 56px); }
+/* 左侧导航 */
+.sidebar { width:200px; background:linear-gradient(180deg,#1a2332,#151c28); color:#fff; padding:16px 0; position:sticky; top:56px; height:calc(100vh - 56px); overflow-y:auto; flex-shrink:0; }
+.nav-item { padding:12px 20px; font-size:13px; cursor:pointer; color:rgba(255,255,255,0.7); transition:all 0.2s; display:flex; align-items:center; gap:10px; border-left:3px solid transparent; }
+.nav-item:hover { color:#fff; background:rgba(255,255,255,0.08); }
+.nav-item.active { color:#fff; background:rgba(30,90,168,0.3); border-left-color:#FF7A00; font-weight:600; }
+.nav-item .icon { font-size:16px; width:20px; text-align:center; }
+.nav-divider { height:1px; background:rgba(255,255,255,0.1); margin:8px 16px; }
+.nav-section { padding:8px 20px; font-size:10px; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; }
+/* 主内容区 */
+.main-content { flex:1; padding:20px 24px; min-width:0; overflow-x:hidden; }
 
 /* 主内容 */
 .main { max-width:1400px; margin:0 auto; padding:20px 24px; }
@@ -109,8 +115,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 
 /* 响应式 */
 @media (max-width:768px) {
-    .tab { padding:12px 14px; font-size:12px; }
-    .main { padding:12px; }
+    .sidebar { width:60px; }
+    .nav-item { padding:12px 8px; justify-content:center; }
+    .nav-item span:not(.icon) { display:none; }
+    .nav-section, .nav-divider { display:none; }
+    .main-content { padding:12px; }
     .workshop-grid { grid-template-columns:1fr; }
 }
 </style>
@@ -132,16 +141,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     <div class="project-info" id="topProjectInfo">📁 未选择项目</div>
 </div>
 
-<!-- Tab导航 -->
-<div class="tabbar">
-  <div class="tab active" onclick="switchModule('resource')"><span class="icon">📁</span>资源管理</div>
-  <div class="tab" onclick="switchModule('docgen')"><span class="icon">📝</span>资料生成</div>
-  <div class="tab" onclick="switchModule('archive')"><span class="icon">📚</span>竣工组卷</div>
-  <div class="tab" onclick="switchModule('ai')"><span class="icon">🤖</span>智能窗口</div>
-  <div class="tab" onclick="switchModule('update')"><span class="icon">🔄</span>版本更新</div>
-</div>
-
-<div class="main">
+<div class="layout">
+  <!-- 左侧导航 -->
+  <div class="sidebar">
+    <div class="nav-section">功能模块</div>
+    <div class="nav-item active" data-module="resource" onclick="switchModule('resource')"><span class="icon">📁</span>资源管理</div>
+    <div class="nav-item" data-module="docgen" onclick="switchModule('docgen')"><span class="icon">📝</span>资料生成</div>
+    <div class="nav-item" data-module="archive" onclick="switchModule('archive')"><span class="icon">📚</span>竣工组卷</div>
+    <div class="nav-divider"></div>
+    <div class="nav-section">系统</div>
+    <div class="nav-item" data-module="ai" onclick="switchModule('ai')"><span class="icon">🤖</span>智能窗口</div>
+    <div class="nav-item" data-module="update" onclick="switchModule('update')"><span class="icon">🔄</span>版本更新</div>
+  </div>
+  <!-- 主内容区 -->
+  <div class="main-content">
 
 <!-- ========== 模块1：资源管理 ========== -->
 <div id="module-resource" class="module active">
@@ -174,12 +187,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   </div>
 
   <!-- 文件上传 -->
-  <div class="card" id="uploadCard" style="display:none">
+  <div class="card" id="uploadCard">
     <div class="card-title"><span class="icon">📤</span>文件上传与解析</div>
+    <div id="noProjectUploadHint" style="display:none;padding:20px;text-align:center;color:#999">
+      <div style="font-size:32px;margin-bottom:8px">📁</div>
+      <div>请先在上方选择或新建项目，然后上传资料</div>
+    </div>
+    <div id="uploadZoneWrap">
     <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
       <div class="icon">📂</div>
       <div class="text">点击选择文件或文件夹，或拖拽文件到此处</div>
       <div class="hint">支持 DWG / PDF / Word / Excel / Project / PPT / 图片 / 语音 / 文字 / 手稿照片 / 扫描件 / 聊天记录 等</div>
+    </div>
     </div>
     <input type="file" id="fileInput" style="display:none" multiple onchange="handleFileUpload(this.files)">
     <div id="uploadProgress" style="display:none;margin-top:12px">
@@ -192,13 +211,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   </div>
 
   <!-- 解析进度实时可视化 -->
-  <div class="card" id="parseProgressCard" style="display:none">
+  <div class="card" id="parseProgressCard">
     <div class="card-title"><span class="icon">⚙️</span>解析进度 <span class="badge badge-info" id="parseQueueCount">0</span></div>
     <div id="parseQueueList" style="max-height:300px;overflow-y:auto"></div>
   </div>
 
   <!-- 车间展示 -->
-  <div class="card" id="workshopCard" style="display:none">
+  <div class="card" id="workshopCard">
     <div class="card-title"><span class="icon">🏭</span>车间文件管理 <span style="font-size:11px;color:#999;font-weight:400;margin-left:8px">点击车间查看文件</span></div>
     <div id="workshopGrid" class="workshop-grid"></div>
     <div id="workshopFiles" style="display:none;margin-top:16px">
@@ -220,7 +239,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   </div>
 
   <!-- 待确认文件 -->
-  <div class="card" id="pendingCard" style="display:none">
+  <div class="card" id="pendingCard">
     <div class="card-title"><span class="icon">⏳</span>待确认文件 <span class="badge badge-warning" id="pendingCount">0</span></div>
     <div class="empty" id="pendingEmpty" style="display:none"><div class="icon">✅</div><div class="text">暂无待确认文件</div></div>
     <table class="table" id="pendingTable" style="display:none">
@@ -230,7 +249,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   </div>
 
   <!-- 处理失败文件 -->
-  <div class="card" id="failedCard" style="display:none">
+  <div class="card" id="failedCard">
     <div class="card-title"><span class="icon">❌</span>处理失败文件 <span class="badge badge-danger" id="failedCount">0</span></div>
     <div class="empty" id="failedEmpty" style="display:none"><div class="icon">✅</div><div class="text">暂无失败文件</div></div>
     <table class="table" id="failedTable" style="display:none">
@@ -240,7 +259,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   </div>
 
   <!-- 导出 -->
-  <div class="card" id="exportCard" style="display:none">
+  <div class="card" id="exportCard">
     <div class="card-title"><span class="icon">📦</span>导出解析包</div>
     <div class="row">
       <div style="flex:1">
@@ -540,6 +559,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 </div>
 
 </div>
+</div>
 
 <!-- 文件预览模态框 -->
 <div id="filePreviewModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:none;align-items:center;justify-content:center">
@@ -572,19 +592,19 @@ var parsedFiles = [];
 // ===== 模块切换 =====
 function switchModule(moduleName) {
     document.querySelectorAll('.module').forEach(function(m) { m.classList.remove('active'); });
-    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
-    document.getElementById('module-' + moduleName).classList.add('active');
-    event.target.closest('.tab').classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(function(t) { t.classList.remove('active'); });
+    var target = document.getElementById('module-' + moduleName);
+    if (target) target.classList.add('active');
+    var navItem = document.querySelector('.nav-item[data-module="' + moduleName + '"]');
+    if (navItem) navItem.classList.add('active');
     window.scrollTo({top:0, behavior:'smooth'});
     
-    // 模块加载时刷新数据
-    if (moduleName === 'resource') loadResourceData();
-    if (moduleName === 'docgen') loadDocgenWorkshops();
-    if (moduleName === 'archive') loadArchiveData();
-    if (moduleName === 'update') loadUpdateInfo();
-    if (moduleName === 'archive') loadDashboard();
-    if (moduleName === 'ai') loadOperationLogs();
-    if (moduleName === 'docgen') { loadTemplates(); loadGenHistory(); }
+    // 模块加载时刷新数据（无项目时也能访问，显示空状态）
+    if (moduleName === 'resource') { try { loadResourceData(); } catch(e) {} }
+    if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); } catch(e) {} }
+    if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); } catch(e) {} }
+    if (moduleName === 'ai') { try { loadOperationLogs(); } catch(e) {} }
+    if (moduleName === 'update') { try { loadUpdateInfo(); } catch(e) {} }
 }
 
 // ===== 项目管理 =====
@@ -653,11 +673,19 @@ function updateProjectUI() {
     if (currentProject) {
         document.getElementById('topProjectInfo').textContent = '📁 ' + currentProject.name;
         document.getElementById('projectStats').style.display = 'block';
-        document.getElementById('uploadCard').style.display = 'block';
-        document.getElementById('workshopCard').style.display = 'block';
-        document.getElementById('pendingCard').style.display = 'block';
-        document.getElementById('failedCard').style.display = 'block';
-        document.getElementById('exportCard').style.display = 'block';
+        var hint = document.getElementById('noProjectUploadHint');
+        var wrap = document.getElementById('uploadZoneWrap');
+        if (hint) hint.style.display = 'none';
+        if (wrap) wrap.style.display = 'block';
+        // 所有卡片默认显示，无项目时显示空状态
+    } else {
+        document.getElementById('topProjectInfo').textContent = '📁 未选择项目';
+        document.getElementById('projectStats').style.display = 'none';
+        // 无项目时显示提示
+        var hint = document.getElementById('noProjectUploadHint');
+        var wrap = document.getElementById('uploadZoneWrap');
+        if (hint) hint.style.display = 'block';
+        if (wrap) wrap.style.display = 'none';
     }
 }
 
@@ -1015,13 +1043,7 @@ function sendChat() {
 }
 
 function switchModuleByName(name) {
-    document.querySelectorAll('.module').forEach(function(m) { m.classList.remove('active'); });
-    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
-    document.getElementById('module-' + name).classList.add('active');
-    var tabs = document.querySelectorAll('.tab');
-    var tabMap = {resource: 0, docgen: 1, archive: 2, ai: 3, update: 4};
-    if (tabs[tabMap[name]]) tabs[tabMap[name]].classList.add('active');
-    window.scrollTo({top:0, behavior:'smooth'});
+    switchModule(name);
 }
 
 function showVectorSearch() { alert('向量检索功能：在智能窗口中输入检索内容即可'); }
