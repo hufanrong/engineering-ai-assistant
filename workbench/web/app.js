@@ -3881,3 +3881,140 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnDamageReportMergeIntegrity");
   if (b4) b4.addEventListener("click", damageReportMergeLoadIntegrity);
 });
+
+// v0.1.82：设备安装位置与施工进度联动增强
+function scheduleOptimize() {
+  fetch("/api/schedule-enhanced/optimize-order").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleOptimizeResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>施工顺序优化结果：</strong>共' + d.total_devices + '台设备 / ' + d.total_workshops + '个车间 / 估算总工期' + d.total_estimated_days + '天 / 总移动成本' + d.total_move_cost + '<br>';
+    html += '<strong>关键设备：</strong>' + d.critical_devices + '台<br>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">';
+    html += '<tr style="background:#f0f0f0"><th style="border:1px solid #ddd;padding:2px">序号</th><th style="border:1px solid #ddd;padding:2px">位号</th><th style="border:1px solid #ddd;padding:2px">类型</th><th style="border:1px solid #ddd;padding:2px">车间</th><th style="border:1px solid #ddd;padding:2px">标高</th><th style="border:1px solid #ddd;padding:2px">工期</th><th style="border:1px solid #ddd;padding:2px">移动成本</th><th style="border:1px solid #ddd;padding:2px">关键</th></tr>';
+    (d.optimized_schedule || []).forEach(function(item) {
+      html += '<tr>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center">' + item.sequence + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px">' + esc(item.tag) + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px">' + esc(item.type || '') + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px">' + esc(item.workshop) + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center">' + (item.elevation != null ? item.elevation + 'm' : '-') + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center">' + item.estimated_days + '天</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center">' + item.move_cost_from_prev + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center">' + (item.is_critical ? '<span style="color:#e74c3c">★</span>' : '') + '</td>';
+      html += '</tr>';
+    });
+    html += '</table>';
+    el.innerHTML = html;
+  }).catch(function(e){ alert("优化失败：" + e.message); });
+}
+function scheduleConflicts() {
+  fetch("/api/schedule-enhanced/detect-conflicts").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleConflictsResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>施工冲突识别结果：</strong>共' + d.total_conflicts + '个冲突 / 高风险' + d.high_severity + '个 / 中风险' + d.medium_severity + '个<br>';
+    if (d.total_conflicts === 0) { html += '<span style="color:#27ae60">未发现施工冲突</span>'; }
+    (d.conflicts || []).forEach(function(c, i) {
+      var color = c.severity === 'high' ? '#e74c3c' : '#f39c12';
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+      html += '<strong style="color:' + color + '">[' + c.type + ']</strong> ' + esc(c.description) + '<br>';
+      html += '<strong>设备：</strong>' + (c.devices || []).join(', ') + ' | <strong>车间：</strong>' + esc(c.workshop || '') + '<br>';
+      html += '<strong>建议：</strong>' + esc(c.suggestion || '');
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("冲突识别失败：" + e.message); });
+}
+function scheduleCritical() {
+  fetch("/api/schedule-enhanced/critical-path").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleCriticalResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>关键路径分析结果：</strong>关键路径' + d.critical_path_length + '台设备 / 关键路径工期' + d.critical_path_days + '天 / 阈值' + d.threshold + '<br>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">';
+    html += '<tr style="background:#f0f0f0"><th style="border:1px solid #ddd;padding:2px">位号</th><th style="border:1px solid #ddd;padding:2px">类型</th><th style="border:1px solid #ddd;padding:2px">车间</th><th style="border:1px solid #ddd;padding:2px">标高</th><th style="border:1px solid #ddd;padding:2px">关键度</th><th style="border:1px solid #ddd;padding:2px">工期</th><th style="border:1px solid #ddd;padding:2px">原因</th></tr>';
+    (d.critical_path || []).forEach(function(item) {
+      html += '<tr style="background:rgba(231,76,60,0.05)">';
+      html += '<td style="border:1px solid #ddd;padding:2px"><strong>' + esc(item.tag) + '</strong></td>';
+      html += '<td style="border:1px solid #ddd;padding:2px">' + esc(item.type || '') + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px">' + esc(item.workshop || '') + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center">' + (item.elevation != null ? item.elevation + 'm' : '-') + '</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center;color:#e74c3c"><strong>' + item.critical_score + '</strong></td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;text-align:center">' + item.estimated_days + '天</td>';
+      html += '<td style="border:1px solid #ddd;padding:2px;font-size:10px">' + (item.reasons || []).join('；') + '</td>';
+      html += '</tr>';
+    });
+    html += '</table>';
+    el.innerHTML = html;
+  }).catch(function(e){ alert("关键路径分析失败：" + e.message); });
+}
+function scheduleWarnings() {
+  fetch("/api/schedule-enhanced/detect-warnings").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleWarningsResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>施工进度预警结果：</strong>共' + d.total_warnings + '项预警 / 高风险' + d.high_severity + '项 / 中风险' + d.medium_severity + '项 / 低风险' + d.low_severity + '项<br>';
+    if (d.total_warnings === 0) { html += '<span style="color:#27ae60">未发现预警</span>'; }
+    (d.warnings || []).forEach(function(w) {
+      var color = w.severity === 'high' ? '#e74c3c' : (w.severity === 'medium' ? '#f39c12' : '#3498db');
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + color + '">';
+      html += '<strong style="color:' + color + '">[' + w.type + ']</strong> ' + esc(w.description) + '<br>';
+      if (w.devices) html += '<strong>设备：</strong>' + w.devices.join(', ') + '<br>';
+      if (w.workshop) html += '<strong>车间：</strong>' + esc(w.workshop) + '<br>';
+      html += '<strong>建议：</strong>' + esc(w.suggestion || '');
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("预警检测失败：" + e.message); });
+}
+function scheduleResources() {
+  fetch("/api/schedule-enhanced/optimize-resources").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("scheduleResourcesResult");
+    el.style.display = "block";
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var plan = d.resource_plan || {};
+    var total = plan.total || {};
+    var html = '<strong>资源优化配置结果：</strong>共' + (total.workshops || 0) + '个车间 / ' + (total.devices || 0) + '台设备<br>';
+    html += '<strong>总人员配置：</strong>';
+    for (var role in (total.personnel || {})) {
+      html += role + ':' + total.personnel[role] + '人 ';
+    }
+    html += '<br>';
+    html += '<strong>总机具配置：</strong>' + (total.equipment || []).join('、') + '<br>';
+    html += '<strong>总材料配置：</strong>' + (total.materials || []).join('、') + '<br>';
+    for (var ws in (plan.workshops || {})) {
+      var wsp = plan.workshops[ws];
+      html += '<div style="margin-top:4px;padding:4px;background:rgba(30,90,168,0.05);border-radius:4px">';
+      html += '<strong>' + esc(ws) + '</strong>（' + wsp.device_count + '台：' + wsp.devices.join(',') + '）<br>';
+      html += '<strong>人员：</strong>';
+      for (var role in wsp.personnel) { html += role + ':' + wsp.personnel[role] + ' '; }
+      html += '<br><strong>机具：</strong>' + wsp.equipment.join('、');
+      html += '<br><strong>材料：</strong>' + wsp.materials.join('、');
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }).catch(function(e){ alert("资源优化失败：" + e.message); });
+}
+function scheduleFullAnalysis() {
+  scheduleOptimize();
+  scheduleConflicts();
+  scheduleCritical();
+  scheduleWarnings();
+  scheduleResources();
+  alert("完整分析已启动，请查看下方各分析结果");
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnScheduleOptimize");
+  if (b1) b1.addEventListener("click", scheduleOptimize);
+  var b2 = document.getElementById("btnScheduleConflicts");
+  if (b2) b2.addEventListener("click", scheduleConflicts);
+  var b3 = document.getElementById("btnScheduleCritical");
+  if (b3) b3.addEventListener("click", scheduleCritical);
+  var b4 = document.getElementById("btnScheduleWarnings");
+  if (b4) b4.addEventListener("click", scheduleWarnings);
+  var b5 = document.getElementById("btnScheduleResources");
+  if (b5) b5.addEventListener("click", scheduleResources);
+  var b6 = document.getElementById("btnScheduleFull");
+  if (b6) b6.addEventListener("click", scheduleFullAnalysis);
+});

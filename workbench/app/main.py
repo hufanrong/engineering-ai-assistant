@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.81")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.82")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2340,6 +2340,55 @@ def damage_report_merge_stats():
     from . import damage_report_merge as _drm
     return {"ok": True, **_drm.merge_stats()}
 
+
+
+@app.get("/api/schedule-enhanced/optimize-order")
+def schedule_enhanced_optimize_order():
+    """v0.1.82：根据设备位置优化施工顺序。"""
+    from . import schedule_enhanced as _se
+    return {"ok": True, **_se.optimize_construction_order()}
+
+
+@app.get("/api/schedule-enhanced/detect-conflicts")
+def schedule_enhanced_detect_conflicts():
+    """v0.1.82：识别施工冲突。"""
+    from . import schedule_enhanced as _se
+    return {"ok": True, **_se.detect_construction_conflicts()}
+
+
+@app.get("/api/schedule-enhanced/critical-path")
+def schedule_enhanced_critical_path():
+    """v0.1.82：关键路径分析。"""
+    from . import schedule_enhanced as _se
+    return {"ok": True, **_se.analyze_critical_path()}
+
+
+@app.get("/api/schedule-enhanced/detect-warnings")
+def schedule_enhanced_detect_warnings():
+    """v0.1.82：施工进度预警。"""
+    from . import schedule_enhanced as _se
+    return {"ok": True, **_se.detect_schedule_warnings()}
+
+
+@app.get("/api/schedule-enhanced/optimize-resources")
+def schedule_enhanced_optimize_resources():
+    """v0.1.82：资源优化配置。"""
+    from . import schedule_enhanced as _se
+    return {"ok": True, **_se.optimize_resource_plan()}
+
+
+@app.get("/api/schedule-enhanced/full-analysis")
+def schedule_enhanced_full_analysis():
+    """v0.1.82：运行完整分析。"""
+    from . import schedule_enhanced as _se
+    return {"ok": True, **_se.run_full_analysis()}
+
+
+@app.get("/api/schedule-enhanced/stats")
+def schedule_enhanced_stats():
+    """v0.1.82：获取增强分析统计。"""
+    from . import schedule_enhanced as _se
+    return {"ok": True, **_se.get_enhanced_stats()}
 
 @app.get("/api/damage-report-merge/integrity")
 def damage_report_merge_integrity():

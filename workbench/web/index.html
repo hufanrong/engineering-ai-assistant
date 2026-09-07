@@ -514,6 +514,25 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.82：设备安装位置与施工进度联动增强 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与施工进度联动增强（v0.1.82）</h3>
+  <div class="msg" style="margin-bottom:6px">施工顺序优化、施工冲突识别、关键路径分析、施工进度预警、资源优化配置。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnScheduleOptimize" style="background:#1E5AA8">优化施工顺序</button>
+    <button class="btn" id="btnScheduleConflicts">识别施工冲突</button>
+    <button class="btn" id="btnScheduleCritical">关键路径分析</button>
+    <button class="btn" id="btnScheduleWarnings">施工进度预警</button>
+    <button class="btn" id="btnScheduleResources">资源优化配置</button>
+    <button class="btn" id="btnScheduleFull" style="background:#FF7A00">一键完整分析</button>
+  </div>
+  <div id="scheduleOptimizeResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleConflictsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleCriticalResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleWarningsResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="scheduleResourcesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.81：多电脑并库货损报告合并 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">多电脑并库货损报告合并（v0.1.81）</h3>
