@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.77")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.78")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2108,6 +2108,70 @@ def damage_report_stats():
     from . import damage_report as _dr
     return {"ok": True, **_dr.get_damage_report_stats()}
 
+
+
+@app.post("/api/unboxing-merge/merge")
+def unboxing_merge_merge(body: dict):
+    """v0.1.78：合并源开箱验收记录数据。"""
+    from . import unboxing_merge as _um
+    source = body.get("source_records", {})
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    return {"ok": True, **_um.merge_unboxing_records(source, source_pc, strategy)}
+
+
+@app.post("/api/unboxing-merge/merge-file")
+def unboxing_merge_merge_file(body: dict):
+    """v0.1.78：从文件合并开箱验收记录。"""
+    from . import unboxing_merge as _um
+    file_path = body.get("file_path", "")
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    source = _um.load_records_from_file(file_path)
+    if "error" in source:
+        raise HTTPException(status_code=400, detail=source["error"])
+    return {"ok": True, **_um.merge_unboxing_records(source, source_pc, strategy)}
+
+
+@app.get("/api/unboxing-merge/pending")
+def unboxing_merge_pending():
+    """v0.1.78：列出待人工确认的记录冲突。"""
+    from . import unboxing_merge as _um
+    return {"ok": True, "pending": _um.list_pending()}
+
+
+@app.post("/api/unboxing-merge/resolve")
+def unboxing_merge_resolve(body: dict):
+    """v0.1.78：处理待人工确认的记录冲突。"""
+    from . import unboxing_merge as _um
+    index = body.get("index", 0)
+    decision = body.get("decision", "")
+    if decision not in ["use_source", "keep_existing", "skip"]:
+        raise HTTPException(status_code=400, detail="decision必须是use_source/keep_existing/skip")
+    return {"ok": True, **_um.resolve_pending(index, decision)}
+
+
+@app.get("/api/unboxing-merge/log")
+def unboxing_merge_log():
+    """v0.1.78：列出合并日志。"""
+    from . import unboxing_merge as _um
+    return {"ok": True, "log": _um.list_merge_log()}
+
+
+@app.get("/api/unboxing-merge/stats")
+def unboxing_merge_stats():
+    """v0.1.78：获取合并统计信息。"""
+    from . import unboxing_merge as _um
+    return {"ok": True, **_um.merge_stats()}
+
+
+@app.get("/api/unboxing-merge/integrity")
+def unboxing_merge_integrity():
+    """v0.1.78：检查开箱验收记录完整性。"""
+    from . import unboxing_merge as _um
+    return {"ok": True, **_um.check_unboxing_integrity()}
 
 @app.get("/api/damage-report/points")
 def damage_report_points(type: str = ""):

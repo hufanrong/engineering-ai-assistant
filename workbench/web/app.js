@@ -3518,3 +3518,92 @@ document.addEventListener("DOMContentLoaded", function () {
   var b3 = document.getElementById("btnDamageReportStats");
   if (b3) b3.addEventListener("click", damageReportLoadStats);
 });
+
+// v0.1.78：多电脑并库开箱验收记录合并
+function unboxingMergeFile() {
+  var file = document.getElementById("unboxingMergeFile").value.trim();
+  var pc = document.getElementById("unboxingMergePC").value.trim();
+  var strategy = document.getElementById("unboxingMergeStrategy").value;
+  if (!file) { alert("请输入源开箱验收记录JSON文件路径"); return; }
+  fetch("/api/unboxing-merge/merge-file", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({file_path: file, source_pc: pc, conflict_strategy: strategy})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.detail) { alert("合并失败：" + d.detail); return; }
+    var log = d.log || {};
+    var msg = "合并完成！源记录:" + log.source_records + " 合并:" + log.merged_records + " 跳过:" + log.skipped_duplicate + " 冲突:" + log.conflicts + " 字段合并:" + (log.fields_merged || 0);
+    if (d.integrity_after_merge) {
+      var integ = d.integrity_after_merge;
+      msg += "\n合并后完整性：覆盖" + integ.coverage_percent + "% 日期跨度" + integ.date_span + " 缺件设备" + integ.devices_with_missing + "台 损坏设备" + integ.devices_with_damaged + "台 问题" + integ.issues_count + "个";
+    }
+    alert(msg);
+    unboxingMergeLoadStats();
+    unboxingMergeLoadIntegrity();
+  }).catch(function(e){ alert("合并失败：" + e.message); });
+}
+function unboxingMergeLoadStats() {
+  fetch("/api/unboxing-merge/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("unboxingMergeStats");
+    el.style.display = "block";
+    var html = '<strong>合并统计：</strong>操作' + d.total_merge_operations + '次 | 合并记录' + d.total_records_merged + '条 | 合并字段' + d.total_fields_merged + '项 | 冲突' + d.total_conflicts + '次<br>';
+    html += '待处理冲突:' + d.pending_conflicts + ' | 已解决:' + d.resolved_conflicts + ' | 当前记录:' + d.current_total_records + '条<br>';
+    if (d.current_by_conclusion) {
+      html += '<strong>按验收结论：</strong>';
+      for (var k in d.current_by_conclusion) { html += esc(k) + ':' + d.current_by_conclusion[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function unboxingMergeLoadPending() {
+  fetch("/api/unboxing-merge/pending").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("unboxingMergePending");
+    var pending = d.pending || [];
+    if (pending.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#27ae60">无待处理冲突</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>待处理冲突（' + pending.length + '个）：</strong><br>';
+    pending.slice(0, 10).forEach(function(p, i) {
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(231,76,60,0.05);border-radius:4px">';
+      html += '<strong>' + esc(p.tag) + '</strong> ' + esc(p.unboxing_date || '') + ' 来源:' + esc(p.source_pc || '') + '<br>';
+      html += '源结论:' + esc(p.source_conclusion || '无') + ' vs 当前:' + esc(p.current_conclusion || '无') + '<br>';
+      html += '源缺件:' + p.source_missing_count + '项 vs 当前:' + p.current_missing_count + '项 | 源损坏:' + p.source_damaged_count + '项 vs 当前:' + p.current_damaged_count + '项<br>';
+      html += '<button onclick="unboxingMergeResolve(' + i + ',\'use_source\')" style="font-size:11px;padding:2px 6px;margin-right:4px">用源数据</button>';
+      html += '<button onclick="unboxingMergeResolve(' + i + ',\'keep_existing\')" style="font-size:11px;padding:2px 6px;margin-right:4px">保留现有</button>';
+      html += '<button onclick="unboxingMergeResolve(' + i + ',\'skip\')" style="font-size:11px;padding:2px 6px">跳过</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function unboxingMergeResolve(index, decision) {
+  fetch("/api/unboxing-merge/resolve", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({index: index, decision: decision})
+  }).then(function(r){return r.json();}).then(function(d){
+    if (d.ok) { alert("已处理：" + d.decision); unboxingMergeLoadPending(); unboxingMergeLoadStats(); }
+    else alert("处理失败：" + (d.error || ""));
+  }).catch(function(e){ alert("处理失败：" + e.message); });
+}
+function unboxingMergeLoadIntegrity() {
+  fetch("/api/unboxing-merge/integrity").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("unboxingMergeIntegrity");
+    el.style.display = "block";
+    var html = '<strong>开箱验收记录完整性：</strong>总设备' + d.total_devices + '台 | 有记录' + d.devices_with_records + '台 | 记录总数' + d.total_records + '条 | 覆盖率' + d.coverage_percent + '%<br>';
+    html += '日期跨度: ' + esc(d.date_span) + ' | 缺件设备: ' + d.devices_with_missing + '台 | 损坏设备: ' + d.devices_with_damaged + '台 | 问题: ' + d.issues_count + '个<br>';
+    if (d.issues && d.issues.length > 0) {
+      d.issues.forEach(function(iss) {
+        html += '- ' + esc(iss.type) + ': ' + iss.count + (iss.devices ? '台 (' + iss.devices.slice(0,5).join(',') + '...)' : '条') + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnUnboxingMergeFile");
+  if (b1) b1.addEventListener("click", unboxingMergeFile);
+  var b2 = document.getElementById("btnUnboxingMergeStats");
+  if (b2) b2.addEventListener("click", unboxingMergeLoadStats);
+  var b3 = document.getElementById("btnUnboxingMergePending");
+  if (b3) b3.addEventListener("click", unboxingMergeLoadPending);
+  var b4 = document.getElementById("btnUnboxingMergeIntegrity");
+  if (b4) b4.addEventListener("click", unboxingMergeLoadIntegrity);
+});

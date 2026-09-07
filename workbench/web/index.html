@@ -514,6 +514,28 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.78：多电脑并库开箱验收记录合并 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">多电脑并库开箱验收记录合并（v0.1.78）</h3>
+  <div class="msg" style="margin-bottom:6px">多台电脑解析的开箱验收记录数据合并，自动去重，记录冲突处理，合并后自动触发完整性检查。</div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="unboxingMergeFile" placeholder="源开箱验收记录JSON文件路径" style="width:200px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <input type="text" id="unboxingMergePC" placeholder="来源电脑名" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+    <select id="unboxingMergeStrategy" style="padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px">
+      <option value="latest">以最新版为准</option>
+      <option value="keep_existing">保留现有</option>
+      <option value="manual">冲突留待人工确认</option>
+    </select>
+    <button class="btn" id="btnUnboxingMergeFile" style="background:#52C41A">从文件合并</button>
+    <button class="btn" id="btnUnboxingMergeStats">统计</button>
+    <button class="btn" id="btnUnboxingMergePending">待处理冲突</button>
+    <button class="btn" id="btnUnboxingMergeIntegrity">完整性检查</button>
+  </div>
+  <div id="unboxingMergeStats" style="font-size:12px;margin-bottom:6px;display:none"></div>
+  <div id="unboxingMergePending" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+  <div id="unboxingMergeIntegrity" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.77：设备安装位置与货损报告联动 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(255,122,0,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">设备安装位置与货损报告联动（v0.1.77）</h3>
