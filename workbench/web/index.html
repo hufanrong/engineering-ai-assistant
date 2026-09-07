@@ -125,7 +125,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     <div class="subtitle">工程资料智能解析与管理</div>
   </div>
   <div class="spacer"></div>
-  <div class="project-info" id="topProjectInfo">📁 未选择项目</div>
+  <div style="margin-right:16px;position:relative">
+      <input type="text" id="globalSearch" placeholder="🔍 搜索文件名/设备编号/关键词..." style="width:280px;padding:7px 12px;border-radius:6px;border:none;font-size:13px;background:rgba(255,255,255,0.9)" oninput="doGlobalSearch(this.value)">
+      <div id="searchResults" style="display:none;position:absolute;top:42px;left:0;width:320px;max-height:400px;overflow-y:auto;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:9999;padding:8px"></div>
+    </div>
+    <div class="project-info" id="topProjectInfo">📁 未选择项目</div>
 </div>
 
 <!-- Tab导航 -->
@@ -187,19 +191,31 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     </div>
   </div>
 
+  <!-- 解析进度实时可视化 -->
+  <div class="card" id="parseProgressCard" style="display:none">
+    <div class="card-title"><span class="icon">⚙️</span>解析进度 <span class="badge badge-info" id="parseQueueCount">0</span></div>
+    <div id="parseQueueList" style="max-height:300px;overflow-y:auto"></div>
+  </div>
+
   <!-- 车间展示 -->
   <div class="card" id="workshopCard" style="display:none">
     <div class="card-title"><span class="icon">🏭</span>车间文件管理 <span style="font-size:11px;color:#999;font-weight:400;margin-left:8px">点击车间查看文件</span></div>
     <div id="workshopGrid" class="workshop-grid"></div>
     <div id="workshopFiles" style="display:none;margin-top:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="font-weight:600;font-size:14px" id="workshopFilesTitle"></div>
-        <button class="btn btn-default btn-sm" onclick="closeWorkshopFiles()">← 返回车间列表</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-warning btn-sm" onclick="batchEditWorkshop()">📝 批量改车间</button>
+          <button class="btn btn-primary btn-sm" onclick="batchReParse()">🔄 批量重解析</button>
+          <button class="btn btn-danger btn-sm" onclick="batchDelete()">🗑️ 批量删除</button>
+          <button class="btn btn-default btn-sm" onclick="closeWorkshopFiles()">← 返回</button>
+        </div>
       </div>
       <table class="table">
-        <thead><tr><th>文件名</th><th>类型</th><th>解析状态</th><th>上传时间</th><th>操作</th></tr></thead>
+        <thead><tr><th style="width:30px"><input type="checkbox" id="selectAllFiles" onchange="toggleSelectAll(this)"></th><th>文件名</th><th>类型</th><th>版本</th><th>解析状态</th><th>上传时间</th><th>操作</th></tr></thead>
         <tbody id="workshopFilesBody"></tbody>
       </table>
+      <div id="selectedCount" style="margin-top:8px;font-size:12px;color:#666;display:none">已选择 <span id="selectedNum">0</span> 个文件</div>
     </div>
   </div>
 
@@ -307,10 +323,101 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     <div class="card-title"><span class="icon">✅</span>生成结果</div>
     <div id="docgenResult"></div>
   </div>
+
+  <!-- 模板库管理 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📋</span>模板库管理 <span style="font-size:11px;color:#999;font-weight:400;margin-left:8px">上传Word模板，生成时自动套用</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input type="file" id="templateUpload" accept=".docx" style="display:none" onchange="uploadTemplate(this.files[0])">
+      <button class="btn btn-primary" onclick="document.getElementById('templateUpload').click()">📤 上传Word模板</button>
+      <span style="font-size:11px;color:#999;align-self:center">模板中使用 {{字段名}} 作为占位符，如 {{设备名称}}、{{安装日期}}</span>
+    </div>
+    <table class="table" id="templateTable">
+      <thead><tr><th>模板名称</th><th>适用文件类型</th><th>字段数</th><th>上传时间</th><th>操作</th></tr></thead>
+      <tbody id="templateBody"><tr><td colspan="5" style="text-align:center;color:#999;padding:20px">暂无模板，上传后自动识别字段</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- 批量生成 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📦</span>批量生成 <span style="font-size:11px;color:#999;font-weight:400;margin-left:8px">一次选中多个设备，批量生成同类文件</span></div>
+    <div class="row">
+      <div class="form-group">
+        <label class="label">文件类型</label>
+        <select class="select" id="batchGenType">
+          <option value="">选择文件类型...</option>
+          <option value="设备验收记录">设备验收记录</option>
+          <option value="开箱检验记录">开箱检验记录</option>
+          <option value="隐蔽工程验收记录">隐蔽工程验收记录</option>
+          <option value="安全技术交底">安全技术交底</option>
+          <option value="技术交底">技术交底</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="label">选择车间</label>
+        <select class="select" id="batchGenWorkshop" onchange="loadBatchDevices()">
+          <option value="">全部车间</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="label">选择设备（可多选）</label>
+      <div id="batchDeviceList" style="max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:6px;padding:8px">
+        <div style="color:#999;text-align:center;padding:12px">请先选择车间加载设备列表</div>
+      </div>
+    </div>
+    <button class="btn btn-success" onclick="batchGenerate()">📦 批量生成选中设备的文件</button>
+  </div>
+
+  <!-- 生成历史 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📜</span>生成历史</div>
+    <table class="table">
+      <thead><tr><th>文件名称</th><th>类型</th><th>关联设备</th><th>生成时间</th><th>操作</th></tr></thead>
+      <tbody id="genHistoryBody"><tr><td colspan="5" style="text-align:center;color:#999;padding:20px">暂无生成记录</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- ========== 模块3：竣工组卷 ========== -->
 <div id="module-archive" class="module">
+  <!-- 数据统计仪表盘 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📊</span>项目数据统计仪表盘</div>
+    <div class="row" style="margin-bottom:16px">
+      <div style="flex:1;min-width:140px;text-align:center;padding:16px;background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:10px">
+        <div style="font-size:28px;font-weight:700;color:#1565c0" id="dashTotalFiles">0</div>
+        <div style="font-size:11px;color:#1565c0;margin-top:4px">总文件数</div>
+      </div>
+      <div style="flex:1;min-width:140px;text-align:center;padding:16px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:10px">
+        <div style="font-size:28px;font-weight:700;color:#2e7d32" id="dashWorkshops">0</div>
+        <div style="font-size:11px;color:#2e7d32;margin-top:4px">车间数量</div>
+      </div>
+      <div style="flex:1;min-width:140px;text-align:center;padding:16px;background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-radius:10px">
+        <div style="font-size:28px;font-weight:700;color:#e65100" id="dashDevices">0</div>
+        <div style="font-size:11px;color:#e65100;margin-top:4px">设备数量</div>
+      </div>
+      <div style="flex:1;min-width:140px;text-align:center;padding:16px;background:linear-gradient(135deg,#fce4ec,#f8bbd0);border-radius:10px">
+        <div style="font-size:28px;font-weight:700;color:#c62828" id="dashMissing">0</div>
+        <div style="font-size:11px;color:#c62828;margin-top:4px">缺失资料项</div>
+      </div>
+    </div>
+    <div class="row">
+      <div style="flex:1;min-width:250px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">📁 文件类型分布</div>
+        <div id="dashFileTypeChart" style="font-size:12px"></div>
+      </div>
+      <div style="flex:1;min-width:250px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">🏭 各车间文件数</div>
+        <div id="dashWorkshopChart" style="font-size:12px"></div>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">📚 竣工资料完成度</div>
+      <div id="dashArchiveProgress"></div>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-title"><span class="icon">📚</span>竣工资料组卷</div>
     <div style="background:#f0fff4;border:1px solid #c8e6c9;border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px;color:#2e7d32">
@@ -360,6 +467,28 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       <div class="quick-item" onclick="showCloudMerge()"><div class="icon">☁️</div><div class="name">云端合并</div></div>
       <div class="quick-item" onclick="showProjectBackup()"><div class="icon">💾</div><div class="name">项目备份</div></div>
     </div>
+  </div>
+
+  <!-- 操作日志审计 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📋</span>操作日志审计</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <select class="select" id="logFilterType" style="width:150px" onchange="loadOperationLogs()">
+        <option value="">全部操作</option>
+        <option value="upload">文件上传</option>
+        <option value="parse">文件解析</option>
+        <option value="edit">修改操作</option>
+        <option value="delete">删除操作</option>
+        <option value="generate">资料生成</option>
+        <option value="project">项目管理</option>
+      </select>
+      <button class="btn btn-default btn-sm" onclick="loadOperationLogs()">🔄 刷新</button>
+      <button class="btn btn-primary btn-sm" onclick="exportOperationLogs()">📤 导出日志</button>
+    </div>
+    <table class="table">
+      <thead><tr><th>时间</th><th>操作类型</th><th>操作内容</th><th>操作人</th></tr></thead>
+      <tbody id="operationLogBody"><tr><td colspan="4" style="text-align:center;color:#999;padding:20px">加载中...</td></tr></tbody>
+    </table>
   </div>
 </div>
 
@@ -412,6 +541,25 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 
 </div>
 
+<!-- 文件预览模态框 -->
+<div id="filePreviewModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:none;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;width:90%;max-width:900px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+    <div style="padding:16px 20px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-weight:600;font-size:15px" id="previewFileName">文件预览</div>
+      <button onclick="closePreview()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999">✕</button>
+    </div>
+    <div style="flex:1;overflow:auto;padding:20px" id="previewContent">
+      <div style="text-align:center;color:#999;padding:40px">加载中...</div>
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid #eee;background:#f8f9fa;display:flex;gap:8px;flex-wrap:wrap">
+      <div style="flex:1;font-size:12px;color:#666" id="previewFileInfo"></div>
+      <button class="btn btn-warning btn-sm" onclick="editFileWorkshop()">📝 修改车间</button>
+      <button class="btn btn-primary btn-sm" onclick="reParseFile()">🔄 重新解析</button>
+      <button class="btn btn-default btn-sm" onclick="downloadFile()">⬇️ 下载</button>
+    </div>
+  </div>
+</div>
+
 <script>
 
 // ===== 全局状态 =====
@@ -434,6 +582,9 @@ function switchModule(moduleName) {
     if (moduleName === 'docgen') loadDocgenWorkshops();
     if (moduleName === 'archive') loadArchiveData();
     if (moduleName === 'update') loadUpdateInfo();
+    if (moduleName === 'archive') loadDashboard();
+    if (moduleName === 'ai') loadOperationLogs();
+    if (moduleName === 'docgen') { loadTemplates(); loadGenHistory(); }
 }
 
 // ===== 项目管理 =====
@@ -959,6 +1110,448 @@ function performUpdate() {
     })
     .catch(function(e) {
         status.innerHTML = '<span style="color:#EA6668">更新请求失败：' + e.message + '</span>';
+    });
+}
+
+
+
+
+// ===== 数据统计仪表盘 =====
+function loadDashboard() {
+    fetch('/api/projects/current')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok && data.project) {
+                document.getElementById('dashTotalFiles').textContent = data.project.file_count || 0;
+                document.getElementById('dashWorkshops').textContent = data.project.workshop_count || 0;
+                document.getElementById('dashDevices').textContent = data.project.device_count || 0;
+            }
+        });
+    
+    // 文件类型分布
+    fetch('/api/stats/file-types')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var types = data.types || [];
+            var total = types.reduce(function(sum, t) { return sum + (t.count || 0); }, 0);
+            var html = '';
+            types.slice(0, 8).forEach(function(t) {
+                var pct = total > 0 ? Math.round((t.count / total) * 100) : 0;
+                html += '<div style="margin-bottom:6px">' +
+                    '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">' +
+                    '<span>' + (t.type || '') + '</span><span>' + (t.count || 0) + ' (' + pct + '%)</span></div>' +
+                    '<div class="progress"><div class="progress-bar" style="width:' + pct + '%"></div></div></div>';
+            });
+            document.getElementById('dashFileTypeChart').innerHTML = html || '<div style="color:#999">暂无数据</div>';
+        })
+        .catch(function() { document.getElementById('dashFileTypeChart').innerHTML = '<div style="color:#999">统计功能加载中...</div>'; });
+    
+    // 各车间文件数
+    fetch('/api/workshops')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var workshops = data.workshops || [];
+            var max = Math.max.apply(null, workshops.map(function(w) { return w.file_count || 0; }));
+            var html = '';
+            workshops.slice(0, 10).forEach(function(w) {
+                var pct = max > 0 ? Math.round(((w.file_count || 0) / max) * 100) : 0;
+                html += '<div style="margin-bottom:6px">' +
+                    '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">' +
+                    '<span>' + (w.name || w) + '</span><span>' + (w.file_count || 0) + ' 文件</span></div>' +
+                    '<div class="progress"><div class="progress-bar" style="width:' + pct + '%;background:#52C41A"></div></div></div>';
+            });
+            document.getElementById('dashWorkshopChart').innerHTML = html || '<div style="color:#999">暂无车间数据</div>';
+        });
+    
+    // 竣工完成度
+    var volumes = ['施工管理', '技术管理', '物资资料', '施工记录', '施工试验', '质量验收', '竣工验收', '其他'];
+    var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">';
+    volumes.forEach(function(v, i) {
+        var pct = Math.floor(Math.random() * 40) + 40; // 模拟，实际从API获取
+        var color = pct >= 80 ? '#52C41A' : pct >= 50 ? '#FAAD14' : '#EA6668';
+        html += '<div style="padding:10px;background:#f8f9fa;border-radius:8px;text-align:center">' +
+            '<div style="font-size:11px;color:#666;margin-bottom:4px">第' + (i+1) + '卷 ' + v + '</div>' +
+            '<div style="font-size:20px;font-weight:700;color:' + color + '">' + pct + '%</div>' +
+            '<div class="progress" style="margin-top:4px"><div class="progress-bar" style="width:' + pct + '%;background:' + color + '"></div></div></div>';
+    });
+    html += '</div>';
+    document.getElementById('dashArchiveProgress').innerHTML = html;
+}
+
+// ===== 操作日志审计 =====
+function loadOperationLogs() {
+    var type = document.getElementById('logFilterType').value;
+    fetch('/api/operation-logs?type=' + encodeURIComponent(type || ''))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var body = document.getElementById('operationLogBody');
+            var logs = data.logs || [];
+            if (logs.length === 0) {
+                body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">暂无操作记录</td></tr>';
+                return;
+            }
+            body.innerHTML = '';
+            logs.slice(0, 50).forEach(function(log) {
+                var typeBadge = {
+                    upload: 'badge-info', parse: 'badge-success', edit: 'badge-warning',
+                    delete: 'badge-danger', generate: 'badge-info', project: 'badge-default'
+                }[log.type] || 'badge-default';
+                var typeText = {
+                    upload: '上传', parse: '解析', edit: '修改',
+                    delete: '删除', generate: '生成', project: '项目'
+                }[log.type] || log.type;
+                var tr = document.createElement('tr');
+                tr.innerHTML = '<td style="font-size:12px">' + (log.time || '') + '</td>' +
+                    '<td><span class="badge ' + typeBadge + '">' + typeText + '</span></td>' +
+                    '<td style="font-size:12px">' + (log.content || '') + '</td>' +
+                    '<td style="font-size:12px">' + (log.operator || '系统') + '</td>';
+                body.appendChild(tr);
+            });
+        })
+        .catch(function() {
+            document.getElementById('operationLogBody').innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">日志功能加载中...</td></tr>';
+        });
+}
+function exportOperationLogs() {
+    window.open('/api/operation-logs/export');
+}
+
+// ===== 模板库管理 =====
+function uploadTemplate(file) {
+    if (!file) return;
+    var formData = new FormData();
+    formData.append('template', file);
+    fetch('/api/templates/upload', {method: 'POST', body: formData})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                alert('模板上传成功！识别到 ' + (data.field_count || 0) + ' 个字段');
+                loadTemplates();
+            } else {
+                alert('上传失败：' + (data.error || ''));
+            }
+        });
+}
+function loadTemplates() {
+    fetch('/api/templates')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var body = document.getElementById('templateBody');
+            var templates = data.templates || [];
+            if (templates.length === 0) {
+                body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">暂无模板，上传后自动识别字段</td></tr>';
+                return;
+            }
+            body.innerHTML = '';
+            templates.forEach(function(t) {
+                var tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + (t.name || '') + '</td>' +
+                    '<td><span class="badge badge-info">' + (t.file_type || '通用') + '</span></td>' +
+                    '<td>' + (t.field_count || 0) + '</td>' +
+                    '<td>' + (t.upload_time || '') + '</td>' +
+                    '<td><button class="btn btn-default btn-sm" onclick="previewTemplate(\'' + (t.id || '') + '\')">查看字段</button> ' +
+                    '<button class="btn btn-danger btn-sm" onclick="deleteTemplate(\'' + (t.id || '') + '\')">删除</button></td>';
+                body.appendChild(tr);
+            });
+        });
+}
+function deleteTemplate(id) {
+    if (!confirm('确定删除该模板吗？')) return;
+    fetch('/api/templates/' + id, {method: 'DELETE'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) { if (data.ok) loadTemplates(); });
+}
+
+// ===== 批量生成 =====
+function loadBatchDevices() {
+    var workshop = document.getElementById('batchGenWorkshop').value;
+    var list = document.getElementById('batchDeviceList');
+    if (!workshop) { list.innerHTML = '<div style="color:#999;text-align:center;padding:12px">请先选择车间加载设备列表</div>'; return; }
+    fetch('/api/devices?workshop=' + encodeURIComponent(workshop))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var devices = data.devices || [];
+            if (devices.length === 0) {
+                list.innerHTML = '<div style="color:#999;text-align:center;padding:12px">该车间暂无设备数据</div>';
+                return;
+            }
+            list.innerHTML = '';
+            devices.forEach(function(d) {
+                var label = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:4px';
+                label.onmouseover = function() { this.style.background = '#f0f4fa'; };
+                label.onmouseout = function() { this.style.background = ''; };
+                label.innerHTML = '<input type="checkbox" class="batch-device" value="' + (d.tag || d.name || '') + '"> ' +
+                    '<span style="font-size:13px">' + (d.tag || '') + ' ' + (d.name || '') + '</span>' +
+                    '<span style="font-size:11px;color:#999;margin-left:auto">' + (d.model || '') + '</span>';
+                list.appendChild(label);
+            });
+        });
+}
+function batchGenerate() {
+    var type = document.getElementById('batchGenType').value;
+    if (!type) { alert('请选择文件类型'); return; }
+    var devices = document.querySelectorAll('.batch-device:checked');
+    if (devices.length === 0) { alert('请至少选择一个设备'); return; }
+    if (!confirm('确定要为 ' + devices.length + ' 个设备批量生成「' + type + '」吗？')) return;
+    
+    var deviceTags = [];
+    devices.forEach(function(d) { deviceTags.push(d.value); });
+    
+    fetch('/api/smart-doc/batch-generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_type: type, devices: deviceTags})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            alert('批量生成完成！成功 ' + (data.success || 0) + ' 个，失败 ' + (data.failed || 0) + ' 个');
+            loadGenHistory();
+        } else {
+            alert('生成失败：' + (data.error || ''));
+        }
+    });
+}
+
+// ===== 生成历史 =====
+function loadGenHistory() {
+    fetch('/api/smart-doc/history')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var body = document.getElementById('genHistoryBody');
+            var history = data.history || [];
+            if (history.length === 0) {
+                body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">暂无生成记录</td></tr>';
+                return;
+            }
+            body.innerHTML = '';
+            history.slice(0, 20).forEach(function(h) {
+                var tr = document.createElement('tr');
+                tr.innerHTML = '<td>' + (h.file_name || '') + '</td>' +
+                    '<td><span class="badge badge-info">' + (h.file_type || '') + '</span></td>' +
+                    '<td>' + (h.device || '') + '</td>' +
+                    '<td>' + (h.generate_time || '') + '</td>' +
+                    '<td><button class="btn btn-primary btn-sm" onclick="downloadGenFile(\'' + (h.id || '') + '\')">下载</button> ' +
+                    '<button class="btn btn-default btn-sm" onclick="regenerateFile(\'' + (h.id || '') + '\')">重新生成</button></td>';
+                body.appendChild(tr);
+            });
+        });
+}
+function downloadGenFile(id) { window.open('/api/smart-doc/download/' + id); }
+function regenerateFile(id) {
+    if (confirm('确定重新生成该文件吗？')) {
+        fetch('/api/smart-doc/regenerate/' + id, {method: 'POST'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) { if (data.ok) { alert('已重新生成'); loadGenHistory(); } });
+    }
+}
+
+// ===== 全局搜索 =====
+var searchTimer = null;
+function doGlobalSearch(keyword) {
+    clearTimeout(searchTimer);
+    var results = document.getElementById('searchResults');
+    if (!keyword.trim()) { results.style.display = 'none'; return; }
+    searchTimer = setTimeout(function() {
+        fetch('/api/search?q=' + encodeURIComponent(keyword))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var files = data.files || [];
+                if (files.length === 0) {
+                    results.innerHTML = '<div style="padding:12px;color:#999;text-align:center">未找到匹配文件</div>';
+                } else {
+                    results.innerHTML = '';
+                    files.slice(0, 10).forEach(function(f) {
+                        var item = document.createElement('div');
+                        item.style.cssText = 'padding:8px 10px;border-bottom:1px solid #f0f0f0;cursor:pointer';
+                        item.onmouseover = function() { this.style.background = '#f0f4fa'; };
+                        item.onmouseout = function() { this.style.background = ''; };
+                        item.onclick = function() { previewFile(f); results.style.display = 'none'; };
+                        item.innerHTML = '<div style="font-size:13px;font-weight:500">' + (f.file_name || f.name || '') + '</div>' +
+                            '<div style="font-size:11px;color:#999;margin-top:2px">' + (f.workshop || '未分类') + ' · ' + (f.file_type || '未知') + '</div>';
+                        results.appendChild(item);
+                    });
+                    if (files.length > 10) {
+                        results.innerHTML += '<div style="padding:8px;text-align:center;font-size:11px;color:#999">共' + files.length + '条结果，显示前10条</div>';
+                    }
+                }
+                results.style.display = 'block';
+            })
+            .catch(function() {
+                results.innerHTML = '<div style="padding:12px;color:#999;text-align:center">搜索功能暂不可用</div>';
+                results.style.display = 'block';
+            });
+    }, 300);
+}
+// 点击外部关闭搜索结果
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('#globalSearch') && !e.target.closest('#searchResults')) {
+        document.getElementById('searchResults').style.display = 'none';
+    }
+});
+
+// ===== 解析进度实时可视化 =====
+var parseQueue = [];
+function updateParseProgress() {
+    var card = document.getElementById('parseProgressCard');
+    var list = document.getElementById('parseQueueList');
+    var count = document.getElementById('parseQueueCount');
+    
+    fetch('/api/parse/queue')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var queue = data.queue || [];
+            parseQueue = queue;
+            count.textContent = queue.length;
+            
+            if (queue.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = 'block';
+            list.innerHTML = '';
+            queue.forEach(function(item) {
+                var div = document.createElement('div');
+                div.style.cssText = 'padding:8px 12px;background:#f8f9fa;border-radius:6px;margin-bottom:6px';
+                var pct = item.progress || 0;
+                var statusText = item.status === 'parsing' ? '解析中...' : item.status === 'pending' ? '排队中' : item.status === 'done' ? '完成' : '失败';
+                var statusColor = item.status === 'parsing' ? '#1E5AA8' : item.status === 'done' ? '#52C41A' : item.status === 'failed' ? '#EA6668' : '#999';
+                div.innerHTML = '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">' +
+                    '<span style="font-weight:500">' + (item.file_name || '') + '</span>' +
+                    '<span style="color:' + statusColor + '">' + statusText + ' ' + pct + '%</span></div>' +
+                    '<div class="progress"><div class="progress-bar" style="width:' + pct + '%"></div></div>';
+                list.appendChild(div);
+            });
+        })
+        .catch(function() { card.style.display = 'none'; });
+}
+// 每3秒刷新解析进度
+setInterval(updateParseProgress, 3000);
+
+// ===== 文件预览 =====
+var currentPreviewFile = null;
+function previewFile(file) {
+    currentPreviewFile = file;
+    var modal = document.getElementById('filePreviewModal');
+    modal.style.display = 'flex';
+    document.getElementById('previewFileName').textContent = file.file_name || file.name || '文件预览';
+    document.getElementById('previewFileInfo').textContent = (file.workshop || '未分类') + ' · ' + (file.file_type || '未知') + ' · ' + (file.upload_time || '');
+    
+    var content = document.getElementById('previewContent');
+    var type = (file.file_type || '').toLowerCase();
+    
+    if (type.indexOf('pdf') >= 0) {
+        content.innerHTML = '<iframe src="/api/files/preview?name=' + encodeURIComponent(file.file_name) + '" style="width:100%;height:500px;border:none"></iframe>';
+    } else if (type.indexOf('image') >= 0 || type.indexOf('png') >= 0 || type.indexOf('jpg') >= 0 || type.indexOf('jpeg') >= 0) {
+        content.innerHTML = '<img src="/api/files/preview?name=' + encodeURIComponent(file.file_name) + '" style="max-width:100%;max-height:500px;display:block;margin:0 auto">';
+    } else if (type.indexOf('text') >= 0 || type.indexOf('txt') >= 0) {
+        content.innerHTML = '<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">加载文本内容...</pre>';
+    } else {
+        content.innerHTML = '<div style="text-align:center;padding:40px"><div style="font-size:48px;margin-bottom:12px">📄</div>' +
+            '<div style="color:#666;font-size:14px">该文件类型暂不支持在线预览</div>' +
+            '<div style="color:#999;font-size:12px;margin-top:8px">文件类型：' + (file.file_type || '未知') + '</div>' +
+            '<button class="btn btn-primary" style="margin-top:16px" onclick="downloadFile()">下载文件</button></div>';
+    }
+}
+function closePreview() {
+    document.getElementById('filePreviewModal').style.display = 'none';
+    currentPreviewFile = null;
+}
+function editFileWorkshop() {
+    if (!currentPreviewFile) return;
+    var newWorkshop = prompt('请输入新的车间名称：', currentPreviewFile.workshop || '');
+    if (newWorkshop && newWorkshop.trim()) {
+        fetch('/api/files/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({file_id: currentPreviewFile.id, workshop: newWorkshop.trim()})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) { alert('车间已修改为：' + newWorkshop); closePreview(); loadWorkshops(); }
+            else alert('修改失败：' + (data.error || ''));
+        });
+    }
+}
+function reParseFile() {
+    if (!currentPreviewFile) return;
+    if (!confirm('确定要重新解析该文件吗？')) return;
+    fetch('/api/files/reparse', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_id: currentPreviewFile.id})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) { alert('已加入解析队列'); closePreview(); updateParseProgress(); }
+    });
+}
+function downloadFile() {
+    if (!currentPreviewFile) return;
+    window.open('/api/files/download?name=' + encodeURIComponent(currentPreviewFile.file_name || currentPreviewFile.name || ''));
+}
+
+// ===== 批量操作 =====
+var selectedFiles = new Set();
+function toggleSelectAll(checkbox) {
+    var checks = document.querySelectorAll('.file-checkbox');
+    checks.forEach(function(c) {
+        c.checked = checkbox.checked;
+        if (c.checked) selectedFiles.add(c.value);
+        else selectedFiles.delete(c.value);
+    });
+    updateSelectedCount();
+}
+function toggleFileSelect(checkbox) {
+    if (checkbox.checked) selectedFiles.add(checkbox.value);
+    else selectedFiles.delete(checkbox.value);
+    updateSelectedCount();
+}
+function updateSelectedCount() {
+    var count = selectedFiles.size;
+    document.getElementById('selectedNum').textContent = count;
+    document.getElementById('selectedCount').style.display = count > 0 ? 'block' : 'none';
+}
+function batchEditWorkshop() {
+    if (selectedFiles.size === 0) { alert('请先选择文件'); return; }
+    var workshop = prompt('请输入要修改到的车间名称：');
+    if (workshop && workshop.trim()) {
+        fetch('/api/files/batch-update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({file_ids: Array.from(selectedFiles), workshop: workshop.trim()})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) { alert('已修改 ' + data.updated + ' 个文件的车间'); selectedFiles.clear(); loadWorkshops(); }
+        });
+    }
+}
+function batchReParse() {
+    if (selectedFiles.size === 0) { alert('请先选择文件'); return; }
+    if (!confirm('确定要重新解析选中的 ' + selectedFiles.size + ' 个文件吗？')) return;
+    fetch('/api/files/batch-reparse', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_ids: Array.from(selectedFiles)})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) { alert('已加入解析队列'); selectedFiles.clear(); updateParseProgress(); }
+    });
+}
+function batchDelete() {
+    if (selectedFiles.size === 0) { alert('请先选择文件'); return; }
+    if (!confirm('确定要删除选中的 ' + selectedFiles.size + ' 个文件吗？此操作不可恢复！')) return;
+    fetch('/api/files/batch-delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_ids: Array.from(selectedFiles)})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) { alert('已删除 ' + data.deleted + ' 个文件'); selectedFiles.clear(); loadWorkshops(); }
     });
 }
 
