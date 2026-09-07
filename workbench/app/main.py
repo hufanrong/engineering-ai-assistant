@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.108")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.109")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -82,6 +82,10 @@ class ScanReq(BaseModel):
 
 @app.post("/api/scan")
 def start_scan(req: ScanReq):
+    from . import project_manager as _pm
+    current = _pm.get_current_project()
+    if not current:
+        raise HTTPException(400, "请先新建或选择项目，资料将自动归入当前项目")
     folders = [req.folder] if isinstance(req.folder, str) else list(req.folder)
     for f in folders:
         if not os.path.isdir(f):
@@ -89,7 +93,27 @@ def start_scan(req: ScanReq):
     if SCAN_STATUS.get("running"):
         raise HTTPException(409, "已有扫描任务在运行")
     SCAN_STATUS.update({"running": False, "done": 0, "total": 0, "msg": "", "stats": None})
-    t = threading.Thread(target=scanner.background_scan, args=(folders, req.force, SCAN_STATUS), daemon=True)
+    
+    def _scan_with_stats(folders, force, status):
+        """扫描完成后自动更新项目统计。"""
+        scanner.background_scan(folders, force, status)
+        try:
+            from . import project_manager as _pm2
+            cur = _pm2.get_current_project()
+            if cur:
+                ddir = _pm2.get_project_data_dir(cur["id"])
+                idx_path = os.path.join(ddir, "index.json")
+                if os.path.isfile(idx_path):
+                    with open(idx_path, "r", encoding="utf-8") as f:
+                        idx = json.load(f)
+                    file_count = len(idx.get("files", [])) if isinstance(idx.get("files"), list) else len(idx)
+                    device_count = len(idx.get("devices", {}))
+                    workshop_count = len(idx.get("workshops", {}))
+                    _pm2.update_project_stats(cur["id"], file_count, device_count, workshop_count)
+        except Exception:
+            pass
+    
+    t = threading.Thread(target=_scan_with_stats, args=(folders, req.force, SCAN_STATUS), daemon=True)
     t.start()
     return {"ok": True, "folders": folders}
 
@@ -255,7 +279,9 @@ def do_upload():
 @app.get("/api/upload/log")
 def upload_log(limit: int = 100):
     """上传/打包留痕记录（upload_log.jsonl 尾部）。"""
-    log_path = os.path.join(config.DATA_DIR, "upload_log.jsonl")
+    from . import project_manager as _pm
+    ddir = _pm.get_active_data_dir() if hasattr(_pm, 'get_active_data_dir') else _pm.get_project_data_dir()
+    log_path = os.path.join(ddir, "upload_log.jsonl")
     if not os.path.exists(log_path):
         return {"items": []}
     lines = []

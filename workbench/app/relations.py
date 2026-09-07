@@ -28,11 +28,29 @@ TABLE_KEYS = ["台账", "清单", "记录", "箱单", "货单", "采购", "到�
 PLAN_KEYS = ["施工计划", "进度", "project", "计划"]
 
 
-def _ensure():
+def _get_data_dir(data_dir=None):
+    """获取数据目录：优先传入的data_dir，其次当前项目目录，最后全局目录。"""
+    if data_dir:
+        os.makedirs(data_dir, exist_ok=True)
+        return data_dir
+    try:
+        from . import project_manager as _pm
+        current = _pm.get_current_project()
+        if current:
+            pdir = _pm.get_project_data_dir(current["id"])
+            os.makedirs(pdir, exist_ok=True)
+            return pdir
+    except Exception:
+        pass
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    return config.DATA_DIR
+
+
+def _ensure(data_dir=None):
     global RELATIONS_FILE
-    if RELATIONS_FILE is None:
-        RELATIONS_FILE = os.path.join(config.DATA_DIR, "relations.json")
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+    ddir = _get_data_dir(data_dir)
+    RELATIONS_FILE = os.path.join(ddir, "relations.json")
+    os.makedirs(ddir, exist_ok=True)
 
 
 CONFIRM_FILE = None  # v0.1.23 人工确认持久化
@@ -132,8 +150,9 @@ def list_rejected_candidates() -> list:
     return [{"tag": k, **v} for k, v in m.items()]
 
 
-def _load_index():
-    idx_file = os.path.join(config.DATA_DIR, "index.json")
+def _load_index(data_dir=None):
+    ddir = _get_data_dir(data_dir)
+    idx_file = os.path.join(ddir, "index.json")
     if os.path.exists(idx_file):
         try:
             with open(idx_file, encoding="utf-8") as f:
@@ -143,8 +162,9 @@ def _load_index():
     return {}
 
 
-def _load_cache(sha256: str):
-    p = os.path.join(config.DATA_DIR, "parsed_cache", f"{sha256}.json")
+def _load_cache(sha256: str, data_dir=None):
+    ddir = _get_data_dir(data_dir)
+    p = os.path.join(ddir, "parsed_cache", f"{sha256}.json")
     if os.path.exists(p):
         try:
             with open(p, encoding="utf-8") as f:
@@ -387,12 +407,13 @@ def _compute_distances(devices: list, docs: dict) -> list:
 
 
 # ---------------- 主构建 ----------------
-def build_relations(force: bool = False) -> dict:
-    _ensure()
-    idx = _load_index()
+def build_relations(force: bool = False, data_dir=None) -> dict:
+    ddir = _get_data_dir(data_dir)
+    _ensure(ddir)
+    idx = _load_index(ddir)
     docs = {}   # sha -> {file_name, parser, workshop, doc_type, tags, title_block, frame}
     for sha, info in idx.items():
-        cache = _load_cache(sha)
+        cache = _load_cache(sha, ddir)
         if not cache or cache.get("status") not in ("parsed", "partial"):
             continue
         fname = cache.get("file_name", "")
@@ -733,7 +754,8 @@ def _load_cache_by_name(fname: str, idx: dict):
     return None
 
 
-def _save(graph: dict):
+def _save(graph: dict, data_dir=None):
+    _ensure(data_dir)
     with open(RELATIONS_FILE, "w", encoding="utf-8") as f:
         json.dump(graph, f, ensure_ascii=False, indent=1)
 

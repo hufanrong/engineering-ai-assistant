@@ -14,15 +14,33 @@ from . import upload_queue
 INDEX_FILE = None
 
 
-def _ensure():
+def _get_data_dir(data_dir=None):
+    """获取数据目录：优先传入的data_dir，其次当前项目目录，最后全局目录。"""
+    if data_dir:
+        os.makedirs(data_dir, exist_ok=True)
+        return data_dir
+    try:
+        from . import project_manager as _pm
+        current = _pm.get_current_project()
+        if current:
+            pdir = _pm.get_project_data_dir(current["id"])
+            os.makedirs(pdir, exist_ok=True)
+            return pdir
+    except Exception:
+        pass
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    return config.DATA_DIR
+
+
+def _ensure(data_dir=None):
     global INDEX_FILE
-    if INDEX_FILE is None:
-        INDEX_FILE = os.path.join(config.DATA_DIR, "index.json")
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+    ddir = _get_data_dir(data_dir)
+    INDEX_FILE = os.path.join(ddir, "index.json")
+    os.makedirs(ddir, exist_ok=True)
 
 
-def _load_index() -> dict:
-    _ensure()
+def _load_index(data_dir=None) -> dict:
+    _ensure(data_dir)
     if os.path.exists(INDEX_FILE):
         try:
             with open(INDEX_FILE, encoding="utf-8") as f:
@@ -32,8 +50,8 @@ def _load_index() -> dict:
     return {}
 
 
-def _save_index(idx: dict):
-    _ensure()
+def _save_index(idx: dict, data_dir=None):
+    _ensure(data_dir)
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=1)
 
@@ -45,16 +63,17 @@ SUPPORTED_EXTS = (
 )
 
 
-def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None) -> dict:
+def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None, data_dir=None) -> dict:
     """扫描一个或多个文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
-    folder 可为字符串或字符串列表。返回统计。"""
+    folder 可为字符串或字符串列表。data_dir 指定数据目录（为None时自动使用当前项目目录）。返回统计。"""
     folders = [folder] if isinstance(folder, str) else list(folder)
     for f in folders:
         if not os.path.isdir(f):
             return {"error": f"路径不存在：{f}"}
 
-    idx = _load_index()
-    store = VectorStore()
+    ddir = _get_data_dir(data_dir)
+    idx = _load_index(ddir)
+    store = VectorStore(db_path=os.path.join(ddir, "vector_db"))
     stats = {"found": 0, "parsed": 0, "vectorized": 0, "skipped": 0, "failed": 0, "duplicate": 0}
 
     file_list = []
@@ -154,7 +173,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 "retry_count": 0,
                 "ts": datetime.datetime.now().isoformat(),
             }
-            _save_index(idx)
+            _save_index(idx, ddir)
             if progress_cb:
                 progress_cb(i + 1, len(file_list), f"{res.status}: {res.file_name}")
         except Exception as e:  # noqa: BLE001
@@ -167,7 +186,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
 
 def _save_parsed_cache(res: ParseResult):
     """把解析结果缓存到 data/parsed_cache/{sha256}.json，供详情页读取。"""
-    cache_dir = os.path.join(config.DATA_DIR, "parsed_cache")
+    cache_dir = os.path.join(ddir, "parsed_cache")
     os.makedirs(cache_dir, exist_ok=True)
     with open(os.path.join(cache_dir, f"{res.sha256}.json"), "w", encoding="utf-8") as f:
         json.dump({

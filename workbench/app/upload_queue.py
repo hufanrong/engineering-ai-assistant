@@ -16,11 +16,23 @@ QUEUE_DIR = None          # 延迟初始化
 LOG_PATH = None
 
 
+def _get_data_dir():
+    """获取当前项目数据目录。"""
+    try:
+        from . import project_manager as _pm
+        current = _pm.get_current_project()
+        if current:
+            return _pm.get_project_data_dir(current["id"])
+    except Exception:
+        pass
+    return config.DATA_DIR
+
+
 def _ensure():
     global QUEUE_DIR, LOG_PATH
-    if QUEUE_DIR is None:
-        QUEUE_DIR = os.path.join(config.DATA_DIR, "upload_queue")
-        LOG_PATH = os.path.join(config.DATA_DIR, "upload_log.jsonl")
+    ddir = _get_data_dir()
+    QUEUE_DIR = os.path.join(ddir, "upload_queue")
+    LOG_PATH = os.path.join(ddir, "upload_log.jsonl")
     # 目录可能被外部删除/移动（如整库迁移、导入合并后继续扫描），每次确保存在
     os.makedirs(QUEUE_DIR, exist_ok=True)
 
@@ -57,7 +69,7 @@ def enqueue(parse_result) -> str:
 def _node_id() -> str:
     """节点稳定 ID：基于 data/.node_id 持久化。"""
     _ensure()
-    nf = os.path.join(config.DATA_DIR, ".node_id")
+    nf = os.path.join(_get_data_dir(), ".node_id")
     if os.path.exists(nf):
         with open(nf) as f:
             return f.read().strip()
