@@ -327,17 +327,12 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hi
       <input type="text" id="uploaderName" placeholder="请输入姓名">
     </div>
     <div class="input-group">
-      <label>所属车间</label>
-      <select id="uploadWorkshop">
-        <option value="">请选择车间</option>
-        <option value="破碎车间">破碎车间</option>
-        <option value="磨矿车间">磨矿车间</option>
-        <option value="浮选车间">浮选车间</option>
-        <option value="脱水车间">脱水车间</option>
-        <option value="火法冶炼车间">火法冶炼车间</option>
-        <option value="湿法冶炼车间">湿法冶炼车间</option>
-        <option value="公用辅助">公用辅助</option>
+      <label>所属车间（从项目资料自动识别，也可手动输入）</label>
+      <select id="uploadWorkshop" style="margin-bottom:6px">
+        <option value="">上传资料后自动识别车间...</option>
       </select>
+      <input type="text" id="uploadWorkshopManual" placeholder="或手动输入车间名称（可选）" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box">
+      <div style="font-size:11px;color:#999;margin-top:4px">💡 车间以项目实际资料为准，系统随资料完善自动更新</div>
     </div>
     
     <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="submitCombinedUpload()">
@@ -380,7 +375,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hi
     </div>
     <div class="input-group">
       <label>设备类型</label>
-      <input type="text" id="docDevice" placeholder="如：球磨机">
+      <input type="text" id="docDevice" placeholder="设备名称（从项目资料识别）">
     </div>
     <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="generateDoc()">
       <span class="icon" style="font-size:16px;margin:0">📄</span>生成资料
@@ -658,6 +653,37 @@ function showSettings() { alert('设置功能开发中'); }
 
 // 初始化
 loadHome();
+
+// 从项目数据动态加载已识别的车间
+function loadProjectWorkshops() {
+    var apiUrl = (window.API_BASE_URL || '') + '/api/workshops';
+    fetch(apiUrl)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var select = document.getElementById('uploadWorkshop');
+            if (select && data.workshops && data.workshops.length > 0) {
+                select.innerHTML = '<option value="">选择已识别车间...</option>';
+                data.workshops.forEach(function(w) {
+                    var opt = document.createElement('option');
+                    opt.value = w.name || w;
+                    opt.textContent = w.name || w;
+                    select.appendChild(opt);
+                });
+            }
+        })
+        .catch(function() {
+            // 加载失败不影响使用，保持默认提示
+        });
+}
+
+// 提交时获取车间（优先手动输入，其次下拉选择）
+function getSelectedWorkshop() {
+    var manual = document.getElementById('uploadWorkshopManual');
+    if (manual && manual.value.trim()) return manual.value.trim();
+    var select = document.getElementById('uploadWorkshop');
+    if (select && select.value) return select.value;
+    return '';
+}
 </script>
 
 <script>
@@ -725,6 +751,8 @@ function isInApp() {
 
 // 页面加载完成后检查离线状态
 document.addEventListener('DOMContentLoaded', function() {
+    // 从当前项目动态加载已识别的车间列表
+    loadProjectWorkshops();
     if (isInApp()) {
         try {
             var offline = AndroidNative.isOfflineMode();

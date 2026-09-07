@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.118")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.119")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 app.add_middleware(
@@ -3269,6 +3269,37 @@ def restore_backup(data: dict):
 
 
 # ========== v0.1.118：手机端语音+文字+图片组合上传 ==========
+
+# ========== v0.1.119：车间列表API（供手机端动态加载，不以通用参考展示） ==========
+@app.get("/api/workshops")
+def get_workshops():
+    """获取当前项目已识别的车间列表（从项目资料解析，不返回通用参考数据）。"""
+    from . import workshop_assign as _wa
+    from . import project_manager as _pm
+    
+    current = _pm.get_current_project()
+    if not current:
+        return {"ok": True, "workshops": [], "message": "未选择项目，上传资料后自动识别车间"}
+    
+    # 从项目已解析的文件中获取车间列表
+    workshops = _wa.list_workshops() if hasattr(_wa, 'list_workshops') else []
+    
+    # 去重
+    seen = set()
+    unique = []
+    for w in workshops:
+        name = w.get("name", w) if isinstance(w, dict) else str(w)
+        if name and name not in seen:
+            seen.add(name)
+            unique.append({"name": name, "file_count": w.get("file_count", 0) if isinstance(w, dict) else 0})
+    
+    return {
+        "ok": True,
+        "workshops": unique,
+        "project": current["name"],
+        "message": f"当前项目已识别 {len(unique)} 个车间（从项目资料自动解析）"
+    }
+
 @app.post("/api/mobile/combined-upload")
 async def mobile_combined_upload(request: Request):
     """接收手机端组合上传（语音+文字+图片同步），自动归入当前项目解析。"""

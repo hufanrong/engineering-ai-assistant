@@ -520,7 +520,7 @@
     <h3 style="margin:0 0 6px;font-size:15px">🤖 智能工程文件生成（v0.1.107）</h3>
     <div class="msg" style="margin-bottom:6px">用自然语言描述要生成的文件，系统自动识别类型、读取项目数据填充、列出缺失项。例如："生成球磨机安装的安全技术交底"、"制作高压釜基础验收记录"</div>
     <div class="row" style="margin-bottom:6px">
-      <input type="text" id="smartDocInput" placeholder="输入：生成球磨机安全交底 / 制作高压釜施工方案 / 生成浮选机开箱检验记录..." style="flex:1;min-width:200px;padding:6px 10px;font-size:13px">
+      <input type="text" id="smartDocInput" placeholder="输入：生成设备安全交底 / 制作施工方案 / 生成开箱检验记录..." style="flex:1;min-width:200px;padding:6px 10px;font-size:13px">
       <button class="btn" id="btnSmartDocAnalyze" style="background:#6B7280;font-size:12px;padding:4px 10px">分析</button>
       <button class="btn" id="btnSmartDocGenerate" style="background:#1E5AA8;font-size:12px;padding:4px 10px">生成文件</button>
     </div>
@@ -628,7 +628,7 @@
         <select id="genTemplateId" style="padding:4px 8px;font-size:12px;min-width:150px">
           <option value="">选择模板...</option>
         </select>
-        <input type="text" id="genEquipment" placeholder="设备名称（如：球磨机）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+        <input type="text" id="genEquipment" placeholder="设备名称（从项目资料识别）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
         <input type="text" id="genExtraData" placeholder="额外数据（JSON，如：{&quot;施工单位&quot;:&quot;XX公司&quot;}）" style="flex:2;min-width:150px;padding:4px 8px;font-size:12px">
         <button class="btn" id="btnRenderTemplate" style="background:#1E5AA8;font-size:12px;padding:4px 10px">生成文件</button>
       </div>
@@ -1099,11 +1099,7 @@
   <h3 style="margin:0 0 6px;font-size:15px">技术交底自动生成（v0.1.104）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成技术交底记录（8个标准章节，含精度要求和签字栏）。</div>
   <div class="row" style="margin-bottom:6px">
-    <select id="tdName" style="padding:4px 8px;font-size:12px">
-      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
-      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
-      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
-    </select>
+    <input type="text" id="tdName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <input type="text" id="tdProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
     <input type="text" id="tdWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
     <button class="btn" id="btnTdGenerate" style="background:#1E5AA8">生成交底</button>
@@ -1116,11 +1112,7 @@
   <h3 style="margin:0 0 6px;font-size:15px">安全交底自动生成（v0.1.105）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库和危险源库自动生成安全交底记录（8个标准章节，含危险源辨识和应急预案）。</div>
   <div class="row" style="margin-bottom:6px">
-    <select id="sdName" style="padding:4px 8px;font-size:12px">
-      <option value="球磨机">球磨机</option><option value="高压釜">高压釜</option>
-      <option value="闪速炉">闪速炉</option><option value="颚式破碎机">颚式破碎机</option>
-      <option value="浮选机">浮选机</option><option value="半自磨机">半自磨机</option>
-    </select>
+    <input type="text" id="sdName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <input type="text" id="sdProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
     <input type="text" id="sdWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
     <button class="btn" id="btnSdGenerate" style="background:#FF7A00">生成交底</button>
@@ -1136,11 +1128,7 @@
   <h3 style="margin:0 0 6px;font-size:15px">竣工资料自动组卷增强（v0.1.106）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成竣工资料组卷目录（8卷80+项资料，根据设备类型自动调整）。</div>
   <div class="row" style="margin-bottom:6px">
-    <select id="aeName" style="padding:4px 8px;font-size:12px">
-      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
-      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
-      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
-    </select>
+    <input type="text" id="aeName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <input type="text" id="aeProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
     <input type="text" id="aeWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
     <button class="btn" id="btnAeGenerate" style="background:#1E5AA8">生成组卷</button>
@@ -1157,11 +1145,7 @@
   <h3 style="margin:0 0 6px;font-size:15px">施工方案自动生成增强（v0.1.101）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细知识库自动生成完整施工方案（11个标准章节）。</div>
   <div class="row" style="margin-bottom:6px">
-    <select id="cpeName" style="padding:4px 8px;font-size:12px">
-      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
-      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
-      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
-    </select>
+    <input type="text" id="cpeName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <input type="text" id="cpeProject" placeholder="项目名称" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
     <input type="text" id="cpeWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
     <button class="btn" id="btnCpeGenerate" style="background:#1E5AA8">生成方案</button>
@@ -1174,11 +1158,7 @@
   <h3 style="margin:0 0 6px;font-size:15px">吊装方案自动生成增强（v0.1.102）</h3>
   <div class="msg" style="margin-bottom:6px">基于设备详细参数和吊装参数库自动生成完整吊装方案（12个标准章节，含吊车选型和吊装计算）。</div>
   <div class="row" style="margin-bottom:6px">
-    <select id="lpeName" style="padding:4px 8px;font-size:12px">
-      <option value="球磨机">球磨机</option><option value="半自磨机">半自磨机</option><option value="高压釜">高压釜</option>
-      <option value="闪速炉">闪速炉</option><option value="浮选机">浮选机</option><option value="颚式破碎机">颚式破碎机</option>
-      <option value="浓缩机">浓缩机</option><option value="压滤机">压滤机</option>
-    </select>
+    <input type="text" id="lpeName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <input type="number" id="lpeWeight" placeholder="重量(t)" style="width:80px;padding:4px 8px;font-size:12px">
     <input type="number" id="lpeHeight" placeholder="高度(m)" style="width:80px;padding:4px 8px;font-size:12px">
     <input type="number" id="lpeRadius" placeholder="半径(m)" style="width:80px;padding:4px 8px;font-size:12px">
@@ -1196,9 +1176,7 @@
   <h3 style="margin:0 0 6px;font-size:15px">故障诊断AI助手（v0.1.103）</h3>
   <div class="msg" style="margin-bottom:6px">基于常见故障库进行智能故障诊断，支持症状匹配、原因排查、处理建议、预防措施。</div>
   <div class="row" style="margin-bottom:6px">
-    <select id="fdName" style="padding:4px 8px;font-size:12px">
-      <option value="球磨机">球磨机</option><option value="高压釜">高压釜</option>
-    </select>
+    <input type="text" id="fdName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <input type="text" id="fdSymptoms" placeholder="故障症状（逗号分隔，如：温度过高,异响）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
     <button class="btn" id="btnFdDiagnose" style="background:#1E5AA8">故障诊断</button>
   </div>
@@ -1253,16 +1231,7 @@
   <h3 style="margin:0 0 6px;font-size:15px">设备详细知识库（v0.1.100）</h3>
   <div class="msg" style="margin-bottom:6px">8种典型设备详细参数、施工要点、质量标准、常见故障、验收项目。</div>
   <div class="row" style="margin-bottom:6px">
-    <select id="eqDetailName" style="padding:4px 8px;font-size:12px">
-      <option value="球磨机">球磨机</option>
-      <option value="半自磨机">半自磨机</option>
-      <option value="高压釜">高压釜</option>
-      <option value="闪速炉">闪速炉</option>
-      <option value="浮选机">浮选机</option>
-      <option value="颚式破碎机">颚式破碎机</option>
-      <option value="浓缩机">浓缩机</option>
-      <option value="压滤机">压滤机</option>
-    </select>
+    <input type="text" id="eqDetailName" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <button class="btn" id="btnEqDetail" style="background:#1E5AA8">设备详情</button>
     <button class="btn" id="btnEqPoints">施工要点</button>
     <button class="btn" id="btnEqStandards">质量标准</button>
@@ -1297,7 +1266,7 @@
       <option value="试运转">试运转</option>
       <option value="竣工验收">竣工验收</option>
     </select>
-    <input type="text" id="sdDeviceType" placeholder="设备类型（如球磨机）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="sdDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
   </div>
   <div id="sdPhasesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
   <div id="sdCheckResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
@@ -1316,7 +1285,7 @@
     <button class="btn" id="btnMbBatchParse">批量解析</button>
   </div>
   <div class="row" style="margin-bottom:6px">
-    <input type="text" id="mbFilename" placeholder="文件名（如 球磨机开箱照片.jpg）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
+    <input type="text" id="mbFilename" placeholder="文件名（如 设备开箱照片.jpg）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
     <input type="text" id="mbUploader" placeholder="上传人" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
     <input type="text" id="mbWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
   </div>
@@ -1340,7 +1309,7 @@
       <option value="lifting_record">吊装作业记录</option>
       <option value="welding_record">焊接记录</option>
     </select>
-    <input type="text" id="wordDeviceType" placeholder="设备类型（如球磨机）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="wordDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
     <button class="btn" id="btnWordExport" style="background:#1E5AA8">导出Word</button>
   </div>
   <div id="wordExportResult" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
@@ -1387,7 +1356,7 @@
       <option value="lifting_record">吊装作业记录</option>
       <option value="welding_record">焊接记录</option>
     </select>
-    <input type="text" id="drDeviceType" placeholder="设备类型（如球磨机）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="drDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
   </div>
   <div id="drMappingResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
   <div id="drGenerateResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
@@ -1414,7 +1383,7 @@
       <option value="lifting_record">吊装作业记录</option>
       <option value="welding_record">焊接记录</option>
     </select>
-    <input type="text" id="frDeviceType" placeholder="设备类型（如球磨机）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+    <input type="text" id="frDeviceType" placeholder="设备类型（从项目资料识别）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
     <input type="text" id="frWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
   </div>
   <div id="frTypesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
@@ -1517,17 +1486,7 @@
   <div class="msg" style="margin-bottom:6px">针对矿山设备重量大、尺寸大、安装要求特殊的特点，生成专用施工方案和吊装方案。</div>
   <div class="row" style="margin-bottom:6px">
     <input type="text" id="planTagInput" placeholder="设备位号如：M-101" style="flex:1;min-width:100px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
-    <select id="planTypeSelect" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
-      <option value="">选择设备类型</option>
-      <option value="破碎机">破碎机</option>
-      <option value="球磨机">球磨机</option>
-      <option value="半自磨机">半自磨机</option>
-      <option value="浮选机">浮选机</option>
-      <option value="高压釜">高压釜</option>
-      <option value="闪速炉">闪速炉</option>
-      <option value="转炉">转炉</option>
-      <option value="余热锅炉">余热锅炉</option>
-    </select>
+    <input type="text" id="planTypeSelect" placeholder="设备名称（从项目资料识别或手动输入）" style="flex:1;min-width:150px;padding:6px 10px;font-size:13px;border:1px solid #ddd;border-radius:6px">
     <button class="btn" id="btnGenConstructionPlan" style="background:#1E5AA8">施工方案</button>
     <button class="btn" id="btnGenLiftingPlan" style="background:#FF7A00">吊装方案</button>
   </div>
@@ -1535,13 +1494,13 @@
   <div id="liftingPlanResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
 </div>
 
-<!-- v0.1.84：矿山/选矿/冶炼设备知识库 -->
-<div id="project-bar" class="project-bar" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
-  <h3 style="margin:0 0 6px;font-size:15px">矿山/选矿/冶炼设备知识库（v0.1.84）</h3>
+<!-- v0.1.84：矿山/选矿/冶炼设备知识库（已隐藏，仅内部AI参考，不在前端展示） -->
+<div style="display:none">
+  <h3 style="margin:0 0 6px;font-size:15px">矿山/选矿/冶炼设备知识库（内部参考，不展示）（v0.1.84）</h3>
   <div class="msg" style="margin-bottom:6px">矿山设备、选厂设备、湿法/火法冶炼设备分类清单，吊装参数、技术交底、隐蔽工程、开箱验收、设计变更、货损、施工日志要点。</div>
   <div class="row" style="margin-bottom:6px">
     <button class="btn" id="btnMiningCategories" style="background:#1E5AA8">设备分类清单</button>
-    <input type="text" id="miningTypeInput" placeholder="输入设备类型如：球磨机" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+    <input type="text" id="miningTypeInput" placeholder="输入设备类型（从项目资料识别）" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">
     <button class="btn" id="btnMiningCategory">查询分类</button>
     <button class="btn" id="btnMiningLifting">吊装参数</button>
   </div>
