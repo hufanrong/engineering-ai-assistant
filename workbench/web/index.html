@@ -54,8 +54,74 @@
   .qr{color:var(--sub);font-size:12px;margin-top:8px}
   @media(max-width:480px){ .wrap{padding:8px} .tab{padding:6px 10px;font-size:12px} th,td{font-size:12px} }
 </style>
+
+<style>
+.update-banner {
+    background: linear-gradient(135deg, #1E5AA8, #2E7BD4);
+    color: #fff;
+    padding: 10px 20px;
+    display: none;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    z-index: 9999;
+}
+.update-banner.show { display: flex; }
+.update-banner .icon { font-size: 20px; }
+.update-banner .info { flex: 1; }
+.update-banner .info .title { font-weight: 600; font-size: 14px; }
+.update-banner .info .desc { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+.update-banner .btn-update {
+    background: #FF7A00;
+    color: #fff;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.update-banner .btn-update:hover { background: #E66A00; }
+.update-banner .btn-update:disabled { background: #999; cursor: not-allowed; }
+.update-banner .btn-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    opacity: 0.7;
+    padding: 4px;
+}
+.update-banner .btn-close:hover { opacity: 1; }
+.update-progress {
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+    height: 4px;
+    margin-top: 6px;
+    overflow: hidden;
+}
+.update-progress-bar {
+    background: #FF7A00;
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s;
+}
+</style>
 </head>
 <body>
+<div class="update-banner" id="updateBanner">
+    <span class="icon">🔄</span>
+    <div class="info">
+        <div class="title" id="updateTitle">发现新版本</div>
+        <div class="desc" id="updateDesc">点击更新按钮自动下载并安装最新版本</div>
+        <div class="update-progress" id="updateProgress" style="display:none;">
+            <div class="update-progress-bar" id="updateProgressBar"></div>
+        </div>
+    </div>
+    <button class="btn-update" id="btnUpdateNow" onclick="performUpdate()">立即更新</button>
+    <button class="btn-close" onclick="hideUpdateBanner()">×</button>
+</div>
+
 <div class="wrap">
   <header>
     <div class="logo">繁</div>
@@ -1643,5 +1709,85 @@
 </div>
 
 <script src="/web/app.js"></script>
+
+<script>
+// 自动更新功能
+var updateInfo = null;
+
+function checkForUpdates() {
+    fetch('/api/update/check')
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.has_update) {
+                updateInfo = data;
+                showUpdateBanner(data);
+            }
+        })
+        .catch(e => console.log('检查更新失败', e));
+}
+
+function showUpdateBanner(data) {
+    var banner = document.getElementById('updateBanner');
+    document.getElementById('updateTitle').textContent = 
+        '发现新版本 v' + data.latest_version + '（当前 v' + data.current_version + '）';
+    document.getElementById('updateDesc').textContent = 
+        '最新更新：' + (data.latest_commit_msg || '').substring(0, 60);
+    banner.classList.add('show');
+}
+
+function hideUpdateBanner() {
+    document.getElementById('updateBanner').classList.remove('show');
+}
+
+function performUpdate() {
+    var btn = document.getElementById('btnUpdateNow');
+    var progress = document.getElementById('updateProgress');
+    var progressBar = document.getElementById('updateProgressBar');
+    
+    if (!confirm('确定要更新到最新版本吗？\n\n更新前会自动备份当前版本，数据目录不会被覆盖。\n更新完成后需要重启服务。')) {
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = '更新中...';
+    progress.style.display = 'block';
+    progressBar.style.width = '20%';
+    
+    fetch('/api/update/perform', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({backup: true, force: false})
+    })
+    .then(r => r.json())
+    .then(data => {
+        progressBar.style.width = '100%';
+        
+        if (data.ok) {
+            btn.textContent = '更新成功';
+            alert('更新成功！\n\n' + (data.restart_hint || data.message || '') + 
+                  '\n\n请关闭当前窗口，重新运行 run_workbench.bat 启动新版本。');
+            setTimeout(() => {
+                hideUpdateBanner();
+                location.reload();
+            }, 2000);
+        } else {
+            btn.disabled = false;
+            btn.textContent = '立即更新';
+            alert('更新失败：' + (data.error || '未知错误') + 
+                  '\n\n' + (data.suggestion || ''));
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.textContent = '立即更新';
+        alert('更新请求失败：' + e.message);
+    });
+}
+
+// 页面加载后3秒检查更新
+setTimeout(checkForUpdates, 3000);
+// 每小时检查一次
+setInterval(checkForUpdates, 3600000);
+</script>
 </body>
 </html>

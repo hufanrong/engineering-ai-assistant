@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.111")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.112")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -3218,6 +3218,45 @@ def merge_projects(data: dict):
 
 
 # ========== v0.1.111：手机端离线数据批量接收 ==========
+
+# ========== v0.1.112：自动更新 ==========
+@app.get("/api/update/check")
+def check_update():
+    """检查GitHub最新版本。"""
+    from . import auto_updater as _au
+    return _au.get_latest_version_from_github()
+
+
+@app.post("/api/update/perform")
+def perform_update(data: dict):
+    """执行自动更新。"""
+    from . import auto_updater as _au
+    return _au.perform_update(
+        backup=data.get("backup", True),
+        force=data.get("force", False),
+    )
+
+
+@app.get("/api/update/log")
+def update_log():
+    """获取更新日志。"""
+    from . import auto_updater as _au
+    return _au.get_update_log()
+
+
+@app.get("/api/update/backups")
+def update_backups():
+    """获取备份列表。"""
+    from . import auto_updater as _au
+    return _au.get_backup_list()
+
+
+@app.post("/api/update/restore")
+def restore_backup(data: dict):
+    """从备份恢复。"""
+    from . import auto_updater as _au
+    return _au.restore_backup(data.get("backup_name", ""))
+
 @app.post("/api/mobile/offline-batch-upload")
 async def mobile_offline_batch_upload(request: Request):
     """接收手机端离线缓存的数据（文件或文字记录），自动归入当前项目。"""
