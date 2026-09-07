@@ -514,6 +514,55 @@
   <div id="spatialVizContainer" style="overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:5px;background:#fff;padding:5px;display:none"></div>
 </div>
 
+<!-- v0.1.96：施工进度资料联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">施工进度与资料生成联动（v0.1.96）</h3>
+  <div class="msg" style="margin-bottom:6px">根据施工进度自动检查对应阶段资料完整性，生成需要的资料清单。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnSdPhases" style="background:#1E5AA8">阶段资料映射</button>
+    <button class="btn" id="btnSdCheck">阶段资料检查</button>
+    <button class="btn" id="btnSdGenerate">生成资料清单</button>
+    <button class="btn" id="btnSdCheckFull">全进度检查</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <select id="sdPhase" style="padding:4px 8px;font-size:12px">
+      <option value="施工准备">施工准备</option>
+      <option value="基础施工">基础施工</option>
+      <option value="设备开箱">设备开箱</option>
+      <option value="设备安装">设备安装</option>
+      <option value="管道安装">管道安装</option>
+      <option value="电气安装">电气安装</option>
+      <option value="试运转">试运转</option>
+      <option value="竣工验收">竣工验收</option>
+    </select>
+    <input type="text" id="sdDeviceType" placeholder="设备类型（如球磨机）" style="flex:1;min-width:100px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="sdPhasesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="sdCheckResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="sdGenerateResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="sdCheckFullResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
+<!-- v0.1.97：移动端上传联动 -->
+<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
+  <h3 style="margin:0 0 6px;font-size:15px">移动端资料上传与解析联动（v0.1.97）</h3>
+  <div class="msg" style="margin-bottom:6px">移动端上传资料后自动解析，自动识别资料类型，自动归类到项目/车间/设备。</div>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn" id="btnMbTypes" style="background:#1E5AA8">上传类型</button>
+    <button class="btn" id="btnMbClassify">自动分类</button>
+    <button class="btn" id="btnMbRecords">上传记录</button>
+    <button class="btn" id="btnMbBatchParse">批量解析</button>
+  </div>
+  <div class="row" style="margin-bottom:6px">
+    <input type="text" id="mbFilename" placeholder="文件名（如 球磨机开箱照片.jpg）" style="flex:1;min-width:150px;padding:4px 8px;font-size:12px">
+    <input type="text" id="mbUploader" placeholder="上传人" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+    <input type="text" id="mbWorkshop" placeholder="车间" style="flex:1;min-width:80px;padding:4px 8px;font-size:12px">
+  </div>
+  <div id="mbTypesResult" style="font-size:12px;max-height:300px;overflow-y:auto;display:none"></div>
+  <div id="mbClassifyResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+  <div id="mbRecordsResult" style="font-size:12px;max-height:500px;overflow-y:auto;display:none"></div>
+</div>
+
 <!-- v0.1.94：Word文档导出 -->
 <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(30,90,168,0.03)">
   <h3 style="margin:0 0 6px;font-size:15px">Word文档导出（v0.1.94）</h3>

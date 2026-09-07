@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.95")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.97")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2773,6 +2773,110 @@ def mining_ai_kb_multi_search(query: str = "", top_k: int = 10):
     from . import mining_ai_knowledge_link as _maik
     return _maik.multi_knowledge_base_search(query, top_k=top_k)
 
+
+
+@app.get("/api/mining-schedule-doc/phases")
+def mining_schedule_doc_phases():
+    """v0.1.96：获取施工进度阶段到工程资料的映射。"""
+    from . import mining_schedule_doc_link as _msdl
+    return _msdl.get_schedule_phase_docs()
+
+
+@app.get("/api/mining-schedule-doc/check")
+def mining_schedule_doc_check(phase: str = "", device_type: str = ""):
+    """v0.1.96：检查指定施工阶段的资料完整性。"""
+    from . import mining_schedule_doc_link as _msdl
+    from . import archive as _archive
+    existing_docs = []
+    try:
+        status = _archive.get_archive_status()
+        if status.get("ok"):
+            for vol in status.get("volumes", []):
+                for doc in vol.get("docs", []):
+                    existing_docs.append(doc.get("name", ""))
+    except Exception:
+        pass
+    return _msdl.check_schedule_phase_docs(phase, existing_docs, device_type)
+
+
+@app.get("/api/mining-schedule-doc/generate")
+def mining_schedule_doc_generate(phase: str = "", device_type: str = "", device_tag: str = "", workshop: str = ""):
+    """v0.1.96：为指定施工阶段生成需要的资料清单。"""
+    from . import mining_schedule_doc_link as _msdl
+    return _msdl.generate_docs_for_phase(phase, device_type, device_tag, workshop)
+
+
+
+@app.get("/api/mining-mobile/upload-types")
+def mining_mobile_upload_types():
+    """v0.1.97：获取移动端支持的上传类型。"""
+    from . import mining_mobile_upload as _mmu
+    return _mmu.get_upload_types()
+
+
+@app.post("/api/mining-mobile/auto-classify")
+def mining_mobile_auto_classify(data: dict):
+    """v0.1.97：自动分类上传资料。"""
+    from . import mining_mobile_upload as _mmu
+    return _mmu.auto_classify_upload(
+        data.get("filename", ""),
+        data.get("content", ""),
+        data.get("uploader", ""),
+        data.get("workshop", ""),
+        data.get("project", ""),
+    )
+
+
+@app.get("/api/mining-mobile/records")
+def mining_mobile_records(status: str = "", uploader: str = "", workshop: str = "", limit: int = 50):
+    """v0.1.97：获取上传记录列表。"""
+    from . import mining_mobile_upload as _mmu
+    return _mmu.get_upload_records(status, uploader, workshop, limit)
+
+
+@app.post("/api/mining-mobile/update-record")
+def mining_mobile_update_record(data: dict):
+    """v0.1.97：更新上传记录。"""
+    from . import mining_mobile_upload as _mmu
+    return _mmu.update_upload_record(data.get("record_id", ""), data.get("updates", {}))
+
+
+@app.post("/api/mining-mobile/batch-parse")
+def mining_mobile_batch_parse(data: dict):
+    """v0.1.97：批量解析上传文件。"""
+    from . import mining_mobile_upload as _mmu
+    return _mmu.batch_parse_uploads(data.get("record_ids"), data.get("status", "待解析"))
+
+
+@app.get("/api/mining-mobile/detect-type")
+def mining_mobile_detect_type(filename: str = ""):
+    """v0.1.97：检测上传类型。"""
+    from . import mining_mobile_upload as _mmu
+    return _mmu.detect_upload_type(filename)
+
+
+@app.get("/api/mining-mobile/detect-doc-type")
+def mining_mobile_detect_doc_type(content: str = "", filename: str = ""):
+    """v0.1.97：识别资料类型。"""
+    from . import mining_mobile_upload as _mmu
+    return _mmu.detect_doc_type(content, filename)
+
+@app.get("/api/mining-schedule-doc/check-full")
+def mining_schedule_doc_check_full(device_type: str = ""):
+    """v0.1.96：检查完整施工进度各阶段的资料完整性。"""
+    from . import mining_schedule_doc_link as _msdl
+    from . import archive as _archive
+    existing_docs = []
+    try:
+        status = _archive.get_archive_status()
+        if status.get("ok"):
+            for vol in status.get("volumes", []):
+                for doc in vol.get("docs", []):
+                    existing_docs.append(doc.get("name", ""))
+    except Exception:
+        pass
+    all_phases = list(_msdl.SCHEDULE_PHASE_TO_DOCS.keys())
+    return _msdl.check_full_schedule_docs(all_phases, existing_docs, device_type)
 
 @app.get("/api/mining-ai-kb/stats")
 def mining_ai_kb_stats():

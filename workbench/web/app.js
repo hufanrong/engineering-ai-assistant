@@ -5029,3 +5029,181 @@ document.addEventListener("DOMContentLoaded", function () {
   var b4 = document.getElementById("btnKbContext");
   if (b4) b4.addEventListener("click", kbContext);
 });
+
+// v0.1.96：施工进度资料联动
+function sdPhases() {
+  fetch("/api/mining-schedule-doc/phases").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("sdPhasesResult");
+    el.style.display = "block";
+    ["sdCheckResult","sdGenerateResult","sdCheckFullResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>施工阶段到资料映射（' + d.total_phases + '个阶段）：</strong><br>';
+    d.phases.forEach(function(p) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + esc(p.phase) + '</strong>：' + esc(p.description) + '<br>';
+      html += '应备资料：' + p.required_docs_count + '项（必备' + p.high_priority_count + '项）';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function sdCheck() {
+  var phase = document.getElementById("sdPhase").value;
+  var dev = document.getElementById("sdDeviceType").value;
+  var url = "/api/mining-schedule-doc/check?phase=" + encodeURIComponent(phase);
+  if (dev) url += "&device_type=" + encodeURIComponent(dev);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("sdCheckResult");
+    el.style.display = "block";
+    ["sdPhasesResult","sdGenerateResult","sdCheckFullResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var color = d.can_proceed ? '#52C41A' : '#EA6668';
+    var html = '<strong>' + esc(d.phase) + '资料检查：</strong><br>';
+    html += '应备：' + d.total_required + '项 | 已有：' + d.total_existing + '项 | 完成率：<span style="color:' + color + '">' + d.completion_rate + '%</span><br>';
+    html += '缺失必备：' + d.missing_high + '项 | 缺失可选：' + d.missing_medium + '项<br>';
+    html += '能否进入下一阶段：<span style="color:' + color + ';font-weight:bold">' + (d.can_proceed ? '可以' : '不可以') + '</span><br>';
+    html += '建议：' + esc(d.suggestion);
+    if (d.missing_high_list && d.missing_high_list.length > 0) {
+      html += '<br><br><span style="color:#EA6668">缺失必备资料：</span><br>';
+      d.missing_high_list.forEach(function(doc) {
+        html += '  • ' + esc(doc.doc_type) + ' - ' + esc(doc.description) + '<br>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function sdGenerate() {
+  var phase = document.getElementById("sdPhase").value;
+  var dev = document.getElementById("sdDeviceType").value;
+  var url = "/api/mining-schedule-doc/generate?phase=" + encodeURIComponent(phase);
+  if (dev) url += "&device_type=" + encodeURIComponent(dev);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("sdGenerateResult");
+    el.style.display = "block";
+    ["sdPhasesResult","sdCheckResult","sdCheckFullResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    if (d.error) { el.innerHTML = '<span style="color:#e74c3c">' + esc(d.error) + '</span>'; return; }
+    var html = '<strong>' + esc(d.phase) + '需要生成的资料清单：</strong><br>';
+    html += '共' + d.total_docs + '项（必备' + d.high_priority + '项，可选' + (d.medium_priority + d.low_priority) + '项）<br><br>';
+    d.docs_to_generate.forEach(function(doc) {
+      var pc = doc.priority === 'high' ? '#EA6668' : (doc.priority === 'medium' ? '#FAAD14' : '#6B7280');
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + pc + '">';
+      html += '<span style="color:' + pc + '">[' + (doc.priority === 'high' ? '必备' : doc.priority === 'medium' ? '可选' : '参考') + ']</span> ';
+      html += '<strong>' + esc(doc.doc_type) + '</strong> - ' + esc(doc.description);
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function sdCheckFull() {
+  var dev = document.getElementById("sdDeviceType").value;
+  var url = "/api/mining-schedule-doc/check-full";
+  if (dev) url += "?device_type=" + encodeURIComponent(dev);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("sdCheckFullResult");
+    el.style.display = "block";
+    ["sdPhasesResult","sdCheckResult","sdGenerateResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>全施工进度资料检查：</strong><br>';
+    html += '检查阶段：' + d.phases_checked + '个 | 应备：' + d.total_required + '项 | 已有：' + d.total_existing + '项<br>';
+    html += '总完成率：' + d.overall_completion_rate + '% | 缺失必备：' + d.total_missing_high + '项<br><br>';
+    d.phase_results.forEach(function(p) {
+      var pc = p.can_proceed ? '#52C41A' : '#EA6668';
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + pc + '">';
+      html += '<strong>' + esc(p.phase) + '</strong>：' + p.completion_rate + '%（' + p.total_existing + '/' + p.total_required + '）';
+      if (p.missing_high > 0) html += ' <span style="color:#EA6668">缺' + p.missing_high + '项必备</span>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnSdPhases");
+  if (b1) b1.addEventListener("click", sdPhases);
+  var b2 = document.getElementById("btnSdCheck");
+  if (b2) b2.addEventListener("click", sdCheck);
+  var b3 = document.getElementById("btnSdGenerate");
+  if (b3) b3.addEventListener("click", sdGenerate);
+  var b4 = document.getElementById("btnSdCheckFull");
+  if (b4) b4.addEventListener("click", sdCheckFull);
+});
+
+// v0.1.97：移动端上传联动
+function mbTypes() {
+  fetch("/api/mining-mobile/upload-types").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mbTypesResult");
+    el.style.display = "block";
+    ["mbClassifyResult","mbRecordsResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>移动端上传类型（' + d.total + '种）：</strong><br>';
+    d.types.forEach(function(t) {
+      html += '<div style="margin-bottom:6px;padding:6px;background:rgba(0,0,0,0.02);border-left:3px solid #1E5AA8">';
+      html += '<strong>' + esc(t.name) + '</strong>（' + esc(t.type) + '）<br>';
+      html += '<span style="color:#6B7280">' + esc(t.description) + '</span><br>';
+      html += '支持格式：' + t.extensions.join(', ') + '<br>';
+      html += '自动解析：' + (t.auto_parse ? '是' : '否') + ' | 解析动作：' + t.parse_actions.join('、');
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function mbClassify() {
+  var fn = document.getElementById("mbFilename").value || "球磨机开箱验收照片.jpg";
+  var up = document.getElementById("mbUploader").value;
+  var ws = document.getElementById("mbWorkshop").value;
+  fetch("/api/mining-mobile/auto-classify", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({filename: fn, content: fn, uploader: up, workshop: ws})
+  }).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mbClassifyResult");
+    el.style.display = "block";
+    ["mbTypesResult","mbRecordsResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>自动分类结果：</strong><br>';
+    html += '文件：' + esc(d.record.filename) + '<br>';
+    html += '上传类型：' + esc(d.upload_type.upload_type_name) + '<br>';
+    var dc = d.doc_type.detected ? '#52C41A' : '#FAAD14';
+    html += '资料类型：<span style="color:' + dc + '">' + esc(d.doc_type.doc_type) + '</span>';
+    if (d.doc_type.confidence) html += '（置信度：' + d.doc_type.confidence + '）';
+    html += '<br>';
+    html += '归类：' + esc(d.classification.project) + ' / ' + esc(d.classification.workshop) + '<br>';
+    html += '上传人：' + esc(d.record.uploader) + ' | 时间：' + esc(d.record.upload_time) + '<br>';
+    html += '状态：' + esc(d.record.status) + '<br>';
+    html += '建议：' + esc(d.suggestion);
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function mbRecords() {
+  fetch("/api/mining-mobile/records?limit=20").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("mbRecordsResult");
+    el.style.display = "block";
+    ["mbTypesResult","mbClassifyResult"].forEach(function(id){document.getElementById(id).style.display="none";});
+    var html = '<strong>上传记录（共' + d.stats.total + '条，显示' + d.returned + '条）：</strong><br>';
+    html += '待解析：' + d.stats.pending_parse + ' | 已解析：' + d.stats.parsed + ' | 待人工确认：' + d.stats.manual_confirm + '<br><br>';
+    d.records.forEach(function(r) {
+      var sc = r.status === '已解析' ? '#52C41A' : (r.status === '待解析' ? '#FAAD14' : '#EA6668');
+      html += '<div style="margin-bottom:4px;padding:4px;background:rgba(0,0,0,0.02);border-left:3px solid ' + sc + '">';
+      html += '<strong>' + esc(r.filename) + '</strong><br>';
+      html += '类型：' + esc(r.upload_type_name) + ' | 资料：' + esc(r.doc_type) + ' | 车间：' + esc(r.workshop) + '<br>';
+      html += '上传人：' + esc(r.uploader) + ' | 时间：' + esc(r.upload_time) + ' | 状态：<span style="color:' + sc + '">' + esc(r.status) + '</span>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function mbBatchParse() {
+  fetch("/api/mining-mobile/batch-parse", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({status: "待解析"})
+  }).then(function(r){return r.json();}).then(function(d){
+    alert("批量解析完成：共" + d.total + "条，成功" + d.parsed + "条，失败" + d.failed + "条");
+    mbRecords();
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnMbTypes");
+  if (b1) b1.addEventListener("click", mbTypes);
+  var b2 = document.getElementById("btnMbClassify");
+  if (b2) b2.addEventListener("click", mbClassify);
+  var b3 = document.getElementById("btnMbRecords");
+  if (b3) b3.addEventListener("click", mbRecords);
+  var b4 = document.getElementById("btnMbBatchParse");
+  if (b4) b4.addEventListener("click", mbBatchParse);
+});

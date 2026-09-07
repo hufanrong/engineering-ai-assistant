@@ -1,4 +1,4 @@
-# 繁工AI · 本地解析工作台（MVP v0.1.95）
+# 繁工AI · 本地解析工作台（MVP v0.1.97）
 
 > 复杂工程，AI 化简 —— 在你自己电脑上运行的文件深度解析引擎。
 > 配套开发提示词文档：`工程AI助手_开发提示词_v3.md`（v3.6 本地解析工作台 / v3.7 方案智能生成）。
@@ -108,6 +108,8 @@ fangong-workbench/
 
 ## 版本记录
 
+- **v0.1.97**：**矿山设备移动端资料上传与解析联动**（新增app/mining_mobile_upload.py；4种上传类型照片/语音/文字/文档各含支持扩展名和自动解析动作；16种资料类型自动识别关键词开箱验收/隐蔽工程/施工日志/安装记录/试运转/安全检查/吊装作业/焊接/技术交底/设计变更/货损/竣工资料/设备台账/施工方案/吊装方案；auto_classify_upload自动分类上传资料类型检测+资料识别+自动归类生成上传记录；detect_upload_type根据扩展名检测上传类型；detect_doc_type根据内容和文件名识别资料类型含置信度；get_upload_records获取上传记录列表支持状态/上传人/车间筛选和统计；update_upload_record更新记录；batch_parse_uploads批量解析；上传记录持久化JSON保留最近500条；新增/api/mining-mobile/{upload-types,auto-classify,records,update-record,batch-parse,detect-type,detect-doc-type}端点；前端新增移动端上传联动区）
+- **v0.1.96**：**矿山设备施工进度与资料生成联动**（新增app/mining_schedule_doc_link.py；8大施工阶段到工程资料映射施工准备/基础施工/设备开箱/设备安装/管道安装/电气安装/试运转/竣工验收各含必备/可选资料5-9项；6种典型设备专用阶段资料球磨机/半自磨机/高压釜/闪速炉/浮选机含轴瓦刮研/大齿圈检测/钛衬里电火花/烘炉曲线等专用资料；check_schedule_phase_docs检查指定阶段资料完整性标记缺失必备/可选判断是否可进入下一阶段；generate_docs_for_phase为指定阶段生成需要的资料清单按优先级排序；check_full_schedule_docs检查完整施工进度各阶段资料完整性；新增/api/mining-schedule-doc/{phases,check,generate,check-full}端点；前端新增施工进度资料联动区）
 - **v0.1.95**：**矿山设备AI助手与资料库深度联动**（新增app/mining_ai_knowledge_link.py；search_equipment_in_knowledge_base在资料库中检索设备信息支持按位号/名称/车间检索返回设备信息/相关文档/相关规范；generate_ai_context_from_knowledge_base从资料库生成AI问答上下文含设备信息/相关文档/规范标准/吊装参数构建专业系统提示词和用户提示词；multi_knowledge_base_search多库联合检索项目库+平台规范库+设备知识库；get_knowledge_base_stats获取资料库统计信息项目文档数/设备数/车间数/规范数/设备类型数；新增/api/mining-ai-kb/{search-equipment,generate-context,multi-search,stats}端点；前端新增AI知识库联动区）
 - **v0.1.94**：**矿山设备资料生成Word文档导出**（新增app/mining_doc_word_export.py；支持8种现场记录类型Word导出施工日志/开箱检验/隐蔽验收/设备安装/试运转/安全检查/吊装作业/焊接记录；export_record_to_word生成标准Word文档含标题/设备信息/数据表格/设备专用要点/签字栏；表格两列布局项目+内容；字体设置宋体正文/黑体标题；batch_export_to_word批量导出；自动关联设备专用要点；新增/api/mining-word/{export,batch-export}端点；前端新增Word导出区）
 - **v0.1.93**：**矿山设备资料生成与现场记录联动**（新增app/mining_doc_record_link.py；8种现场记录到工程资料映射施工日志/开箱检验/隐蔽验收/设备安装/试运转/安全检查/吊装作业/焊接记录各含字段映射13-24项；generate_doc_from_record根据现场记录自动生成工程资料文档自动填充字段标记已填/待填计算完成率；_generate_doc_content生成标准文档格式含编制审核批准签字栏；batch_generate_docs_from_records批量生成；check_record_completeness_for_doc检查现场记录完整性判断是否足够生成资料必填项完成60%以上可生成；自动关联设备专用要点；新增/api/mining-doc-record/{mapping,generate,batch-generate,check-completeness}端点；前端新增资料记录联动区）
