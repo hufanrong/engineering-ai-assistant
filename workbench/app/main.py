@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.72")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.73")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -1914,6 +1914,46 @@ def archive_merge_enhanced_group_workshop():
     from . import archive_merge_enhanced as _ame
     return {"ok": True, "groups": _ame.group_by_workshop()}
 
+
+
+@app.get("/api/unboxing-record/generate")
+def unboxing_record_generate(tag: str, date: str = None, location: str = None):
+    """v0.1.73：生成设备开箱验收记录。"""
+    from . import unboxing_record as _ur
+    return {"ok": True, **_ur.generate_unboxing_record(tag, date, location)}
+
+
+@app.post("/api/unboxing-record/update")
+def unboxing_record_update(body: dict):
+    """v0.1.73：更新开箱验收记录。"""
+    from . import unboxing_record as _ur
+    tag = body.get("tag", "")
+    date = body.get("date", "")
+    updates = body.get("updates", {})
+    if not tag or not date:
+        raise HTTPException(status_code=400, detail="缺少tag或date")
+    return {"ok": True, **_ur.update_unboxing_record(tag, date, updates)}
+
+
+@app.get("/api/unboxing-record/list")
+def unboxing_record_list(tag: str = None):
+    """v0.1.73：列出生成的开箱验收记录。"""
+    from . import unboxing_record as _ur
+    return {"ok": True, "records": _ur.list_unboxing_records(tag)}
+
+
+@app.get("/api/unboxing-record/stats")
+def unboxing_record_stats():
+    """v0.1.73：获取开箱验收统计。"""
+    from . import unboxing_record as _ur
+    return {"ok": True, **_ur.get_unboxing_stats()}
+
+
+@app.get("/api/unboxing-record/points")
+def unboxing_record_points(type: str = ""):
+    """v0.1.73：获取设备类型开箱验收要点。"""
+    from . import unboxing_record as _ur
+    return {"ok": True, "points": _ur.get_unboxing_points(type)}
 
 @app.get("/api/archive-merge-enhanced/group-elevation")
 def archive_merge_enhanced_group_elevation():

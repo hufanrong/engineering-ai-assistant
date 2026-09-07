@@ -3149,3 +3149,71 @@ document.addEventListener("DOMContentLoaded", function () {
   var b5 = document.getElementById("btnArchiveMergeGroupWS");
   if (b5) b5.addEventListener("click", archiveMergeLoadGroupWS);
 });
+
+// v0.1.73：设备安装位置与开箱验收记录联动
+function unboxingGenerate() {
+  var tag = document.getElementById("unboxingDeviceTag").value.trim();
+  if (!tag) { alert("请输入设备位号"); return; }
+  var date = document.getElementById("unboxingDate").value.trim();
+  var url = "/api/unboxing-record/generate?tag=" + encodeURIComponent(tag);
+  if (date) url += "&date=" + encodeURIComponent(date);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if (d.error) { alert("生成失败：" + d.error); return; }
+    var el = document.getElementById("unboxingDetail");
+    el.style.display = "block";
+    var html = '<strong>开箱验收记录 - ' + esc(d.tag) + ' ' + esc(d.name || '') + '</strong><br>';
+    html += '类型: ' + esc(d.type || '未知') + ' | 车间: ' + esc(d.workshop || '未分配');
+    if (d.elevation != null) html += ' | 标高: ' + d.elevation + 'm';
+    html += '<br>';
+    html += '开箱日期: ' + esc(d.unboxing_date) + ' | 到货日期: ' + esc(d.arrival_date) + ' | 验收地点: ' + esc(d.unboxing_location) + '<br>';
+    html += '包装情况: ' + esc(d.packaging_condition) + '<br>';
+    html += '<strong>一、外观检查：</strong><br>';
+    (d.appearance_inspection || []).forEach(function(item, i){ html += (i+1) + '. ' + esc(item) + '<br>'; });
+    html += '<strong>二、附件清单：</strong>' + (d.accessories_list || []).map(esc).join('、') + '<br>';
+    html += '<strong>三、随机文件：</strong>' + (d.documents_list || []).map(esc).join('、') + '<br>';
+    if (d.environment_notes && d.environment_notes.length > 0) {
+      html += '<strong>四、环境注意事项：</strong><br>';
+      d.environment_notes.forEach(function(n, i){ html += (i+1) + '. ' + esc(n) + '<br>'; });
+    }
+    html += '<strong>五、验收结论：</strong><span style="color:#f39c12">' + esc(d.inspection_conclusion) + '</span><br>';
+    html += '<strong>六、参加人员：</strong><br>';
+    (d.participants || []).forEach(function(p){ html += '- ' + esc(p.role) + ': ' + (p.name ? esc(p.name) : '______') + '<br>'; });
+    el.innerHTML = html;
+  }).catch(function(e){ alert("生成失败：" + e.message); });
+}
+function unboxingLoadList() {
+  var tag = document.getElementById("unboxingDeviceTag").value.trim();
+  var url = "/api/unboxing-record/list" + (tag ? "?tag=" + encodeURIComponent(tag) : "");
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("unboxingList");
+    var records = d.records || [];
+    if (records.length === 0) { el.style.display = "block"; el.innerHTML = '<span style="color:#888">暂无开箱记录</span>'; return; }
+    el.style.display = "block";
+    var html = '<strong>开箱记录（' + records.length + '条）：</strong><br>';
+    records.slice(0, 15).forEach(function(rec) {
+      html += '<a href="javascript:void(0)" onclick="document.getElementById(\'unboxingDeviceTag\').value=\'' + rec.tag + '\';document.getElementById(\'unboxingDate\').value=\'' + rec.unboxing_date + '\';unboxingGenerate();" style="color:#1E5AA8">' + rec.unboxing_date + '</a> ' + esc(rec.tag) + ' ' + esc(rec.name || '') + ' (' + esc(rec.type || '') + '/' + esc(rec.workshop || '') + '/' + esc(rec.inspection_conclusion || '') + ')<br>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+function unboxingLoadStats() {
+  fetch("/api/unboxing-record/stats").then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById("unboxingStats");
+    el.style.display = "block";
+    if (d.total_records === 0) { el.innerHTML = '<span style="color:#888">暂无数据</span>'; return; }
+    var html = '<strong>开箱统计：</strong>共' + d.total_records + '条 / 覆盖' + d.devices_with_records + '台设备 / 总设备' + d.total_devices + '台（覆盖率' + d.coverage_percent + '%）<br>';
+    if (d.by_conclusion) {
+      html += '<strong>按结论：</strong>';
+      for (var k in d.by_conclusion) { html += esc(k) + ':' + d.by_conclusion[k] + ' '; }
+    }
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var b1 = document.getElementById("btnUnboxingGenerate");
+  if (b1) b1.addEventListener("click", unboxingGenerate);
+  var b2 = document.getElementById("btnUnboxingList");
+  if (b2) b2.addEventListener("click", unboxingLoadList);
+  var b3 = document.getElementById("btnUnboxingStats");
+  if (b3) b3.addEventListener("click", unboxingLoadStats);
+});
