@@ -6094,3 +6094,155 @@ document.addEventListener("DOMContentLoaded", function () {
   var b2 = document.getElementById("btnRefreshTemplates"); if (b2) b2.addEventListener("click", loadTemplates);
   var b3 = document.getElementById("btnRenderTemplate"); if (b3) b3.addEventListener("click", renderTemplate);
 });
+
+// v0.1.110：项目备份与合并
+function refreshProjectSelectors() {
+  fetch("/api/projects").then(function(r){return r.json();}).then(function(d) {
+    var ids = ["compareProjectA", "compareProjectB", "mergeSource", "mergeTarget"];
+    ids.forEach(function(sid) {
+      var sel = document.getElementById(sid);
+      if (!sel) return;
+      var cur = sel.value;
+      sel.innerHTML = '<option value="">选择项目...</option>';
+      d.projects.forEach(function(p) {
+        var opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name;
+        sel.appendChild(opt);
+      });
+      sel.value = cur;
+    });
+  }).catch(function(){});
+}
+
+function exportProject() {
+  fetch("/api/projects/current").then(function(r){return r.json();}).then(function(d) {
+    if (!d.ok) { alert("请先选择项目"); return; }
+    var el = document.getElementById("backupResult");
+    el.style.display = "block";
+    el.innerHTML = '<span style="color:#6B7280">正在导出...</span>';
+    fetch("/api/projects/export", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project_id:d.project.id})}).then(function(r){return r.json();}).then(function(res) {
+      if (res.ok) {
+        el.innerHTML = '<div style="padding:6px;background:rgba(30,90,168,0.05);border-radius:4px">' +
+          '<strong>' + esc(res.message) + '</strong><br>' +
+          '文件：<span style="font-family:monospace;font-size:11px">' + esc(res.output_path) + '</span><br>' +
+          '大小：' + (res.backup_size/1024).toFixed(1) + 'KB | 文件数：' + res.file_count +
+          '</div>';
+      } else {
+        el.innerHTML = '<span style="color:#EA6668">' + esc(res.error) + '</span>';
+      }
+    }).catch(function(e){ el.innerHTML = '<span style="color:#EA6668">导出失败：' + e + '</span>'; });
+  });
+}
+
+function listBackups() {
+  fetch("/api/projects/backups").then(function(r){return r.json();}).then(function(d) {
+    var el = document.getElementById("backupList");
+    el.style.display = "block";
+    if (d.total === 0) {
+      el.innerHTML = '<span style="color:#6B7280">暂无备份文件</span>';
+      return;
+    }
+    var html = '<strong>备份列表（' + d.total + '个）：</strong><br>';
+    d.backups.forEach(function(b) {
+      html += '<div style="padding:4px;margin-top:4px;background:rgba(0,0,0,0.02);border-radius:4px;display:flex;justify-content:space-between;align-items:center">';
+      html += '<div><strong>' + esc(b.file_name) + '</strong><br><span style="font-size:11px;color:#6B7280">' + b.created_at + ' | ' + (b.file_size/1024).toFixed(1) + 'KB</span></div>';
+      html += '<button class="btn" style="background:#EA6668;font-size:10px;padding:2px 6px" onclick="deleteBackup(\'' + esc(b.file_name) + '\')">删除</button>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){});
+}
+
+function deleteBackup(name) {
+  if (!confirm("确定删除备份 " + name + "？")) return;
+  fetch("/api/projects/backups/delete", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({backup_file:name})}).then(function(r){return r.json();}).then(function(d) {
+    alert(d.message || d.error);
+    listBackups();
+  }).catch(function(){});
+}
+
+function importProject() {
+  var fileInput = document.getElementById("backupFile");
+  if (!fileInput.files || fileInput.files.length === 0) { alert("请选择 .fgbak 备份文件"); return; }
+  var formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+  formData.append("new_project_name", document.getElementById("importProjectName").value);
+  var el = document.getElementById("backupResult");
+  el.style.display = "block";
+  el.innerHTML = '<span style="color:#6B7280">正在导入...</span>';
+  fetch("/api/projects/import", {method:"POST", body:formData}).then(function(r){return r.json();}).then(function(d) {
+    if (d.ok) {
+      el.innerHTML = '<div style="padding:6px;background:rgba(82,196,26,0.05);border-radius:4px"><strong>' + esc(d.message) + '</strong></div>';
+      loadProjects();
+      refreshProjectSelectors();
+    } else {
+      el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>';
+    }
+  }).catch(function(e){ el.innerHTML = '<span style="color:#EA6668">导入失败：' + e + '</span>'; });
+}
+
+function compareProjects() {
+  var a = document.getElementById("compareProjectA").value;
+  var b = document.getElementById("compareProjectB").value;
+  if (!a || !b) { alert("请选择两个项目"); return; }
+  if (a === b) { alert("两个项目不能相同"); return; }
+  var el = document.getElementById("compareResult");
+  el.style.display = "block";
+  el.innerHTML = '<span style="color:#6B7280">正在对比...</span>';
+  fetch("/api/projects/compare", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project_a_id:a, project_b_id:b})}).then(function(r){return r.json();}).then(function(d) {
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var s = d.summary;
+    var html = '<div style="padding:6px;background:rgba(255,122,0,0.05);border-radius:4px;margin-bottom:6px">';
+    html += '<strong>对比结果：</strong>' + esc(d.project_a.name) + '（' + d.project_a.device_count + '设备） vs ' + esc(d.project_b.name) + '（' + d.project_b.device_count + '设备）<br>';
+    html += '相同设备：<span style="color:#52C41A">' + s.same_count + '</span> | ';
+    html += '数据冲突：<span style="color:#EA6668">' + s.conflict_count + '</span> | ';
+    html += '仅A有：<span style="color:#1E5AA8">' + s.only_in_a_count + '</span> | ';
+    html += '仅B有：<span style="color:#FF7A00">' + s.only_in_b_count + '</span>';
+    html += '</div>';
+    if (d.conflicts.length > 0) {
+      html += '<strong style="color:#EA6668">冲突设备（' + d.conflicts.length + '）：</strong><br>';
+      d.conflicts.forEach(function(c) {
+        html += '<div style="padding:4px;margin:2px 0;background:rgba(234,102,104,0.05);border-radius:4px;font-size:11px">';
+        html += '<strong>' + esc(c.name) + '</strong>（A:' + esc(c.tag_a) + ' / B:' + esc(c.tag_b) + '）<br>';
+        c.conflict_fields.forEach(function(f) {
+          html += '  ' + esc(f.field) + ': A=' + esc(f.value_a) + ' ≠ B=' + esc(f.value_b) + '<br>';
+        });
+        html += '</div>';
+      });
+    }
+    el.innerHTML = html;
+  }).catch(function(e){ el.innerHTML = '<span style="color:#EA6668">对比失败：' + e + '</span>'; });
+}
+
+function mergeProjects() {
+  var src = document.getElementById("mergeSource").value;
+  var tgt = document.getElementById("mergeTarget").value;
+  var strategy = document.getElementById("mergeStrategy").value;
+  if (!src || !tgt) { alert("请选择源项目和目标项目"); return; }
+  if (src === tgt) { alert("源项目和目标项目不能相同"); return; }
+  var el = document.getElementById("mergeResult");
+  el.style.display = "block";
+  el.innerHTML = '<span style="color:#6B7280">正在合并...</span>';
+  fetch("/api/projects/merge", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({source_project_id:src, target_project_id:tgt, conflict_strategy:strategy})}).then(function(r){return r.json();}).then(function(d) {
+    if (!d.ok) { el.innerHTML = '<span style="color:#EA6668">' + esc(d.error) + '</span>'; return; }
+    var html = '<div style="padding:6px;background:rgba(30,90,168,0.05);border-radius:4px">';
+    html += '<strong>' + esc(d.message) + '</strong><br>';
+    html += '合并：' + d.merged_count + ' | 跳过：' + d.skipped_count + ' | 冲突：' + d.conflict_count;
+    if (d.pending_manual_count > 0) {
+      html += ' | 待人工确认：<span style="color:#FF7A00">' + d.pending_manual_count + '</span>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+    loadProjects();
+  }).catch(function(e){ el.innerHTML = '<span style="color:#EA6668">合并失败：' + e + '</span>'; });
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  setTimeout(refreshProjectSelectors, 500);
+  var b1 = document.getElementById("btnExportProject"); if (b1) b1.addEventListener("click", exportProject);
+  var b2 = document.getElementById("btnListBackups"); if (b2) b2.addEventListener("click", listBackups);
+  var b3 = document.getElementById("btnImportProject"); if (b3) b3.addEventListener("click", importProject);
+  var b4 = document.getElementById("btnCompareProjects"); if (b4) b4.addEventListener("click", compareProjects);
+  var b5 = document.getElementById("btnMergeProjects"); if (b5) b5.addEventListener("click", mergeProjects);
+});

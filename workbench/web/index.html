@@ -110,7 +110,61 @@
     <h3 style="margin:0 0 6px;font-size:15px">📋 模板管理 - 基于模板生成文件（v0.1.108）</h3>
     <div class="msg" style="margin-bottom:6px">上传Word模板（.docx），模板中使用 {{字段名}} 作为占位符，系统自动用项目数据库数据填充生成文件。支持字段：设备名称、项目名称、车间、施工单位、日期、供货厂家、设备型号、安装位置等28种。</div>
     
-    <!-- 上传模板 -->
+    
+  <!-- v0.1.110：项目备份与合并 -->
+  <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(82,196,26,0.03)">
+    <h3 style="margin:0 0 6px;font-size:15px">💾 项目备份与合并（v0.1.110）</h3>
+    
+    <!-- 备份导入导出 -->
+    <div style="margin-bottom:10px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px">
+      <strong style="font-size:13px">数据备份：</strong>
+      <div class="row" style="margin-top:6px;margin-bottom:6px">
+        <button class="btn" id="btnExportProject" style="background:#1E5AA8;font-size:12px;padding:4px 10px">导出当前项目</button>
+        <button class="btn" id="btnListBackups" style="background:#6B7280;font-size:12px;padding:4px 10px">备份列表</button>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <input type="file" id="backupFile" accept=".fgbak" style="font-size:12px">
+        <input type="text" id="importProjectName" placeholder="新项目名称（留空用原名）" style="flex:1;min-width:120px;padding:4px 8px;font-size:12px">
+        <button class="btn" id="btnImportProject" style="background:#52C41A;font-size:12px;padding:4px 10px">导入备份</button>
+      </div>
+      <div id="backupResult" style="font-size:12px;display:none"></div>
+      <div id="backupList" style="font-size:12px;max-height:200px;overflow-y:auto;display:none"></div>
+    </div>
+
+    <!-- 项目对比合并 -->
+    <div style="padding:8px;background:rgba(0,0,0,0.02);border-radius:6px">
+      <strong style="font-size:13px">项目对比合并：</strong>
+      <div class="row" style="margin-top:6px;margin-bottom:6px">
+        <select id="compareProjectA" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">选择项目A...</option>
+        </select>
+        <span style="font-size:12px;color:#6B7280">对比</span>
+        <select id="compareProjectB" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">选择项目B...</option>
+        </select>
+        <button class="btn" id="btnCompareProjects" style="background:#FF7A00;font-size:12px;padding:4px 10px">对比</button>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <span style="font-size:12px">合并方向：</span>
+        <select id="mergeSource" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">源项目...</option>
+        </select>
+        <span style="font-size:12px">→</span>
+        <select id="mergeTarget" style="padding:4px 8px;font-size:12px;min-width:120px">
+          <option value="">目标项目...</option>
+        </select>
+        <select id="mergeStrategy" style="padding:4px 8px;font-size:12px">
+          <option value="manual">冲突留人工确认</option>
+          <option value="source">以源项目为准</option>
+          <option value="target">以目标项目为准</option>
+        </select>
+        <button class="btn" id="btnMergeProjects" style="background:#1E5AA8;font-size:12px;padding:4px 10px">合并设备</button>
+      </div>
+      <div id="compareResult" style="font-size:12px;max-height:400px;overflow-y:auto;display:none"></div>
+      <div id="mergeResult" style="font-size:12px;display:none"></div>
+    </div>
+  </div>
+<!-- 上传模板 -->
     <div style="margin-bottom:10px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px">
       <strong style="font-size:13px">上传模板：</strong>
       <div class="row" style="margin-top:6px">

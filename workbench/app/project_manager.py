@@ -181,13 +181,14 @@ def get_current_project() -> Optional[Dict]:
         return None
 
 
-def delete_project(project_id: str, force: bool = False) -> Dict:
+def delete_project(project_id: str, force: bool = False, backup: bool = True) -> Dict:
     """
-    删除项目。
+    删除项目。删除前自动备份到 data/backups/ 目录。
     
     Args:
         project_id: 项目ID
         force: 是否强制删除（不确认）
+        backup: 是否自动备份（默认True）
     
     Returns:
         删除结果
@@ -195,6 +196,15 @@ def delete_project(project_id: str, force: bool = False) -> Dict:
     project = get_project(project_id)
     if not project:
         return {"ok": False, "error": f"项目不存在：{project_id}"}
+    
+    # 删除前自动备份
+    backup_result = None
+    if backup:
+        try:
+            from . import project_backup as _pb
+            backup_result = _pb.backup_before_delete(project_id)
+        except Exception:
+            pass
     
     project_dir = _get_project_dir(project_id)
     
@@ -208,11 +218,15 @@ def delete_project(project_id: str, force: bool = False) -> Dict:
     if os.path.exists(project_dir):
         shutil.rmtree(project_dir)
     
-    return {
+    result = {
         "ok": True,
         "message": f"项目「{project['name']}」已删除",
         "deleted_id": project_id,
     }
+    if backup_result and backup_result.get("ok"):
+        result["backup"] = backup_result
+        result["message"] += f"（删除前已自动备份：{backup_result['output_file']}）"
+    return result
 
 
 def update_project_stats(project_id: str, file_count: int = None,

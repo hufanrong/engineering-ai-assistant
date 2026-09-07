@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.109")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.110")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -3151,11 +3151,87 @@ def get_current_project():
     return {"ok": False, "error": "当前未选择项目，请先新建或选择项目"}
 
 
+
+# ========== v0.1.110：项目备份与合并 ==========
+@app.post("/api/projects/export")
+def export_project(data: dict):
+    """导出项目数据为 .fgbak 备份文件。"""
+    from . import project_backup as _pb
+    return _pb.export_project(data.get("project_id", ""), data.get("output_path"))
+
+
+@app.get("/api/projects/backups")
+def list_backups():
+    """列出所有备份文件。"""
+    from . import project_backup as _pb
+    return _pb.list_backups()
+
+
+@app.post("/api/projects/import")
+async def import_project(request):
+    """从备份文件导入项目。支持上传 .fgbak 文件或指定路径。"""
+    from . import project_backup as _pb
+    form = await request.form()
+    backup_path = form.get("backup_path", "")
+    new_name = form.get("new_project_name", "")
+    overwrite_id = form.get("overwrite_project_id", "")
+    # 如果上传了文件
+    file = form.get("file")
+    if file:
+        import tempfile
+        suffix = os.path.splitext(file.filename)[1]
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            backup_path = tmp.name
+    if not backup_path:
+        return {"ok": False, "error": "请指定备份文件路径或上传备份文件"}
+    result = _pb.import_project(backup_path, new_name or None, overwrite_id or None)
+    return result
+
+
+@app.post("/api/projects/backups/delete")
+def delete_backup(data: dict):
+    """删除备份文件。"""
+    from . import project_backup as _pb
+    return _pb.delete_backup(data.get("backup_file", ""))
+
+
+@app.post("/api/projects/compare")
+def compare_projects(data: dict):
+    """对比两个项目的设备数据。"""
+    from . import project_merge as _pmg
+    return _pmg.compare_projects(data.get("project_a_id", ""), data.get("project_b_id", ""))
+
+
+@app.post("/api/projects/merge")
+def merge_projects(data: dict):
+    """将源项目设备数据合并到目标项目。"""
+    from . import project_merge as _pmg
+    return _pmg.merge_devices(
+        source_project_id=data.get("source_project_id", ""),
+        target_project_id=data.get("target_project_id", ""),
+        device_tags=data.get("device_tags"),
+        conflict_strategy=data.get("conflict_strategy", "manual"),
+    )
+
+
+@app.post("/api/projects/merge/resolve-conflict")
+def resolve_merge_conflict(data: dict):
+    """人工确认解决合并冲突。"""
+    from . import project_merge as _pmg
+    return _pmg.resolve_manual_conflict(
+        target_project_id=data.get("target_project_id", ""),
+        device_name=data.get("device_name", ""),
+        choose=data.get("choose", "source"),
+        source_project_id=data.get("source_project_id"),
+    )
+
 @app.post("/api/projects/delete")
 def delete_project(data: dict):
-    """删除项目。"""
+    """删除项目。删除前自动备份（backup=false可跳过）。"""
     from . import project_manager as _pm
-    return _pm.delete_project(data.get("project_id", ""))
+    return _pm.delete_project(data.get("project_id", ""), backup=data.get("backup", True))
 
 
 @app.get("/api/projects/data-dir")
