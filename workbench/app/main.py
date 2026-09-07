@@ -35,7 +35,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.78")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.79")
 
 # 共享扫描状态（单任务）
 SCAN_STATUS = {"running": False}
@@ -2166,6 +2166,70 @@ def unboxing_merge_stats():
     from . import unboxing_merge as _um
     return {"ok": True, **_um.merge_stats()}
 
+
+
+@app.post("/api/concealment-merge/merge")
+def concealment_merge_merge(body: dict):
+    """v0.1.79：合并源隐蔽工程验收记录数据。"""
+    from . import concealment_merge as _cm
+    source = body.get("source_records", {})
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    return {"ok": True, **_cm.merge_concealment_records(source, source_pc, strategy)}
+
+
+@app.post("/api/concealment-merge/merge-file")
+def concealment_merge_merge_file(body: dict):
+    """v0.1.79：从文件合并隐蔽工程验收记录。"""
+    from . import concealment_merge as _cm
+    file_path = body.get("file_path", "")
+    source_pc = body.get("source_pc", "")
+    strategy = body.get("conflict_strategy", "latest")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="缺少file_path")
+    source = _cm.load_records_from_file(file_path)
+    if "error" in source:
+        raise HTTPException(status_code=400, detail=source["error"])
+    return {"ok": True, **_cm.merge_concealment_records(source, source_pc, strategy)}
+
+
+@app.get("/api/concealment-merge/pending")
+def concealment_merge_pending():
+    """v0.1.79：列出待人工确认的记录冲突。"""
+    from . import concealment_merge as _cm
+    return {"ok": True, "pending": _cm.list_pending()}
+
+
+@app.post("/api/concealment-merge/resolve")
+def concealment_merge_resolve(body: dict):
+    """v0.1.79：处理待人工确认的记录冲突。"""
+    from . import concealment_merge as _cm
+    index = body.get("index", 0)
+    decision = body.get("decision", "")
+    if decision not in ["use_source", "keep_existing", "skip"]:
+        raise HTTPException(status_code=400, detail="decision必须是use_source/keep_existing/skip")
+    return {"ok": True, **_cm.resolve_pending(index, decision)}
+
+
+@app.get("/api/concealment-merge/log")
+def concealment_merge_log():
+    """v0.1.79：列出合并日志。"""
+    from . import concealment_merge as _cm
+    return {"ok": True, "log": _cm.list_merge_log()}
+
+
+@app.get("/api/concealment-merge/stats")
+def concealment_merge_stats():
+    """v0.1.79：获取合并统计信息。"""
+    from . import concealment_merge as _cm
+    return {"ok": True, **_cm.merge_stats()}
+
+
+@app.get("/api/concealment-merge/integrity")
+def concealment_merge_integrity():
+    """v0.1.79：检查隐蔽工程验收记录完整性。"""
+    from . import concealment_merge as _cm
+    return {"ok": True, **_cm.check_concealment_integrity()}
 
 @app.get("/api/unboxing-merge/integrity")
 def unboxing_merge_integrity():
