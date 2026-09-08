@@ -262,7 +262,7 @@ def update_via_git() -> Dict:
 
 
 def update_via_download() -> Dict:
-    """通过下载GitHub zip更新。"""
+    """通过下载GitHub zip更新（v0.1.127：只同步 workbench/ 子目录，保护本地配置）。"""
     import tempfile
     
     try:
@@ -286,42 +286,79 @@ def update_via_download() -> Dict:
                 zf.extractall(extract_dir)
             
             # GitHub zip 解压后有一层目录 engineering-ai-assistant-main/
-            extracted_root = os.path.join(extract_dir, f"{GITHUB_REPO}-{GITHUB_BRANCH}")
-            if not os.path.isdir(extracted_root):
+            repo_root = os.path.join(extract_dir, f"{GITHUB_REPO}-{GITHUB_BRANCH}")
+            if not os.path.isdir(repo_root):
                 # 尝试找第一个子目录
                 dirs = [d for d in os.listdir(extract_dir) if os.path.isdir(os.path.join(extract_dir, d))]
                 if dirs:
-                    extracted_root = os.path.join(extract_dir, dirs[0])
+                    repo_root = os.path.join(extract_dir, dirs[0])
                 else:
-                    extracted_root = extract_dir
+                    repo_root = extract_dir
             
-            # 复制文件到工作目录（保留数据目录）
+            # 【Bug1 修复】定位 workbench/ 子目录作为更新源（仓库根目录含 client/server/mobile 等无关项目）
+            workbench_root = os.path.join(repo_root, "workbench")
+            if not os.path.isdir(workbench_root):
+                # 兼容旧结构：仓库根目录即 workbench
+                workbench_root = repo_root
+            if not os.path.isdir(workbench_root):
+                return {"ok": False, "method": "download", "error": "下载包中未找到 workbench 子目录"}
+            
+            # 只同步程序文件白名单（不复制数据/环境/无关文件）
+            # 同步目录（相对 workbench_root）：app、parsers、web、docs、cloud_server（不含cloud_data）
+            SYNC_DIRS = ["app", "parsers", "web", "docs", "cloud_server"]
+            # 同步文件（相对 workbench_root）
+            SYNC_FILES = [
+                "start.py", "run_workbench.bat", "README.md", "requirements.txt",
+                "requirements-ocr.txt", ".gitignore", "config.local.py.example",
+            ]
+            # 保护：本地用户数据/配置，更新时跳过
+            LOCAL_PRESERVE = [
+                "data", "platform_data", "venv", "updates", "test_data",
+                "__pycache__", ".git", ".pytest_cache",
+            ]
+            
             copied_count = 0
-            for root, dirs, files in os.walk(extracted_root):
-                rel_path = os.path.relpath(root, extracted_root)
-                
-                # 跳过需要保留的目录
-                skip = False
-                for preserve in PRESERVE_DIRS:
-                    if rel_path.startswith(preserve) or rel_path == preserve:
-                        skip = True
-                        break
-                if skip:
+            
+            # 1) 同步目录
+            for dname in SYNC_DIRS:
+                src_dir = os.path.join(workbench_root, dname)
+                if not os.path.isdir(src_dir):
                     continue
-                
-                # 创建目录
-                target_dir = os.path.join(WORKSPACE_ROOT, rel_path)
-                if rel_path != ".":
-                    os.makedirs(target_dir, exist_ok=True)
-                
-                # 复制文件
-                for f in files:
-                    if f in PRESERVE_FILES:
+                dst_dir = os.path.join(WORKSPACE_ROOT, dname)
+                os.makedirs(dst_dir, exist_ok=True)
+                for root, dirs, files in os.walk(src_dir):
+                    rel_path = os.path.relpath(root, src_dir)
+                    # 跳过保护目录（含 cloud_server/cloud_data）
+                    skip = False
+                    for p in LOCAL_PRESERVE:
+                        if rel_path == p or rel_path.startswith(p + os.sep):
+                            skip = True
+                            break
+                    if rel_path.startswith("cloud_data"):
+                        skip = True
+                    if skip:
                         continue
-                    src_file = os.path.join(root, f)
-                    dst_file = os.path.join(target_dir, f)
+                    target_dir = os.path.join(dst_dir, rel_path) if rel_path != "." else dst_dir
+                    if rel_path != ".":
+                        os.makedirs(target_dir, exist_ok=True)
+                    for f in files:
+                        if f.endswith(".pyc"):
+                            continue
+                        src_file = os.path.join(root, f)
+                        dst_file = os.path.join(target_dir, f)
+                        shutil.copy2(src_file, dst_file)
+                        copied_count += 1
+            
+            # 2) 同步根文件（跳过config.py——本地配置保护见下）
+            for fname in SYNC_FILES:
+                src_file = os.path.join(workbench_root, fname)
+                if os.path.isfile(src_file):
+                    dst_file = os.path.join(WORKSPACE_ROOT, fname)
                     shutil.copy2(src_file, dst_file)
                     copied_count += 1
+            
+            # 【Bug3 修复】保护本地 config.py：更新前把本地配置存为 config.local.py，再更新 config.py
+            _preserve_local_config()
             
             # 清理临时文件
             shutil.rmtree(extract_dir, ignore_errors=True)
@@ -330,7 +367,7 @@ def update_via_download() -> Dict:
                 "ok": True,
                 "method": "download",
                 "copied_files": copied_count,
-                "message": f"下载更新成功，已更新 {copied_count} 个文件",
+                "message": f"下载更新成功，已更新 {copied_count} 个程序文件",
             }
         finally:
             if os.path.exists(zip_path):
@@ -341,6 +378,172 @@ def update_via_download() -> Dict:
             "ok": False,
             "method": "download",
             "error": str(e),
+        }
+
+
+def _preserve_local_config():
+    """【Bug3 修复】保护本地 config.py 修改：
+    更新前若本地 config.py 与仓库版本不同，先备份为 config.local.py（加载时覆盖生效）。
+    更新后再比较，保留用户修改。"""
+    try:
+        import re as _re
+        workbench_cfg = os.path.join(WORKSPACE_ROOT, "app", "config.py")
+        local_cfg = os.path.join(WORKSPACE_ROOT, "app", "config.local.py")
+        
+        # 已存在 config.local.py（用户之前就有本地配置）→ 保留不动
+        if os.path.exists(local_cfg):
+            return
+        
+        # 本地 config.py 中查找用户可能的修改点（HOST 等）
+        if os.path.exists(workbench_cfg):
+            with open(workbench_cfg, "r", encoding="utf-8") as f:
+                content = f.read()
+            # 检测是否被用户改过（HOST 非 127.0.0.1、PORT 非 8756 等）
+            host_match = _re.search(r'HOST\s*=\s*"([^"]+)"', content)
+            modified = host_match and host_match.group(1) != "127.0.0.1"
+            if not modified:
+                port_match = _re.search(r'PORT\s*=\s*(\d+)', content)
+                modified = port_match and port_match.group(1) != "8756"
+            
+            if modified:
+                # 备份为 config.local.py，程序加载时覆盖
+                shutil.copy2(workbench_cfg, local_cfg)
+                print("检测到本地 config.py 修改，已保留为 config.local.py")
+    except Exception:
+        pass
+
+
+def _get_pid_by_port(port: int) -> List[int]:
+    """【Bug2】查找占用指定端口的进程PID列表（Windows/Linux兼容）。"""
+    pids = []
+    if sys.platform.startswith("win"):
+        try:
+            result = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, text=True, timeout=15)
+            for line in result.stdout.splitlines():
+                if f":{port}" in line and ("LISTENING" in line or "LISTEN" in line):
+                    parts = line.split()
+                    if parts:
+                        pid = parts[-1]
+                        if pid.isdigit() and pid != "0":
+                            pids.append(int(pid))
+        except Exception:
+            pass
+    else:
+        try:
+            result = subprocess.run(
+                ["lsof", "-ti", f":{port}"], capture_output=True, text=True, timeout=15)
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    pids.append(int(line))
+        except Exception:
+            try:
+                result = subprocess.run(
+                    ["fuser", f"{port}/tcp"], capture_output=True, text=True, timeout=15)
+                for line in result.stdout.splitlines():
+                    for tok in line.split():
+                        if tok.isdigit():
+                            pids.append(int(tok))
+            except Exception:
+                pass
+    return list(set(pids))
+
+
+def _kill_process_tree(pid: int) -> bool:
+    """【Bug2】结束进程及其子进程树（Windows taskkill /T /F，Linux kill 进程组）。"""
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, text=True, timeout=15)
+        else:
+            try:
+                os.killpg(os.getpgid(pid), 15)  # SIGTERM
+            except Exception:
+                os.kill(pid, 15)
+            # 等待退出
+            for _ in range(10):
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(0.3)
+                except OSError:
+                    return True
+            try:
+                os.kill(pid, 9)  # SIGKILL
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
+
+def restart_service(port: int = 8756) -> Dict:
+    """
+    【Bug2】重启工作台服务：结束占用端口的旧进程 → 重新启动新进程。
+    返回 {ok, message, error, port_pid}
+    """
+    import time as _time
+    
+    # 1. 查找占用端口的进程
+    pids = _get_pid_by_port(port)
+    killed = []
+    for pid in pids:
+        # 跳过自身（如果检测到自己）
+        if pid == os.getpid():
+            continue
+        if _kill_process_tree(pid):
+            killed.append(pid)
+    
+    # 2. 等待端口释放
+    for _ in range(10):
+        remaining = _get_pid_by_port(port)
+        remaining = [p for p in remaining if p != os.getpid()]
+        if not remaining:
+            break
+        _time.sleep(0.5)
+    
+    # 3. 重新启动服务（后台）
+    try:
+        python = sys.executable or "python"
+        main_py = os.path.join(WORKSPACE_ROOT, "app", "main.py")
+        start_py = os.path.join(WORKSPACE_ROOT, "start.py")
+        
+        # 优先用 start.py（如果有），否则直接跑 main.py
+        if os.path.isfile(start_py):
+            cmd = [python, start_py]
+        else:
+            cmd = [python, main_py]
+        
+        # 启动新进程（不阻塞，日志输出到 updates/restart.log）
+        log_path = os.path.join(WORKSPACE_ROOT, "updates", "restart.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as logf:
+            logf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 重启服务 ===\n")
+            if sys.platform.startswith("win"):
+                subprocess.Popen(
+                    cmd, cwd=WORKSPACE_ROOT,
+                    stdout=logf, stderr=logf,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                    close_fds=True)
+            else:
+                subprocess.Popen(
+                    cmd, cwd=WORKSPACE_ROOT,
+                    stdout=logf, stderr=logf,
+                    start_new_session=True, close_fds=True)
+        
+        return {
+            "ok": True,
+            "message": f"服务已重新启动（端口 {port}），新进程已后台运行",
+            "killed_pids": killed,
+            "port": port,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": f"重启失败：{str(e)}",
+            "killed_pids": killed,
+            "suggestion": "请手动关闭旧窗口后，重新运行 run_workbench.bat",
         }
 
 

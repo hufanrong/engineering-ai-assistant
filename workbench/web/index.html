@@ -1094,6 +1094,23 @@ function showCloudMerge() { alert('云端合并：多电脑解析结果合并功
 function showProjectBackup() { alert('项目备份：在资源管理导出栏导出项目解析包'); }
 
 // ===== 版本更新 =====
+function restartService() {
+    if (!confirm('确定要重启服务吗？\n\n将自动结束占用端口的旧进程并启动新进程。')) return;
+    var status = document.getElementById('updateStatus');
+    if (status) status.innerHTML = '<span style="color:#8B8B8B">正在重启服务...</span>';
+    fetch('/api/update/restart', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                alert('重启成功！\n\n' + (data.message || '服务已重新启动') + '\n\n请等待几秒后刷新页面。');
+                setTimeout(function() { location.reload(); }, 3000);
+            } else {
+                alert('重启失败：' + (data.error || '未知错误') + '\n\n' + (data.suggestion || '请手动关闭旧窗口后重新运行 run_workbench.bat'));
+            }
+        })
+        .catch(function() { alert('重启请求失败，请手动重启服务'); });
+}
+
 function loadUpdateInfo() {
     fetch('/api/status')
         .then(function(r) { return r.json(); })
@@ -1164,7 +1181,11 @@ function performUpdate() {
         bar.style.width = '100%';
         if (data.ok) {
             status.innerHTML = '<span style="color:#52C41A;font-weight:600">更新成功！</span>';
-            alert('更新成功！\n\n' + (data.restart_hint || data.message || '') + '\n\n请关闭当前窗口，重新运行 run_workbench.bat 启动新版本。');
+            if (confirm('更新成功！\n\n' + (data.message || '') + '\n\n是否立即重启服务加载新版本？')) {
+                restartService();
+            } else {
+                alert('已跳过重启。请手动关闭当前窗口，重新运行 run_workbench.bat 启动新版本。');
+            }
             setTimeout(function() { location.reload(); }, 2000);
         } else {
             status.innerHTML = '<span style="color:#EA6668">更新失败：' + (data.error || '未知错误') + '</span>';

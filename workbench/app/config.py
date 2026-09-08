@@ -104,3 +104,19 @@ LOG_FILE = os.path.join(DATA_DIR, "workbench.log")
 VOICE_TRANSCRIBE_MODE = "auto"
 VOICE_GATEWAY_ENDPOINT = ""
 VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".opus")
+
+# ============ 本地配置覆盖机制（v0.1.127）============
+# 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），
+# 程序启动时用其中的配置覆盖本文件默认值（如 HOST="0.0.0.0" 等）。
+# 这样自动更新覆盖 config.py 时不会丢失用户的本地化设置。
+try:
+    _cfg_local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.local.py")
+    if os.path.isfile(_cfg_local):
+        _local_ns = {}
+        with open(_cfg_local, "r", encoding="utf-8") as _f:
+            exec(compile(_f.read(), _cfg_local, "exec"), _local_ns)
+        for _k, _v in _local_ns.items():
+            if not _k.startswith("__") and _k.isupper():
+                globals()[_k] = _v
+except Exception:
+    pass

@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.126")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.127")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 app.add_middleware(
@@ -3268,6 +3268,20 @@ def restore_backup(data: dict):
     """从备份恢复。"""
     from . import auto_updater as _au
     return _au.restore_backup(data.get("backup_name", ""))
+
+
+@app.post("/api/update/restart")
+def restart_workbench():
+    """【v0.1.127】重启工作台服务：结束旧进程 → 启动新进程。
+    返回重启结果；重启失败时给出端口占用提示与手动处理指引。"""
+    from . import auto_updater as _au
+    port = 8756
+    try:
+        from . import config as _cfg
+        port = int(getattr(_cfg, "PORT", 8756) or 8756)
+    except Exception:
+        pass
+    return _au.restart_service(port=port)
 
 
 # ========== v0.1.118：手机端语音+文字+图片组合上传 ==========
