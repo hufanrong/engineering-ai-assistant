@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.124")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.126")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 app.add_middleware(
@@ -311,6 +311,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     """浏览器/手机端直接上传文件 → 落盘 → 解析 → 向量化 → 上传队列。
     uploader：上传人姓名（手机端场景，非必填）。"""
     import hashlib
+    _log_op("upload", f"上传 {len(files)} 个文件", uploader or "")
     save_dir = os.path.join(config.DATA_DIR, "uploads")
     os.makedirs(save_dir, exist_ok=True)
     results = []
@@ -3136,6 +3137,7 @@ def list_projects():
 def create_project(data: dict):
     """新建项目。"""
     from . import project_manager as _pm
+    _log_op("project", f"新建项目：{data.get('name', '')}")
     return _pm.create_project(
         name=data.get("name", ""),
         description=data.get("description", ""),
@@ -3286,6 +3288,7 @@ def storage_set(payload: dict):
     from . import storage_manager as sm
     data_root = payload.get("data_root") or None
     platform_root = payload.get("platform_root") or None
+    _log_op("edit", f"修改存储位置：data={data_root}, platform={platform_root}")
     return sm.set_locations(data_root, platform_root)
 
 
@@ -4185,3 +4188,539 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+# ========== v0.1.125：前端兼容API层（5大模块UI统一调用） ==========
+
+
+def _log_op(op_type: str, content: str, operator: str = ""):
+    """写入操作日志（智能窗口-操作日志审计）。"""
+    import json as _json
+    try:
+        log_path = os.path.join(config.DATA_DIR, "operation_log.jsonl")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({
+                "time": datetime_now(),
+                "type": op_type,
+                "content": content,
+                "operator": operator or "系统",
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+def _frontend_index():
+    """获取当前项目索引（显式指定项目数据目录，避免全局INDEX_FILE竞态）。"""
+    from . import scanner as _sc, project_manager as _pm
+    try:
+        current = _pm.get_current_project()
+        if current:
+            ddir = _pm.get_project_data_dir(current["id"])
+        else:
+            ddir = _pm.get_project_data_dir()
+    except Exception:
+        ddir = None
+    return _sc._load_index(data_dir=ddir)
+
+
+def _frontend_index_items():
+    """将项目索引统一转换为 [{id, file_name, ...}] 列表。
+    兼容两种格式：{sha: info} 和 {files: [...], ...}（项目级 index.json）。
+    """
+    idx = _frontend_index()
+    if not isinstance(idx, dict):
+        return []
+    items = []
+    if "files" in idx and isinstance(idx["files"], list):
+        # 项目级格式：files 列表
+        for f in idx["files"]:
+            if isinstance(f, dict):
+                items.append(f)
+    else:
+        # 全局格式：{sha: info}
+        for sha, info in idx.items():
+            if isinstance(info, dict):
+                item = dict(info)
+                item.setdefault("id", sha)
+                item.setdefault("sha256", sha)
+                items.append(item)
+    return items
+
+
+def _frontend_index_dict():
+    """将项目索引统一转换为 {sha或id: info} 字典。"""
+    items = _frontend_index_items()
+    d = {}
+    for item in items:
+        key = item.get("id") or item.get("sha256") or item.get("file_name") or ""
+        if key:
+            d[key] = item
+    return d
+
+
+def _frontend_parse_queue():
+    from . import scanner as _sc
+    status = {}
+    try:
+        from . import upload_queue as _uq
+        pending = _uq.list_pending()
+    except Exception:
+        pending = []
+    queue = []
+    for p in pending[:30]:
+        queue.append({"file_name": p.get("file_name") or p.get("path") or "待上传", "status": "pending", "progress": 0})
+    return {"ok": True, "queue": queue, "scan_status": status}
+
+
+import io as _io
+from urllib.parse import quote as _quote
+
+@app.get("/api/files")
+def frontend_files(workshop: str = "", status: str = "", q: str = "", limit: int = 500):
+    """文件列表：按车间/状态/关键词过滤（前端资源管理模块）。"""
+    from . import workshop_assign as _wa
+    raw_items = _frontend_index_items()
+    items = []
+    for info in raw_items:
+        if status and info.get("status") != status:
+            continue
+        fname = info.get("file_name") or info.get("name") or ""
+        text = info.get("text") or ""
+        if q and q.lower() not in fname.lower() and q.lower() not in (text or "")[:500].lower():
+            continue
+        sha = info.get("id") or info.get("sha256") or ""
+        ws = _wa.get_workshop(sha) or info.get("workshop") or ""
+        if workshop and ws != workshop:
+            continue
+        items.append({
+            "id": sha or fname,
+            "sha256": sha,
+            "file_name": fname,
+            "name": fname,
+            "file_type": info.get("file_type") or "",
+            "workshop": ws,
+            "status": info.get("status") or "parsed",
+            "upload_time": info.get("ts") or info.get("upload_time") or "",
+            "size": info.get("size") or 0,
+            "source_path": info.get("source_path") or "",
+        })
+    items.sort(key=lambda x: x.get("upload_time") or "", reverse=True)
+    return {"ok": True, "files": items[:limit], "total": len(items)}
+
+
+@app.get("/api/parse/queue")
+def frontend_parse_queue():
+    """解析队列/扫描状态（前端资源管理模块）。"""
+    return _frontend_parse_queue()
+
+
+@app.post("/api/files/update")
+def frontend_file_update(payload: dict):
+    """修改文件车间归属（前端人工修正）。payload: {file_id, workshop}"""
+    from . import workshop_assign as _wa
+    file_id = payload.get("file_id") or payload.get("sha256") or ""
+    workshop = payload.get("workshop") or ""
+    if not file_id or not workshop:
+        return {"ok": False, "error": "缺少 file_id 或 workshop"}
+    # 写人工修正记录
+    _wa.manual_assign(file_id, workshop)
+    _log_op("edit", f"修改文件车间为：{workshop} (file: {file_id})")
+    return {"ok": True, "message": f"已修改车间为：{workshop}"}
+
+
+@app.post("/api/files/reparse")
+def frontend_file_reparse(payload: dict):
+    """重新解析单个文件（前端人工修正）。payload: {file_id}"""
+    from . import scanner as _sc, project_manager as _pm
+    file_id = payload.get("file_id") or ""
+    idx = _frontend_index_dict()
+    info = idx.get(file_id)
+    if not info:
+        return {"ok": False, "error": "文件不存在"}
+    src = info.get("source_path") or ""
+    if not os.path.exists(src):
+        return {"ok": False, "error": "源文件不存在，无法重解析"}
+    def _run():
+        try:
+            res = _sc.parse_file(src)
+            _sc.index_result(res, src, force=True)
+        except Exception as e:
+            pass
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "message": "已加入重解析队列"}
+
+
+@app.post("/api/files/batch-update")
+def frontend_file_batch_update(payload: dict):
+    """批量修改车间。payload: {file_ids: [], workshop: ""}"""
+    from . import workshop_assign as _wa
+    ids = payload.get("file_ids") or []
+    workshop = payload.get("workshop") or ""
+    if not ids or not workshop:
+        return {"ok": False, "error": "缺少 file_ids 或 workshop"}
+    n = 0
+    for fid in ids:
+        try:
+            _wa.manual_assign(fid, workshop)
+            n += 1
+        except Exception:
+            pass
+    return {"ok": True, "updated": n}
+
+
+@app.post("/api/files/batch-reparse")
+def frontend_file_batch_reparse(payload: dict):
+    """批量重解析。payload: {file_ids: []}"""
+    ids = payload.get("file_ids") or []
+    idx = _frontend_index_dict()
+    paths = []
+    for fid in ids:
+        info = idx.get(fid)
+        if info and os.path.exists(info.get("source_path") or ""):
+            paths.append(info["source_path"])
+    if not paths:
+        return {"ok": False, "error": "没有可重解析的文件"}
+    def _run():
+        for p in paths:
+            try:
+                _sc.parse_file(p)
+            except Exception:
+                pass
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "message": f"已加入 {len(paths)} 个文件重解析"}
+
+
+@app.post("/api/files/batch-delete")
+def frontend_file_batch_delete(payload: dict):
+    """批量删除文件记录。payload: {file_ids: []}"""
+    ids = payload.get("file_ids") or []
+    idx = _frontend_index_dict()
+    n = 0
+    for fid in ids:
+        if fid in idx:
+            del idx[fid]
+            n += 1
+    _sc._save_index(idx)
+    _log_op("delete", f"批量删除 {n} 个文件记录")
+    return {"ok": True, "deleted": n}
+
+
+@app.get("/api/files/preview")
+def frontend_file_preview(name: str = ""):
+    """文件预览：返回解析文本内容或原文件流。"""
+    idx = _frontend_index_dict()
+    target = None
+    for sha, info in idx.items():
+        if info.get("file_name") == name or info.get("name") == name:
+            target = info
+            break
+    if not target:
+        return {"ok": False, "error": "文件不存在"}
+    text = target.get("text") or ""
+    if text:
+        return {"ok": True, "text": text[:20000], "file_name": name}
+    src = target.get("source_path") or ""
+    if src and os.path.exists(src):
+        ext = os.path.splitext(src)[1].lower()
+        if ext in (".png", ".jpg", ".jpeg", ".bmp", ".gif"):
+            return FileResponse(src, media_type="image/png")
+        if ext in (".pdf",):
+            return FileResponse(src, media_type="application/pdf")
+        if ext in (".dxf", ".dwg"):
+            return {"ok": True, "text": f"[CAD图纸] {name}\n图纸已解析为空间结构数据，可查看空间模型模块。", "file_name": name}
+        return FileResponse(src, filename=name)
+    return {"ok": False, "error": "无预览内容"}
+
+
+@app.get("/api/files/download")
+def frontend_file_download(name: str = ""):
+    """下载原文件。"""
+    idx = _frontend_index_dict()
+    for sha, info in idx.items():
+        if info.get("file_name") == name or info.get("name") == name:
+            src = info.get("source_path") or ""
+            if src and os.path.exists(src):
+                return FileResponse(src, filename=name)
+            break
+    return {"ok": False, "error": "源文件不存在"}
+
+
+@app.get("/api/search")
+def frontend_search(q: str = "", top_k: int = 5):
+    """关键词搜索（前端全局搜索框，GET方式）。"""
+    try:
+        results = _store.search(q, top_k=top_k)
+        files = []
+        for r in results:
+            files.append({
+                "file_name": r.get("source") or r.get("file_name") or "未知",
+                "workshop": r.get("workshop") or "",
+                "file_type": r.get("file_type") or "",
+                "snippet": (r.get("text") or "")[:200],
+            })
+        return {"ok": True, "files": files}
+    except Exception as e:
+        return {"ok": True, "files": [], "error": str(e)}
+
+
+@app.post("/api/smart-doc/analyze")
+def frontend_smart_doc_analyze(payload: dict = None):
+    """需求分析（前端资料生成模块，POST方式）。"""
+    from . import smart_doc_generator as _sdg
+    payload = payload or {}
+    text = payload.get("input") or payload.get("text") or ""
+    file_type = payload.get("file_type") or ""
+    workshop = payload.get("workshop") or ""
+    r = _sdg.analyze_input(text)
+    if not isinstance(r, dict):
+        r = {"ok": True, "result": r}
+    r.setdefault("ok", True)
+    _log_op("generate", f"分析资料生成需求：{text[:50]}")
+    if file_type:
+        r["file_type"] = file_type
+    if workshop:
+        r["workshop"] = workshop
+    return r
+
+
+@app.post("/api/smart-doc/batch-generate")
+def frontend_smart_doc_batch_generate(payload: dict):
+    """批量生成工程文件。payload: {file_type, devices: []}"""
+    from . import smart_doc_generator as _sdg
+    file_type = payload.get("file_type") or ""
+    devices = payload.get("devices") or []
+    success = 0
+    failed = 0
+    for dev in devices:
+        try:
+            r = _sdg.generate_from_natural_language(f"生成{file_type}：{dev}")
+            if isinstance(r, dict) and r.get("ok"):
+                success += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+    return {"ok": True, "success": success, "failed": failed}
+
+
+@app.get("/api/smart-doc/history")
+def frontend_smart_doc_history(limit: int = 50):
+    """生成历史（前端资料生成模块）。"""
+    import time as _time
+    hist = []
+    try:
+        gen_dir = os.path.join(config.DATA_DIR, "generated_docs")
+        if os.path.exists(gen_dir):
+            for fn in sorted(os.listdir(gen_dir), reverse=True)[:limit]:
+                path = os.path.join(gen_dir, fn)
+                mtime = os.path.getmtime(path)
+                hist.append({
+                    "id": fn,
+                    "file_name": fn,
+                    "file_type": fn.split("_")[0] if "_" in fn else "文档",
+                    "device": fn.split("_")[1] if "_" in fn and len(fn.split("_")) > 1 else "",
+                    "generate_time": _time.strftime("%Y-%m-%d %H:%M", _time.localtime(mtime)),
+                })
+    except Exception:
+        pass
+    return {"ok": True, "history": hist}
+
+
+@app.get("/api/smart-doc/download/{doc_id}")
+def frontend_smart_doc_download(doc_id: str):
+    """下载生成的工程文件。"""
+    gen_dir = os.path.join(config.DATA_DIR, "generated_docs")
+    safe = os.path.basename(doc_id)
+    path = os.path.join(gen_dir, safe)
+    if os.path.exists(path):
+        return FileResponse(path, filename=safe)
+    return {"ok": False, "error": "文件不存在"}
+
+
+@app.post("/api/smart-doc/regenerate/{doc_id}")
+def frontend_smart_doc_regenerate(doc_id: str):
+    """重新生成工程文件（按文件名重跑）。"""
+    from . import smart_doc_generator as _sdg
+    safe = os.path.basename(doc_id)
+    # 从文件名反推类型和设备（文件名格式: 类型_设备_时间.docx）
+    parts = safe.replace(".docx", "").split("_")
+    file_type = parts[0] if parts else ""
+    device = parts[1] if len(parts) > 1 else ""
+    if file_type and device:
+        try:
+            r = _sdg.generate_from_natural_language(f"生成{file_type}：{device}")
+            return {"ok": True, "message": "已重新生成", "result": r}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    return {"ok": False, "error": "无法从文件名识别类型/设备"}
+
+
+@app.get("/api/devices")
+def frontend_devices(workshop: str = ""):
+    """设备列表（前端批量生成模块）。"""
+    from . import device_workshop as _dw, workshop_assign as _wa
+    devices = []
+    try:
+        ws_data = _wa.list_by_workshop()
+        dw_data = _dw.list_devices() if hasattr(_dw, "list_devices") else {}
+    except Exception:
+        ws_data, dw_data = {}, {}
+    # 从车间-文件关系找设备
+    seen = set()
+    for ws, files in (ws_data.get("workshops") or {}).items():
+        if workshop and ws != workshop:
+            continue
+        for f in files:
+            text = str(f)
+            for m in re.finditer(config.EQUIPMENT_TAG_RE, text):
+                tag = m.group(1)
+                if tag not in seen:
+                    seen.add(tag)
+                    devices.append({"tag": tag, "name": tag, "model": "", "workshop": ws})
+    return {"ok": True, "devices": devices}
+
+
+@app.get("/api/archive")
+def frontend_archive():
+    """竣工组卷状态（前端竣工组卷模块）。"""
+    from . import archive as _ar
+    try:
+        r = _ar.archive_status()
+    except Exception as e:
+        r = {"ok": False, "error": str(e)}
+    if not isinstance(r, dict):
+        r = {"ok": True, "data": r}
+    return r
+
+
+@app.get("/api/stats/file-types")
+def frontend_stats_file_types():
+    """文件类型分布统计（前端仪表盘）。"""
+    raw_items = _frontend_index_items()
+    types = {}
+    for info in raw_items:
+        t = info.get("file_type") or "其他"
+        types[t] = types.get(t, 0) + 1
+    items = [{"type": k, "count": v} for k, v in sorted(types.items(), key=lambda x: -x[1])]
+    return {"ok": True, "types": items, "total": len(raw_items)}
+
+
+@app.get("/api/operation-logs")
+def frontend_operation_logs(type: str = ""):
+    """操作日志（前端智能窗口模块）。"""
+    logs = []
+    try:
+        log_path = os.path.join(config.DATA_DIR, "operation_log.jsonl")
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                for line in f.readlines()[-100:]:
+                    try:
+                        import json as _json
+                        log = _json.loads(line)
+                        if type and log.get("type") != type:
+                            continue
+                        logs.append(log)
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    return {"ok": True, "logs": logs}
+
+
+@app.get("/api/operation-logs/export")
+def frontend_operation_logs_export():
+    """导出操作日志 CSV。"""
+    import csv, io
+    from . import scanner as _sc
+    logs = []
+    try:
+        log_path = os.path.join(config.DATA_DIR, "operation_log.jsonl")
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                for line in f.readlines():
+                    try:
+                        import json as _json
+                        logs.append(_json.loads(line))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["时间", "操作类型", "操作内容", "操作人"])
+    for log in logs:
+        writer.writerow([log.get("time", ""), log.get("type", ""), log.get("content", ""), log.get("operator", "")])
+    csv_content = output.getvalue()
+    fname = f"操作日志_{datetime_now().replace(':','').replace(' ','_')}.csv"
+    ascii_name = f"operation_logs_{datetime_now().replace(':','').replace(' ','_')}.csv"
+    return Response(
+        content=csv_content.encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{_quote(fname)}"},
+    )
+
+
+@app.get("/api/projects/export")
+def frontend_project_export(project_id: str = "", workshop: str = ""):
+    """导出项目/车间解析包（前端导出栏，GET方式）。"""
+    from . import packager as _pk
+    try:
+        content = _pk.export_library(project_id or None, workshop or None)
+        fname = f"项目解析包_{datetime_now().replace(':','').replace(' ','_')}.fglib"
+        ascii_name = f"project_{datetime_now().replace(':','').replace(' ','_')}.fglib"
+        return Response(
+            content=content,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{_quote(fname)}"},
+        )
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/scan/project")
+def frontend_scan_project(force: bool = True):
+    """扫描当前项目上传目录（前端上传后自动调用，无需folder参数）。"""
+    from . import project_manager as _pm, scanner as _sc
+    current = _pm.get_current_project()
+    if not current:
+        return {"ok": False, "error": "请先选择项目"}
+    uploads_dir = _pm.get_project_uploads_dir(current["id"])
+    if not os.path.exists(uploads_dir):
+        os.makedirs(uploads_dir, exist_ok=True)
+    def _run():
+        try:
+            _sc.scan_folder(uploads_dir, force=force)
+        except Exception:
+            pass
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "message": "扫描已启动", "folder": uploads_dir}
+
+
+@app.get("/api/templates/{tpl_id}")
+def frontend_template_detail(tpl_id: str):
+    """模板详情（查看字段）。"""
+    from . import template_engine as _te
+    try:
+        tpls = _te.list_templates()
+        items = tpls.get("templates") if isinstance(tpls, dict) else tpls
+        if isinstance(items, list):
+            for t in items:
+                if t.get("id") == tpl_id or t.get("name") == tpl_id:
+                    return {"ok": True, "template": t}
+        return {"ok": False, "error": "模板不存在"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.delete("/api/templates/{tpl_id}")
+def frontend_template_delete(tpl_id: str):
+    """删除模板。"""
+    from . import template_engine as _te
+    try:
+        r = _te.delete_template(tpl_id)
+        return r if isinstance(r, dict) else {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

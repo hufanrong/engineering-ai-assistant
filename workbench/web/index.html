@@ -864,6 +864,8 @@ function handleFileUpload(files) {
     status.textContent = '正在上传 ' + files.length + ' 个文件...';
     
     var formData = new FormData();
+    var uname = (localStorage.getItem('fangong_uploader') || '电脑端');
+    formData.append('uploader', uname);
     for (var i = 0; i < files.length; i++) {
         formData.append('files', files[i]);
     }
@@ -879,16 +881,26 @@ function handleFileUpload(files) {
     xhr.onload = function() {
         status.textContent = '上传完成，正在解析...';
         bar.style.width = '90%';
-        // 触发扫描解析
-        fetch('/api/scan', {method: 'POST'})
+        // 触发扫描解析（扫描当前项目上传目录）
+        fetch('/api/scan/project', {method: 'POST'})
             .then(function() {
                 bar.style.width = '100%';
                 status.textContent = '解析完成！';
                 setTimeout(function() { progress.style.display = 'none'; }, 2000);
                 loadResourceData();
+            })
+            .catch(function() {
+                bar.style.width = '100%';
+                status.textContent = '上传完成，解析触发失败，请手动重扫';
+                setTimeout(function() { progress.style.display = 'none'; }, 3000);
+                loadResourceData();
             });
     };
-    xhr.open('POST', '/api/upload');
+    xhr.onerror = function() {
+        status.textContent = '上传失败，请重试';
+        setTimeout(function() { progress.style.display = 'none'; }, 3000);
+    };
+    xhr.open('POST', '/api/upload-files');
     xhr.send(formData);
 }
 
@@ -1305,6 +1317,24 @@ function loadTemplates() {
             });
         });
 }
+function previewTemplate(id) {
+    fetch('/api/templates/' + id)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok && data.template) {
+                var t = data.template;
+                var fields = t.fields || t.field_count || '未知';
+                if (Array.isArray(fields)) {
+                    fields = fields.join(', ');
+                }
+                alert('模板：' + (t.name || '') + '\n适用类型：' + (t.file_type || '通用') + '\n字段数：' + (t.field_count || 0) + '\n字段：' + fields);
+            } else {
+                alert('模板详情加载失败：' + (data.error || ''));
+            }
+        })
+        .catch(function() { alert('模板详情加载失败'); });
+}
+
 function deleteTemplate(id) {
     if (!confirm('确定删除该模板吗？')) return;
     fetch('/api/templates/' + id, {method: 'DELETE'})
