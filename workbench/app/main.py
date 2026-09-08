@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.123")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.124")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 app.add_middleware(
@@ -3271,6 +3271,37 @@ def restore_backup(data: dict):
 # ========== v0.1.118：手机端语音+文字+图片组合上传 ==========
 
 # ========== v0.1.119：车间列表API（供手机端动态加载，不以通用参考展示） ==========
+
+# ========== v0.1.124：解析资源存储位置设置管理 ==========
+@app.get("/api/storage/locations")
+def storage_locations():
+    """查看当前所有解析资源存储位置。"""
+    from . import storage_manager as sm
+    return sm.get_locations()
+
+
+@app.post("/api/storage/set")
+def storage_set(payload: dict):
+    """设置解析资源存储位置（支持迁移）。payload: {"data_root": "...", "platform_root": "..."}"""
+    from . import storage_manager as sm
+    data_root = payload.get("data_root") or None
+    platform_root = payload.get("platform_root") or None
+    return sm.set_locations(data_root, platform_root)
+
+
+@app.post("/api/storage/reset")
+def storage_reset():
+    """恢复默认存储位置（数据迁移回安装目录）。"""
+    from . import storage_manager as sm
+    return sm.reset_locations()
+
+
+@app.get("/api/storage/locations/refresh")
+def storage_locations_refresh():
+    """刷新存储位置信息（重新扫描大小）。"""
+    from . import storage_manager as sm
+    return sm.get_locations()
+
 @app.get("/api/workshops")
 def get_workshops():
     """获取当前项目已识别的车间列表（从项目资料解析，不返回通用参考数据）。"""

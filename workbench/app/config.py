@@ -6,7 +6,21 @@ import os
 # ============ 基本 ============
 HOST = "127.0.0.1"          # 只在本机访问；如需局域网访问改为 0.0.0.0
 PORT = 8756                 # 端口，冲突可改
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+def _load_storage_config():
+    """读取存储位置配置（storage_manager 写入的自定义路径）。"""
+    try:
+        import json
+        _cfg_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "storage_config.json")
+        if os.path.exists(_cfg_path):
+            with open(_cfg_path, "r", encoding="utf-8") as _f:
+                return json.load(_f)
+    except Exception:
+        pass
+    return {}
+
+_STORAGE_CFG = _load_storage_config()
+DATA_DIR = _STORAGE_CFG.get("data_root") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 # ============ 文件夹扫描 ============
 SCAN_INTERVAL_SEC = 30      # 文件夹自动扫描间隔（秒），0 = 关闭自动扫描
@@ -68,7 +82,7 @@ UPLOAD_BATCH_SIZE = 50
 
 # ============ 平台级规范库（v0.1.10）============
 # 国标/规范/通用文件独立建库，与子项目解析库分开；AI 检索项目库时可同时读取平台库。
-PLATFORM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "platform_data")
+PLATFORM_DIR = _STORAGE_CFG.get("platform_root") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "platform_data")
 PLATFORM_CHECK_DAYS = 180        # 规范有效期检查周期（天）= 每 6 个月
 PLATFORM_SEARCH_ENDPOINT = ""
 STD_VERIFY_OPENSTD = True        # 是否允许访问全国标准信息公共服务平台核验（尽力而为）

@@ -279,6 +279,34 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     </div>
     <div style="font-size:11px;color:#999;margin-top:8px">导出格式：.fglib（繁工解析库格式），包含所有解析结果、向量索引、关系图谱</div>
   </div>
+
+  <!-- 存储位置管理 -->
+  <div class="card" id="storageCard">
+    <div class="card-title"><span class="icon">💾</span>解析资源存储位置管理</div>
+    <div style="background:#f0f7ff;border:1px solid #d0e3ff;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#1E5AA8">
+      💡 解析后的资料默认存储在程序目录下。可自定义到其他磁盘/目录，设置时自动迁移现有数据，不影响已解析内容。
+    </div>
+    <div id="storageLocations"></div>
+    <div style="margin-top:12px;padding:12px;background:#f8f9fa;border-radius:8px">
+      <div class="row" style="margin-bottom:12px">
+        <div class="form-group">
+          <label class="label">项目数据根目录（解析库/台账/关系/生成文件）</label>
+          <input class="input" id="storageDataRoot" placeholder="例如：D:/工程数据/fangong_data">
+        </div>
+        <div class="form-group">
+          <label class="label">平台级规范库目录（国标/通用规范）</label>
+          <input class="input" id="storagePlatformRoot" placeholder="例如：D:/工程数据/fangong_platform">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="saveStorageLocations()">💾 保存并迁移</button>
+        <button class="btn btn-default" onclick="resetStorageLocations()">↩️ 恢复默认位置</button>
+        <button class="btn btn-default btn-sm" onclick="loadStorageLocations()">🔄 刷新</button>
+      </div>
+      <div style="font-size:11px;color:#999;margin-top:8px">保存后自动将现有数据迁移到新位置，路径引用即时切换，重启服务后完全生效。请确保新目录所在磁盘空间充足。</div>
+    </div>
+    <div id="storageResult" style="margin-top:12px"></div>
+  </div>
 </div>
 
 <!-- ========== 模块2：资料生成 ========== -->
@@ -600,7 +628,7 @@ function switchModule(moduleName) {
     window.scrollTo({top:0, behavior:'smooth'});
     
     // 模块加载时刷新数据（无项目时也能访问，显示空状态）
-    if (moduleName === 'resource') { try { loadResourceData(); } catch(e) {} }
+    if (moduleName === 'resource') { try { loadResourceData(); loadStorageLocations(); } catch(e) {} }
     if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); } catch(e) {} }
     if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); } catch(e) {} }
     if (moduleName === 'ai') { try { loadOperationLogs(); } catch(e) {} }
@@ -1367,6 +1395,93 @@ function regenerateFile(id) {
             .then(function(r) { return r.json(); })
             .then(function(data) { if (data.ok) { alert('已重新生成'); loadGenHistory(); } });
     }
+}
+
+
+// ===== 存储位置管理 =====
+function loadStorageLocations() {
+    var container = document.getElementById('storageLocations');
+    if (!container) return;
+    container.innerHTML = '<div style="color:#999;text-align:center;padding:12px">加载中...</div>';
+    
+    fetch('/api/storage/locations')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok) { container.innerHTML = '<div style="color:#EA6668">加载失败</div>'; return; }
+            
+            var html = '';
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:12px">';
+            html += '<div style="padding:12px;background:#e3f2fd;border-radius:8px"><div style="font-size:11px;color:#1565c0">磁盘可用空间</div><div style="font-size:18px;font-weight:700;color:#1565c0;margin-top:2px">' + (data.disk_free_text || '—') + '</div></div>';
+            html += '<div style="padding:12px;background:' + (data.is_custom ? '#fff3e0' : '#e8f5e9') + ';border-radius:8px"><div style="font-size:11px;color:#666">当前状态</div><div style="font-size:14px;font-weight:600;margin-top:2px;color:' + (data.is_custom ? '#e65100' : '#2e7d32') + '">' + (data.is_custom ? '自定义位置' : '默认位置') + '</div></div>';
+            html += '</div>';
+            
+            (data.locations || []).forEach(function(loc) {
+                html += '<div style="padding:10px 12px;background:#f8f9fa;border-radius:8px;margin-bottom:8px">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+                    '<div style="font-size:13px;font-weight:600">' + (loc.label || '') + '</div>' +
+                    '<div style="display:flex;gap:10px;font-size:11px;color:#666">' +
+                    '<span>📄 ' + (loc.file_count || 0) + ' 文件</span>' +
+                    '<span>💾 ' + (loc.size_text || '—') + '</span>' +
+                    '</div></div>' +
+                    '<div style="font-size:11px;color:#999;margin-top:4px;word-break:break-all">📂 ' + (loc.path || '') + '</div>' +
+                    '</div>';
+            });
+            
+            container.innerHTML = html;
+            
+            // 填入当前路径到输入框
+            document.getElementById('storageDataRoot').value = data.data_root || '';
+            document.getElementById('storagePlatformRoot').value = data.platform_root || '';
+        })
+        .catch(function() {
+            container.innerHTML = '<div style="color:#EA6668;text-align:center;padding:12px">存储位置信息加载失败</div>';
+        });
+}
+
+function saveStorageLocations() {
+    var dataRoot = document.getElementById('storageDataRoot').value.trim();
+    var platformRoot = document.getElementById('storagePlatformRoot').value.trim();
+    if (!dataRoot && !platformRoot) { alert('请输入至少一个目录路径'); return; }
+    
+    if (!confirm('确定要迁移解析资源到新位置吗？\n\n现有数据会自动迁移到新目录，不会丢失。\n路径引用即时切换，重启服务后完全生效。')) return;
+    
+    var result = document.getElementById('storageResult');
+    result.innerHTML = '<div style="color:#1E5AA8;text-align:center;padding:12px">正在迁移数据，请稍候...</div>';
+    
+    fetch('/api/storage/set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({data_root: dataRoot, platform_root: platformRoot})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            result.innerHTML = '<div style="padding:12px;background:#e8f5e9;border-radius:8px;color:#2e7d32;font-size:13px">✅ ' + (data.message || '迁移成功') + '</div>';
+            loadStorageLocations();
+        } else {
+            result.innerHTML = '<div style="padding:12px;background:#ffebee;border-radius:8px;color:#c62828;font-size:13px">❌ ' + (data.error || '迁移失败') + '</div>';
+        }
+    })
+    .catch(function(e) {
+        result.innerHTML = '<div style="padding:12px;background:#ffebee;border-radius:8px;color:#c62828;font-size:13px">❌ 请求失败：' + e.message + '</div>';
+    });
+}
+
+function resetStorageLocations() {
+    if (!confirm('确定恢复默认存储位置吗？\n\n现有数据会迁移回程序安装目录。')) return;
+    var result = document.getElementById('storageResult');
+    result.innerHTML = '<div style="color:#1E5AA8;text-align:center;padding:12px">正在迁移数据，请稍候...</div>';
+    
+    fetch('/api/storage/reset', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                result.innerHTML = '<div style="padding:12px;background:#e8f5e9;border-radius:8px;color:#2e7d32;font-size:13px">✅ 已恢复默认位置</div>';
+                loadStorageLocations();
+            } else {
+                result.innerHTML = '<div style="padding:12px;background:#ffebee;border-radius:8px;color:#c62828;font-size:13px">❌ ' + (data.error || '恢复失败') + '</div>';
+            }
+        });
 }
 
 // ===== 全局搜索 =====
