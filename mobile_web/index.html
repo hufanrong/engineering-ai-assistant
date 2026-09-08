@@ -469,6 +469,16 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hi
 </div>
 
 <script>
+// 恢复记住的上传人姓名
+(function() {
+    try {
+        var saved = localStorage.getItem('fangong_uploader');
+        if (saved) {
+            var el = document.getElementById('uploaderName');
+            if (el) el.value = saved;
+        }
+    } catch(e) {}
+})();
 const API_BASE = '';
 
 function switchTab(tab) {
@@ -1046,6 +1056,10 @@ function updateCombinedStatus() {
 // 组合上传（语音+文字+图片同步）
 function submitCombinedUpload() {
     var uploader = document.getElementById('uploaderName').value.trim();
+        // 记住上传人姓名，下次免输入
+        if (uploader) {
+            try { localStorage.setItem('fangong_uploader', uploader); } catch(e) {}
+        }
     var workshop = document.getElementById('uploadWorkshop').value;
     var text = document.getElementById('uploadText').value.trim();
     
