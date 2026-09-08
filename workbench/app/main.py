@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.127")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.128")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 app.add_middleware(
@@ -3268,6 +3268,26 @@ def restore_backup(data: dict):
     """从备份恢复。"""
     from . import auto_updater as _au
     return _au.restore_backup(data.get("backup_name", ""))
+
+
+@app.get("/api/mobile/web")
+def mobile_web():
+    """返回最新手机端网页（手机APP自动更新前端资源用）。
+    手机端APP启动时请求此接口，若版本比本地新则下载缓存，无需重装APK。"""
+    web_mobile = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "web", "mobile", "index.html")
+    if not os.path.isfile(web_mobile):
+        return {"ok": False, "error": "工作台未内置手机端网页（web/mobile/index.html 缺失）"}
+    try:
+        with open(web_mobile, "r", encoding="utf-8") as f:
+            html = f.read()
+        import re as _re
+        m = _re.search(r'window\.FANGONG_WEB_VERSION\s*=\s*"([^"]+)"', html)
+        version = m.group(1) if m else "0.0.0"
+        return {"ok": True, "version": version, "html": html, "updated_at": datetime_now()}
+    except Exception as e:
+        return {"ok": False, "error": f"读取手机端网页失败：{str(e)}"}
 
 
 @app.post("/api/update/restart")

@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>繁工AI · 移动端</title>
+<script>window.FANGONG_WEB_VERSION = "1.5.2";</script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif; background:#f5f6f8; color:#1a1b1c; font-size:14px; line-height:1.5; padding-bottom:70px; }
@@ -103,6 +104,130 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hi
     margin-left: 4px;
 }
 </style>
+
+<style>
+/* 语音录制 */
+.voice-recorder {
+    background: linear-gradient(135deg, rgba(30,90,168,0.06), rgba(255,122,0,0.04));
+    border: 1px solid rgba(30,90,168,0.15);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.voice-recorder-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1E5AA8;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.voice-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.voice-btn {
+    padding: 8px 14px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.voice-btn:active { transform: scale(0.97); }
+.voice-btn.record { background: #EA6668; color: #fff; }
+.voice-btn.record.recording { background: #c0392b; animation: pulse 1s infinite; }
+.voice-btn.stop { background: #666; color: #fff; }
+.voice-btn.play { background: #1E5AA8; color: #fff; }
+.voice-btn.delete { background: #f0f0f0; color: #666; }
+.voice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+.voice-timer {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    font-family: monospace;
+    min-width: 50px;
+}
+.voice-preview {
+    margin-top: 10px;
+    display: none;
+}
+.voice-preview.show { display: block; }
+.voice-preview audio {
+    width: 100%;
+    height: 36px;
+}
+.voice-preview-label {
+    font-size: 11px;
+    color: #666;
+    margin-bottom: 4px;
+}
+
+/* 图片预览 */
+.image-preview-grid {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.image-preview-item {
+    position: relative;
+    width: 70px;
+    height: 70px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #ddd;
+}
+.image-preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.image-preview-item .remove-btn {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 20px;
+    height: 20px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 组合上传状态 */
+.combined-status {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+.status-chip {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.status-chip.has { background: #e8f5e9; color: #2e7d32; }
+.status-chip.empty { background: #f5f5f5; color: #999; }
+</style>
 </head>
 <body>
 <div class="offline-banner" id="offlineBanner">
@@ -155,36 +280,64 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hi
 <!-- 上传 -->
 <div id="section-upload" class="section">
   <div class="card">
-    <div class="card-title"><span class="icon">📤</span>现场资料上传</div>
-    <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
-      <div class="icon">📁</div>
-      <div class="text">点击选择文件或拍照<br>支持照片、语音、文档</div>
+    <div class="card-title"><span class="icon">📤</span>现场资料上传（语音+文字+图片同步）</div>
+    
+    <!-- 组合状态指示 -->
+    <div class="combined-status">
+      <span class="status-chip" id="statusVoice">🎤 语音: 未录制</span>
+      <span class="status-chip" id="statusText">📝 文字: 未填写</span>
+      <span class="status-chip" id="statusImage">🖼️ 图片: 0张</span>
     </div>
-    <input type="file" id="fileInput" style="display:none" accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" multiple>
+    
+    <!-- 语音录制区 -->
+    <div class="voice-recorder">
+      <div class="voice-recorder-title">🎤 语音记录（录制后可回放确认）</div>
+      <div class="voice-controls">
+        <button class="voice-btn record" id="btnRecord" onclick="toggleRecording()">
+          <span id="recordIcon">●</span> <span id="recordText">开始录音</span>
+        </button>
+        <span class="voice-timer" id="voiceTimer">00:00</span>
+        <button class="voice-btn play" id="btnPlayVoice" onclick="playVoice()" style="display:none">▶ 回放</button>
+        <button class="voice-btn delete" id="btnDeleteVoice" onclick="deleteVoice()" style="display:none">✕ 重录</button>
+      </div>
+      <div class="voice-preview" id="voicePreview">
+        <div class="voice-preview-label">回放确认（确认无误后再上传）：</div>
+        <audio id="voiceAudio" controls></audio>
+      </div>
+    </div>
+    
+    <!-- 图片选择区 -->
+    <div class="input-group">
+      <label>现场照片（可多选，支持拍照）</label>
+      <div class="upload-zone" style="padding:12px" onclick="document.getElementById('imageInput').click()">
+        <div class="icon" style="font-size:24px">📷</div>
+        <div class="text" style="font-size:12px">点击选择照片或拍照<br>可多选</div>
+      </div>
+      <input type="file" id="imageInput" style="display:none" accept="image/*" multiple capture="environment">
+      <div class="image-preview-grid" id="imagePreviewGrid"></div>
+    </div>
+    
+    <!-- 文字说明区 -->
+    <div class="input-group">
+      <label>文字说明（语音转文字可在此编辑）</label>
+      <textarea id="uploadText" rows="3" placeholder="输入现场情况说明，或语音录制后自动转写..."></textarea>
+    </div>
     
     <div class="input-group">
       <label>上传人</label>
       <input type="text" id="uploaderName" placeholder="请输入姓名">
     </div>
     <div class="input-group">
-      <label>所属车间</label>
-      <select id="uploadWorkshop">
-        <option value="">请选择车间</option>
-        <option value="破碎车间">破碎车间</option>
-        <option value="磨矿车间">磨矿车间</option>
-        <option value="浮选车间">浮选车间</option>
-        <option value="脱水车间">脱水车间</option>
-        <option value="火法冶炼车间">火法冶炼车间</option>
-        <option value="湿法冶炼车间">湿法冶炼车间</option>
-        <option value="公用辅助">公用辅助</option>
+      <label>所属车间（从项目资料自动识别，也可手动输入）</label>
+      <select id="uploadWorkshop" style="margin-bottom:6px">
+        <option value="">上传资料后自动识别车间...</option>
       </select>
+      <input type="text" id="uploadWorkshopManual" placeholder="或手动输入车间名称（可选）" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box">
+      <div style="font-size:11px;color:#999;margin-top:4px">💡 车间以项目实际资料为准，系统随资料完善自动更新</div>
     </div>
-    <div class="input-group">
-      <label>备注说明</label>
-      <textarea id="uploadRemark" rows="2" placeholder="可选：补充说明"></textarea>
-    </div>
-    <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="submitUpload()">
-      <span class="icon" style="font-size:16px;margin:0">↑</span>提交上传
+    
+    <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="submitCombinedUpload()">
+      <span class="icon" style="font-size:16px;margin:0">↑</span>同步上传（语音+文字+图片）
     </button>
     <div id="uploadResult" class="result" style="display:none"></div>
   </div>
@@ -223,7 +376,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hi
     </div>
     <div class="input-group">
       <label>设备类型</label>
-      <input type="text" id="docDevice" placeholder="如：球磨机">
+      <input type="text" id="docDevice" placeholder="设备名称（从项目资料识别）">
     </div>
     <button class="btn primary" style="width:100%;flex-direction:row;gap:6px" onclick="generateDoc()">
       <span class="icon" style="font-size:16px;margin:0">📄</span>生成资料
@@ -317,6 +470,16 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hi
 </div>
 
 <script>
+// 恢复记住的上传人姓名
+(function() {
+    try {
+        var saved = localStorage.getItem('fangong_uploader');
+        if (saved) {
+            var el = document.getElementById('uploaderName');
+            if (el) el.value = saved;
+        }
+    } catch(e) {}
+})();
 const API_BASE = '';
 
 function switchTab(tab) {
@@ -501,6 +664,37 @@ function showSettings() { alert('设置功能开发中'); }
 
 // 初始化
 loadHome();
+
+// 从项目数据动态加载已识别的车间
+function loadProjectWorkshops() {
+    var apiUrl = (window.API_BASE_URL || '') + '/api/workshops';
+    fetch(apiUrl)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var select = document.getElementById('uploadWorkshop');
+            if (select && data.workshops && data.workshops.length > 0) {
+                select.innerHTML = '<option value="">选择已识别车间...</option>';
+                data.workshops.forEach(function(w) {
+                    var opt = document.createElement('option');
+                    opt.value = w.name || w;
+                    opt.textContent = w.name || w;
+                    select.appendChild(opt);
+                });
+            }
+        })
+        .catch(function() {
+            // 加载失败不影响使用，保持默认提示
+        });
+}
+
+// 提交时获取车间（优先手动输入，其次下拉选择）
+function getSelectedWorkshop() {
+    var manual = document.getElementById('uploadWorkshopManual');
+    if (manual && manual.value.trim()) return manual.value.trim();
+    var select = document.getElementById('uploadWorkshop');
+    if (select && select.value) return select.value;
+    return '';
+}
 </script>
 
 <script>
@@ -568,6 +762,8 @@ function isInApp() {
 
 // 页面加载完成后检查离线状态
 document.addEventListener('DOMContentLoaded', function() {
+    // 从当前项目动态加载已识别的车间列表
+    loadProjectWorkshops();
     if (isInApp()) {
         try {
             var offline = AndroidNative.isOfflineMode();
@@ -597,6 +793,353 @@ function saveTextOffline(text, recordType, projectId, uploader) {
         return true;
     }
     return false;
+}
+</script>
+
+<script>
+// 手机端网页独立运行配置
+var API_BASE_URL = localStorage.getItem('fangong_api_url') || '';
+
+// 页面加载时检查API配置
+document.addEventListener('DOMContentLoaded', function() {
+    checkApiConfig();
+});
+
+function checkApiConfig() {
+    // 如果在APP中运行，使用APP的服务器地址
+    if (typeof AndroidNative !== 'undefined') {
+        try {
+            API_BASE_URL = AndroidNative.getServerUrl();
+            localStorage.setItem('fangong_api_url', API_BASE_URL);
+            return;
+        } catch(e) {}
+    }
+    
+    // 如果没有配置API地址，显示配置界面
+    if (!API_BASE_URL) {
+        showApiConfigDialog();
+    }
+}
+
+function showApiConfigDialog() {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:99999;';
+    overlay.innerHTML = '<div style="background:#fff;padding:24px;border-radius:12px;width:90%;max-width:360px;">' +
+        '<h3 style="margin:0 0 16px;color:#1E5AA8;">连接电脑端工作台</h3>' +
+        '<p style="font-size:13px;color:#666;margin:0 0 12px;">请输入电脑端工作台的IP地址和端口</p>' +
+        '<input type="text" id="apiUrlInput" placeholder="例如：192.168.1.100:8756" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;margin-bottom:16px;">' +
+        '<button onclick="saveApiConfig()" style="width:100%;padding:12px;background:#1E5AA8;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:500;">连接</button>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    setTimeout(function() { document.getElementById('apiUrlInput').focus(); }, 100);
+}
+
+function saveApiConfig() {
+    var url = document.getElementById('apiUrlInput').value.trim();
+    if (!url) { alert('请输入IP地址'); return; }
+    if (!url.startsWith('http')) url = 'http://' + url;
+    while (url.endsWith('/')) url = url.substring(0, url.length - 1);
+    
+    API_BASE_URL = url;
+    localStorage.setItem('fangong_api_url', url);
+    
+    // 测试连接
+    fetch(url + '/api/status')
+        .then(r => r.json())
+        .then(data => {
+            alert('连接成功！工作台版本：' + (data.version || '未知'));
+            location.reload();
+        })
+        .catch(e => {
+            if (confirm('无法连接到电脑端。\n\n请检查：\n1. 电脑端工作台是否已启动\n2. 手机和电脑是否在同一WiFi\n3. IP地址是否正确\n\n是否仍要保存此地址？')) {
+                location.reload();
+            } else {
+                API_BASE_URL = '';
+                localStorage.removeItem('fangong_api_url');
+            }
+        });
+}
+
+// 重写fetch，自动添加API前缀
+var originalFetch = window.fetch;
+window.fetch = function(url, options) {
+    if (url.startsWith('/api/') && API_BASE_URL) {
+        url = API_BASE_URL + url;
+    }
+    return originalFetch(url, options);
+};
+</script>
+
+<script>
+// ===== 语音录制 + 组合上传 =====
+var mediaRecorder = null;
+var audioChunks = [];
+var audioBlob = null;
+var audioUrl = null;
+var isRecording = false;
+var recordStartTime = 0;
+var recordTimerInterval = null;
+var selectedImages = [];
+
+// 切换录音状态
+function toggleRecording() {
+    if (isRecording) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
+}
+
+// 开始录音
+function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('您的浏览器不支持录音功能，请使用APP或最新版Chrome浏览器');
+        return;
+    }
+    
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(function(stream) {
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = function(e) {
+                if (e.data.size > 0) audioChunks.push(e.data);
+            };
+            
+            mediaRecorder.onstop = function() {
+                audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                audioUrl = URL.createObjectURL(audioBlob);
+                document.getElementById('voiceAudio').src = audioUrl;
+                document.getElementById('voicePreview').classList.add('show');
+                document.getElementById('btnPlayVoice').style.display = '';
+                document.getElementById('btnDeleteVoice').style.display = '';
+                updateCombinedStatus();
+                
+                // 停止所有音轨
+                stream.getTracks().forEach(function(track) { track.stop(); });
+            };
+            
+            mediaRecorder.start();
+            isRecording = true;
+            recordStartTime = Date.now();
+            
+            document.getElementById('btnRecord').classList.add('recording');
+            document.getElementById('recordIcon').textContent = '■';
+            document.getElementById('recordText').textContent = '停止录音';
+            
+            // 计时器
+            recordTimerInterval = setInterval(function() {
+                var elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
+                var mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                var secs = (elapsed % 60).toString().padStart(2, '0');
+                document.getElementById('voiceTimer').textContent = mins + ':' + secs;
+            }, 1000);
+        })
+        .catch(function(err) {
+            alert('无法访问麦克风：' + err.message + '\n请在设置中允许麦克风权限');
+        });
+}
+
+// 停止录音
+function stopRecording() {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        isRecording = false;
+        clearInterval(recordTimerInterval);
+        
+        document.getElementById('btnRecord').classList.remove('recording');
+        document.getElementById('recordIcon').textContent = '●';
+        document.getElementById('recordText').textContent = '开始录音';
+    }
+}
+
+// 回放语音
+function playVoice() {
+    var audio = document.getElementById('voiceAudio');
+    if (audio.paused) {
+        audio.play();
+    } else {
+        audio.pause();
+    }
+}
+
+// 删除语音
+function deleteVoice() {
+    if (confirm('确定要删除当前录音吗？')) {
+        audioBlob = null;
+        audioUrl = null;
+        document.getElementById('voicePreview').classList.remove('show');
+        document.getElementById('btnPlayVoice').style.display = 'none';
+        document.getElementById('btnDeleteVoice').style.display = 'none';
+        document.getElementById('voiceTimer').textContent = '00:00';
+        updateCombinedStatus();
+    }
+}
+
+// 图片选择预览
+document.addEventListener('DOMContentLoaded', function() {
+    var imageInput = document.getElementById('imageInput');
+    if (imageInput) {
+        imageInput.addEventListener('change', function(e) {
+            var files = e.target.files;
+            for (var i = 0; i < files.length; i++) {
+                selectedImages.push(files[i]);
+            }
+            renderImagePreview();
+            updateCombinedStatus();
+            e.target.value = ''; // 重置以便重复选择
+        });
+    }
+    
+    // 文字输入监听
+    var textInput = document.getElementById('uploadText');
+    if (textInput) {
+        textInput.addEventListener('input', updateCombinedStatus);
+    }
+});
+
+// 渲染图片预览
+function renderImagePreview() {
+    var grid = document.getElementById('imagePreviewGrid');
+    grid.innerHTML = '';
+    selectedImages.forEach(function(file, index) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var item = document.createElement('div');
+            item.className = 'image-preview-item';
+            item.innerHTML = '<img src="' + e.target.result + '">' +
+                '<button class="remove-btn" onclick="removeImage(' + index + ')">×</button>';
+            grid.appendChild(item);
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// 移除图片
+function removeImage(index) {
+    selectedImages.splice(index, 1);
+    renderImagePreview();
+    updateCombinedStatus();
+}
+
+// 更新组合状态
+function updateCombinedStatus() {
+    var voiceChip = document.getElementById('statusVoice');
+    var textChip = document.getElementById('statusText');
+    var imageChip = document.getElementById('statusImage');
+    
+    if (audioBlob) {
+        voiceChip.className = 'status-chip has';
+        voiceChip.textContent = '🎤 语音: 已录制 ✓';
+    } else {
+        voiceChip.className = 'status-chip empty';
+        voiceChip.textContent = '🎤 语音: 未录制';
+    }
+    
+    var text = document.getElementById('uploadText') ? document.getElementById('uploadText').value.trim() : '';
+    if (text) {
+        textChip.className = 'status-chip has';
+        textChip.textContent = '📝 文字: 已填写 ✓';
+    } else {
+        textChip.className = 'status-chip empty';
+        textChip.textContent = '📝 文字: 未填写';
+    }
+    
+    if (selectedImages.length > 0) {
+        imageChip.className = 'status-chip has';
+        imageChip.textContent = '🖼️ 图片: ' + selectedImages.length + '张 ✓';
+    } else {
+        imageChip.className = 'status-chip empty';
+        imageChip.textContent = '🖼️ 图片: 0张';
+    }
+}
+
+// 组合上传（语音+文字+图片同步）
+function submitCombinedUpload() {
+    var uploader = document.getElementById('uploaderName').value.trim();
+        // 记住上传人姓名，下次免输入
+        if (uploader) {
+            try { localStorage.setItem('fangong_uploader', uploader); } catch(e) {}
+        }
+    var workshop = document.getElementById('uploadWorkshop').value;
+    var text = document.getElementById('uploadText').value.trim();
+    
+    // 检查是否有内容
+    if (!audioBlob && !text && selectedImages.length === 0) {
+        alert('请至少录制语音、填写文字或选择图片');
+        return;
+    }
+    
+    if (!uploader) {
+        alert('请填写上传人姓名');
+        return;
+    }
+    
+    var btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '上传中...';
+    
+    var formData = new FormData();
+    formData.append('uploader', uploader);
+    formData.append('workshop', workshop);
+    formData.append('text', text);
+    formData.append('record_type', 'combined');
+    
+    // 添加语音文件
+    if (audioBlob) {
+        var voiceFile = new File([audioBlob], 'voice_' + Date.now() + '.webm', { type: 'audio/webm' });
+        formData.append('voice', voiceFile);
+    }
+    
+    // 添加图片
+    selectedImages.forEach(function(file, i) {
+        formData.append('images', file);
+    });
+    
+    var apiUrl = (window.API_BASE_URL || '') + '/api/mobile/combined-upload';
+    
+    fetch(apiUrl, {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="icon" style="font-size:16px;margin:0">↑</span>同步上传（语音+文字+图片）';
+        
+        if (data.ok) {
+            var resultDiv = document.getElementById('uploadResult');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div class="success">✅ 上传成功！' + 
+                (data.voice ? '语音 ' : '') + 
+                (data.images ? data.images + '张图片 ' : '') + 
+                (data.text ? '文字 ' : '') + 
+                '已提交解析</div>';
+            
+            // 清空表单
+            deleteVoice();
+            selectedImages = [];
+            renderImagePreview();
+            document.getElementById('uploadText').value = '';
+            updateCombinedStatus();
+            
+            setTimeout(function() { resultDiv.style.display = 'none'; }, 5000);
+        } else {
+            alert('上传失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(function(e) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="icon" style="font-size:16px;margin:0">↑</span>同步上传（语音+文字+图片）';
+        
+        // 离线模式：保存到本地缓存
+        if (typeof AndroidNative !== 'undefined') {
+            if (text) AndroidNative.cacheText(text, 'combined', '', uploader, workshop);
+            alert('当前离线，文字已保存到本地缓存，联网后自动上传\n（语音和图片请在APP内使用原生上传）');
+        } else {
+            alert('上传请求失败：' + e.message);
+        }
+    });
 }
 </script>
 </body>
