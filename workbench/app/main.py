@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.136")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.137")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -138,21 +138,7 @@ def start_scan(req: ScanReq):
                 pass
         status["heartbeat"] = time.time()
         scanner.background_scan(folders, force, status, progress_cb=lambda *_: _hb())
-        try:
-            from . import project_manager as _pm2
-            cur = _pm2.get_current_project()
-            if cur:
-                ddir = _pm2.get_project_data_dir(cur["id"])
-                idx_path = os.path.join(ddir, "index.json")
-                if os.path.isfile(idx_path):
-                    with open(idx_path, "r", encoding="utf-8") as f:
-                        idx = json.load(f)
-                    file_count = len(idx.get("files", [])) if isinstance(idx.get("files"), list) else len(idx)
-                    device_count = len(idx.get("devices", {}))
-                    workshop_count = len(idx.get("workshops", {}))
-                    _pm2.update_project_stats(cur["id"], file_count, device_count, workshop_count)
-        except Exception:
-            pass
+        _refresh_project_stats()
     
     SCAN_STATUS.update({"start_ts": time.time(), "heartbeat": time.time()})
     t = threading.Thread(target=_scan_with_stats, args=(folders, req.force, SCAN_STATUS), daemon=True)
@@ -402,6 +388,16 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                     res.error = (res.error or "") + f"; 向量化失败: {_vec_err}"
                 upload_queue.enqueue(res)
                 scanner._save_parsed_cache(res)
+                # v0.1.137：网页上传也登记文件版本（多版本对照+最新版，与扫描路径一致）
+                # 注意：必须用原始文件名 name（res.file_name 是带 sha 前缀的落盘名，
+                # 否则同名不同版本永远无法匹配成组）
+                try:
+                    from . import version_manager
+                    version_manager.record_version(name, res.sha256,
+                                                    ts=datetime.datetime.now().isoformat(),
+                                                    size=len(raw), status=res.status)
+                except Exception:  # noqa: BLE001
+                    pass
             # 登记索引（供去重/失败管理/统计共用，v0.1.22）
             idx = scanner._load_index()
             idx[res.sha256] = {
@@ -425,6 +421,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
             })
         except Exception as e:  # noqa: BLE001
             results.append({"file": f.filename or "unnamed", "status": "failed", "error": str(e)})
+    _refresh_project_stats()
     return {"ok": True, "results": results}
 
 
@@ -3414,17 +3411,15 @@ def get_workshops():
     if not current:
         return {"ok": True, "workshops": [], "message": "未选择项目，上传资料后自动识别车间"}
     
-    # 从项目已解析的文件中获取车间列表
-    workshops = _wa.list_workshops() if hasattr(_wa, 'list_workshops') else []
-    
-    # 去重
-    seen = set()
+    # v0.1.137：修复车间列表恒空——原代码调用不存在的 list_workshops() 导致恒返回 []
+    workshops_map = _wa.list_by_workshop()
     unique = []
-    for w in workshops:
-        name = w.get("name", w) if isinstance(w, dict) else str(w)
-        if name and name not in seen:
-            seen.add(name)
-            unique.append({"name": name, "file_count": w.get("file_count", 0) if isinstance(w, dict) else 0})
+    for name, recs in workshops_map.items():
+        name = str(name).strip()
+        if not name:
+            continue
+        unique.append({"name": name, "file_count": len(recs) if isinstance(recs, list) else 0})
+    unique.sort(key=lambda x: x["name"])
     
     return {
         "ok": True,
@@ -4460,6 +4455,35 @@ def _frontend_parse_queue():
     }
 
 
+def _refresh_project_stats():
+    """按当前项目 index.json 实时重算项目统计（上传/扫描后调用）。
+    v0.1.137：修复「已解析文件」数量不显示/不同步——原统计只在 /api/scan 更新，
+    网页上传后 file_count 停留旧值；且扁平索引计数含保留键导致虚高。"""
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if not cur:
+            return
+        # file_count 与前端文件列表完全同口径（files 列表键 + 扁平键合并）
+        ddir = _pm.get_project_data_dir(cur["id"])
+        fcount = len(_frontend_index_items())
+        # 车间/设备数取真实数据源（车间登记表/关联图谱），保证卡片统计同步
+        try:
+            from . import workshop_assign as _wa
+            wcount = len(_wa.list_by_workshop())
+        except Exception:  # noqa: BLE001
+            wcount = None
+        try:
+            from . import relations as _rel
+            _rl = _rel.load_relations()
+            dcount = len(_rl.get("devices", {})) if isinstance(_rl, dict) else 0
+        except Exception:  # noqa: BLE001
+            dcount = None
+        _pm.update_project_stats(cur["id"], fcount, dcount, wcount)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 import io as _io
 from urllib.parse import quote as _quote
 
@@ -4907,6 +4931,7 @@ def frontend_scan_project(force: bool = True):
             _sc.scan_folder(uploads_dir, force=force)
         except Exception:
             pass
+        _refresh_project_stats()
     import threading
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True, "message": "扫描已启动", "folder": uploads_dir}
