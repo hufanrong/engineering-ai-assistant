@@ -1,0 +1,38 @@
+{
+  "delete_keywords": {
+    "institution": ["设计院", "设计有限", "勘察设计", "研究院", "设计股份", "规划设计", "设计咨询"],
+    "person_labels": ["制图", "设计", "校对", "审核", "审定", "批准", "复核", "编制", "描图", "工艺", "专业负责人", "项目负责人"],
+    "date_labels": ["日期", "时间", "出图"],
+    "date_patterns": [
+      "^\\d{4}\\s*[年./-]\\s*\\d{1,2}\\s*[月./-]?\\s*\\d{0,2}\\s*日?",
+      "^\\d{2}\\s*[年./-]\\s*\\d{1,2}\\s*月?",
+      "^\\d{4}\\s*[./-]?\\s*\\d{1,2}$",
+      "^[〇零一二三四五六七八九]{4}\\s*年\\s*[一二三四五六七八九十]{1,3}\\s*月"
+    ],
+    "drawing_type": ["施工图", "设计施工图", "设计图"]
+  },
+  "protect_keywords": ["建设单位", "施工单位", "车间", "图号", "图名", "比例", "图纸编号", "竣工图", "图纸名称"],
+  "replace_rules": {
+    "施工图": "竣工图",
+    "设计施工图": "竣工图"
+  },
+  "drawing_type_mode": "replace",
+  "titleblock": {
+    "default_width_ratio": 1.0,
+    "default_height_ratio": 0.2,
+    "use_line_detection": true
+  },
+  "frame_detect": {
+    "standard_sizes_mm": [[841, 1189], [594, 841], [420, 594], [297, 420], [210, 297]],
+    "tolerance_mm": 3,
+    "fallback_min_side_mm": 180,
+    "fallback_max_side_mm": 1300,
+    "fallback_ratio_min": 0.4,
+    "fallback_ratio_max": 2.5
+  },
+  "plot": {
+    "device": "DWG To PDF.pc3",
+    "style_sheet": "monochrome.ctb",
+    "margin_mm": 10
+  }
+}

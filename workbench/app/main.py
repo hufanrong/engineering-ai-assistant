@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.130")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.131")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -4788,3 +4788,51 @@ def frontend_template_delete(tpl_id: str):
         return r if isinstance(r, dict) else {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ========== v0.1.131：DWG 竣工图清稿工具 ==========
+@app.get("/api/tools/dwg-cleaner/status")
+def dwg_cleaner_status():
+    """清稿工具环境检测：系统/AutoCAD版本/pywin32/pypdf/打印设备。"""
+    from . import dwg_cleaner_bridge as _dcb
+    return {"ok": True, "env": _dcb.detect_environment()}
+
+
+@app.get("/api/tools/dwg-cleaner/help")
+def dwg_cleaner_help():
+    """清稿工具下载/安装指引。"""
+    from . import dwg_cleaner_bridge as _dcb
+    return _dcb.help_text()
+
+
+@app.get("/api/tools/dwg-cleaner/drawings")
+def dwg_cleaner_drawings():
+    """列出当前项目内已入库的 DWG/DXF 图纸。"""
+    from . import dwg_cleaner_bridge as _dcb
+    drawings = _dcb.list_project_drawings()
+    return {"ok": True, "total": len(drawings), "drawings": drawings}
+
+
+@app.post("/api/tools/dwg-cleaner/process")
+def dwg_cleaner_process(data: dict):
+    """清稿处理：传入 file_paths（或 project_drawings=true 自动取当前项目全部图纸）。"""
+    from . import dwg_cleaner_bridge as _dcb
+    file_paths = data.get("file_paths") or []
+    if data.get("project_drawings"):
+        file_paths = [d["file_path"] for d in _dcb.list_project_drawings()
+                      if d.get("file_path")]
+    if not file_paths:
+        return {"ok": False, "error": "未指定要处理的图纸（file_paths 或 project_drawings=true）"}
+    result = _dcb.process_drawings(file_paths)
+    result["ok"] = (result.get("status") == "done") and (result.get("failed", 0) == 0)
+    return result
+
+
+@app.post("/api/completion/clean-drawings")
+def completion_clean_drawings():
+    """竣工资料联动：生成竣工资料前自动清稿项目内图纸（缺工具时返回提示）。"""
+    from . import dwg_cleaner_bridge as _dcb
+    result = _dcb.ensure_completion_drawings()
+    result["ok"] = result.get("status") in ("no_drawings", "done")
+    return result
+

@@ -474,6 +474,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     <div style="background:#f0fff4;border:1px solid #c8e6c9;border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px;color:#2e7d32">
       💡 按车间展示竣工资料完成情况，缺失资料一键跳转资料生成模块补充。
     </div>
+
+    <!-- v0.1.131：DWG 竣工图清稿 -->
+    <div style="border:1px solid #d9e2f3;border-radius:8px;padding:12px;margin-bottom:16px;background:#f7faff">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700;color:#1E5AA8">🖨️ DWG 竣工图清稿 <span style="font-weight:400;color:#888;font-size:11px">（自动删除标题栏设计院/人名/日期/“施工图”字样→替换为“竣工图”→逐图合并PDF+清稿DWG，原文件只读）</span></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="loadCleanerStatus()">🔄 检测环境</button>
+          <button class="btn btn-sm btn-primary" onclick="runCleanerProcess()" id="btnCleanerRun" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">🚀 开始清稿</button>
+        </div>
+      </div>
+      <div id="cleanerEnvBar" style="font-size:12px;margin-bottom:8px;padding:8px;border-radius:6px;background:#fff;border:1px solid #e3e8f0">检测环境中...</div>
+      <div id="cleanerDrawingList" style="font-size:12px;max-height:200px;overflow:auto;margin-bottom:8px"></div>
+      <div id="cleanerResult" style="font-size:12px"></div>
+    </div>
     <div id="archiveWorkshopList"></div>
   </div>
 
@@ -640,7 +654,7 @@ function switchModule(moduleName) {
     // 模块加载时刷新数据（无项目时也能访问，显示空状态）
     if (moduleName === 'resource') { try { loadResourceData(); loadStorageLocations(); } catch(e) {} }
     if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); } catch(e) {} }
-    if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); } catch(e) {} }
+    if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); onEnterArchiveModule(); } catch(e) {} }
     if (moduleName === 'ai') { try { loadOperationLogs(); } catch(e) {} }
     if (moduleName === 'update') { try { loadUpdateInfo(); } catch(e) {} }
 }
@@ -764,6 +778,112 @@ function confirmDeleteProject() {
             alert('删除失败：' + (data.error || '未知错误'));
         }
     });
+}
+
+// ========== v0.1.131：DWG 竣工图清稿 ==========
+var cleanerEnv = null;
+var cleanerDrawings = [];
+function loadCleanerStatus() {
+    var bar = document.getElementById('cleanerEnvBar');
+    if (!bar) return;
+    bar.innerHTML = '检测环境中...';
+    fetch('/api/tools/dwg-cleaner/status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var env = d.env || {};
+            cleanerEnv = env;
+            if (env.ready) {
+                bar.style.background = '#f0fff4';
+                bar.style.color = '#2e7d32';
+                bar.innerHTML = '✅ 清稿环境就绪（AutoCAD ' + (env.autocad.version || '已安装') + ' · pywin32 ✓ · pypdf ✓ · 打印设备 ' + (env.plot_device||'DWG To PDF.pc3') + '）';
+                loadCleanerDrawings();
+            } else {
+                bar.style.background = '#fff7e6';
+                bar.style.color = '#ad6800';
+                var miss = (env.missing||[]).join('、') || '未知';
+                var hints = (env.hint||[]).map(function(h){return '<li>' + escapeHtml(h) + '</li>';}).join('');
+                bar.innerHTML = '⚠️ 清稿环境不全（缺少：' + escapeHtml(miss) + '）<ul style="margin:6px 0 0 16px;padding:0">' + hints + '</ul><div style="margin-top:6px">安装完成后点击「🔄 检测环境」刷新。</div>';
+                document.getElementById('cleanerDrawingList').innerHTML = '';
+                document.getElementById('cleanerResult').innerHTML = '';
+            }
+        })
+        .catch(function(e) {
+            bar.innerHTML = '❌ 环境检测失败：' + escapeHtml(String(e));
+        });
+}
+function loadCleanerDrawings() {
+    var box = document.getElementById('cleanerDrawingList');
+    fetch('/api/tools/dwg-cleaner/drawings')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            cleanerDrawings = d.drawings || [];
+            if (!cleanerDrawings.length) {
+                box.innerHTML = '<div style="color:#999">项目内暂无 DWG/DXF 图纸。请先在资源管理上传图纸后再清稿。</div>';
+                return;
+            }
+            var rows = cleanerDrawings.map(function(f, i) {
+                return '<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer">' +
+                    '<input type="checkbox" class="cleaner-file-cb" data-path="' + escapeHtml(f.file_path) + '" checked>' +
+                    '<span style="flex:1">' + escapeHtml(f.file_name) + '</span>' +
+                    '<span style="color:#999;font-size:11px">' + escapeHtml(f.status || '') + '</span>' +
+                    '</label>';
+            }).join('');
+            box.innerHTML = '<div style="margin-bottom:6px"><label style="display:flex;gap:6px;align-items:center;font-weight:600;cursor:pointer"><input type="checkbox" id="cleanerCheckAll" checked onchange="cleanerToggleAll(this.checked)"> 全选（' + cleanerDrawings.length + ' 张）</label></div>' + rows;
+        });
+}
+function cleanerToggleAll(checked) {
+    var cbs = document.querySelectorAll('.cleaner-file-cb');
+    cbs.forEach(function(cb) { cb.checked = checked; });
+}
+function runCleanerProcess() {
+    var resultBox = document.getElementById('cleanerResult');
+    if (!cleanerEnv || !cleanerEnv.ready) {
+        resultBox.innerHTML = '<div style="color:#ad6800">⚠️ 清稿环境未就绪，请先按提示安装 AutoCAD/pywin32/pypdf 后重试。</div>';
+        return;
+    }
+    var paths = [];
+    document.querySelectorAll('.cleaner-file-cb:checked').forEach(function(cb) {
+        paths.push(cb.getAttribute('data-path'));
+    });
+    if (!paths.length) { resultBox.innerHTML = '<div style="color:#999">请勾选要清稿的图纸。</div>'; return; }
+    resultBox.innerHTML = '<div style="color:#1E5AA8">⏳ 正在清稿 ' + paths.length + ' 张图纸（AutoCAD 处理中，请勿关闭，可能耗时较长）...</div>';
+    fetch('/api/tools/dwg-cleaner/process', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_paths: paths})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        var html = '';
+        if (!d.ok && d.error) {
+            html = '<div style="color:#c62828">❌ 处理失败：' + escapeHtml(d.error) + '</div>' +
+                (d.hint ? '<div style="color:#ad6800;margin-top:4px">' + (d.hint||[]).map(function(h){return escapeHtml(h);}).join('<br>') + '</div>' : '');
+        } else {
+            var succ = d.success || 0, fail = d.failed || 0;
+            html = '<div style="color:#2e7d32">✅ 完成：成功 ' + succ + ' / 失败 ' + fail + '，输出目录：' + escapeHtml(d.out_dir || '') + '</div>';
+            (d.results || []).forEach(function(r) {
+                if (r.status === 'success') {
+                    html += '<div style="margin:6px 0;padding:6px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px">' +
+                        '📄 ' + escapeHtml(r.file.split(/[\\/]/).pop()) +
+                        '：删除 ' + (r.deleted_count||0) + ' 条 / 替换 ' + (r.replaced_count||0) + ' 条 / 图框 ' + (r.frame_count||0) + ' 个 / PDF ' + (r.pdf_pages||0) + ' 页<br>' +
+                        '<span style="color:#666">清稿DWG：' + escapeHtml(r.cleaned_dwg||'') + '<br>竣工PDF：' + escapeHtml(r.pdf||'') + '</span></div>';
+                } else {
+                    html += '<div style="margin:6px 0;padding:6px;background:#fff1f0;border:1px solid #ffa39e;border-radius:6px;color:#c62828">' +
+                        '❌ ' + escapeHtml(r.file.split(/[\\/]/).pop()) + '：' + escapeHtml(r.error || '未知错误') + '</div>';
+                }
+            });
+        }
+        resultBox.innerHTML = html;
+        loadCleanerDrawings();
+    })
+    .catch(function(e) {
+        resultBox.innerHTML = '<div style="color:#c62828">❌ 请求失败：' + escapeHtml(String(e)) + '</div>';
+    });
+}
+// 进入竣工组卷模块时自动检测环境
+function onEnterArchiveModule() {
+    loadCleanerStatus();
+    loadArchiveDashboard();
 }
 
 function updateProjectUI() {

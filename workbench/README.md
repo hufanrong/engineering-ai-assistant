@@ -232,3 +232,13 @@ fangong-workbench/
 
 ---
 © 2026 胡繁荣 · 繁工AI（FanGong AI）· 工程蓝 #1E5AA8 / 安全橙 #FF7A00
+
+## v0.1.131：DWG 竣工图清稿工具
+
+- 功能：批量把设计/施工图 DWG 清理成竣工图（自动删除标题栏设计院名称、出图时间、设计人员姓名、“施工图”字样，保留建设单位/施工单位/车间/图号），每张图单独一页合并导出 PDF + 另存清稿 DWG。原文件只读。
+- 位置：`tools/dwg_cleaner/`（独立包），入口 `app/dwg_cleaner_bridge.py`
+- 环境要求（Windows 部署机）：
+  - AutoCAD 2020+（COM 驱动，必需）
+  - `pip install pywin32 pypdf`
+- 平台内位置：竣工组卷 → DWG 竣工图清稿（自动检测环境，不全时提示下载安装；环境就绪后选择图纸一键清稿）
+- API：`/api/tools/dwg-cleaner/status`（环境检测）、`/help`（下载指引）、`/drawings`（项目图纸列表）、`/process`（清稿处理）、`/api/completion/clean-drawings`（竣工资料联动）
