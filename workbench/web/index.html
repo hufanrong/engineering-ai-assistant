@@ -219,10 +219,25 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     </div>
   </div>
 
-  <!-- 解析进度实时可视化 -->
+  <!-- v0.1.136：解析进度（真实解析状态，完成即100%） + 待上传云端折叠区（勾选/全选上传） -->
   <div class="card" id="parseProgressCard">
     <div class="card-title"><span class="icon">⚙️</span>解析进度 <span class="badge badge-info" id="parseQueueCount">0</span></div>
-    <div id="parseQueueList" style="max-height:300px;overflow-y:auto"></div>
+    <div id="parseProgressMain" style="max-height:260px;overflow-y:auto"></div>
+    <div style="margin-top:10px;border-top:1px dashed #e5e5e5;padding-top:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCloudPending()">
+        <span style="font-size:13px;font-weight:600">☁️ 待上传云端 <span class="badge badge-warning" id="cloudPendingCount">0</span></span>
+        <span id="cloudPendingArrow" style="color:#999;font-size:11px">展开 ▾</span>
+      </div>
+      <div id="cloudPendingArea" style="display:none;margin-top:8px">
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="cloudSelectAll" onchange="toggleCloudSelectAll()"> 全选</label>
+          <button class="btn btn-primary btn-sm" onclick="uploadCloudSelected()">⬆️ 上传选中</button>
+          <button class="btn btn-default btn-sm" onclick="uploadCloudAll()">⬆️ 全部上传</button>
+          <span style="font-size:11px;color:#999" id="cloudUploadResult"></span>
+        </div>
+        <div id="cloudPendingList" style="max-height:220px;overflow-y:auto"></div>
+      </div>
+    </div>
   </div>
 
   <!-- 车间展示 -->
@@ -1190,6 +1205,7 @@ function clearAllFailed() {
 var UPLOAD_BATCH = 50;        // 每批文件数
 var uploadQueueList = [];     // {file, relPath}
 var uploadBusy = false;
+var parseLocalQueue = [];     // v0.1.136 本地上传批次解析状态 {name, status, pct}
 
 // 文件夹选择（webkitdirectory 已按目录展平，files 带 webkitRelativePath）
 function handleFolderUpload(files) {
@@ -1269,10 +1285,14 @@ function collectEntries(entries, basePath, done) {
 function enqueueUploads(items, source) {
     if (!currentProject) { alert('请先选择或创建项目'); return; }
     uploadQueueList = uploadQueueList.concat(items);
+    for (var i = 0; i < items.length; i++) {
+        parseLocalQueue.push({name: items[i].file.name, status: 'waiting', pct: 0});
+    }
     var msg = source + '加入 ' + items.length + ' 个文件，队列共 ' + uploadQueueList.length + ' 个';
     var st = document.getElementById('uploadStatus');
     if (st) st.textContent = msg;
     showUploadProgress();
+    updateParseProgress();
     if (!uploadBusy) runUploadQueue();
 }
 
@@ -1286,6 +1306,12 @@ function hideUploadProgress() {
 }
 
 // 分批上传：每批 UPLOAD_BATCH 个，失败自动重试 3 次
+// v0.1.136：进度条=解析进度（上传阶段显示上传%，响应返回后按解析结果计，完成即100%）
+function markLocalParse(names, status, pct) {
+    parseLocalQueue.forEach(function(item) {
+        if (names.indexOf(item.name) >= 0) { item.status = status; item.pct = pct; }
+    });
+}
 function runUploadQueue() {
     if (uploadBusy) return;
     if (!uploadQueueList.length) { uploadBusy = false; hideUploadProgress(); return; }
@@ -1295,8 +1321,13 @@ function runUploadQueue() {
     var bar = document.getElementById('uploadProgressBar');
     var status = document.getElementById('uploadStatus');
     var percent = document.getElementById('uploadPercent');
-    if (status) status.textContent = '正在上传第 ' + (total - uploadQueueList.length) + '/' + total + ' 个（本批 ' + batch.length + ' 个）...';
+    var batchNames = [];
+    for (var bi = 0; bi < batch.length; bi++) batchNames.push(batch[bi].file.name);
+    markLocalParse(batchNames, 'parsing', 0);
+    if (status) status.textContent = '正在解析第 ' + (total - uploadQueueList.length) + '/' + total + ' 个（本批 ' + batch.length + ' 个）...';
     if (bar) bar.style.width = '5%';
+    if (percent) percent.textContent = '解析 5%';
+    updateParseProgress();
 
     var formData = new FormData();
     var uname = (localStorage.getItem('fangong_uploader') || '电脑端');
@@ -1312,57 +1343,91 @@ function runUploadQueue() {
     xhr.upload.onprogress = function(e) {
         if (e.lengthComputable && bar) {
             var pct = Math.round((e.loaded / e.total) * 100);
+            // 上传阶段仍驱动进度条，但文本标注为「上传+解析」总进度
+            markLocalParse(batchNames, 'parsing', pct);
             bar.style.width = pct + '%';
-            if (percent) percent.textContent = pct + '%';
+            if (percent) percent.textContent = '上传 ' + pct + '%';
         }
     };
     xhr.onload = function() {
-        var ok = false;
-        try { var r = JSON.parse(xhr.responseText); ok = r.ok !== false; } catch (e) {}
-        if (!ok) {
-            // 失败重试（最多3次）
+        var results = [];
+        try { var r = JSON.parse(xhr.responseText); results = r.results || []; if (r.ok === false) throw new Error('ok=false'); }
+        catch (e) {
+            // 整批失败重试（最多3次）
             if ((batch._retry || 0) < 3) {
                 batch._retry = (batch._retry || 0) + 1;
                 uploadQueueList = batch.concat(uploadQueueList);
+                markLocalParse(batchNames, 'waiting', 0);
                 if (status) status.textContent = '本批上传失败，自动重试第 ' + batch._retry + ' 次...';
                 setTimeout(function() { uploadBusy = false; runUploadQueue(); }, 800);
             } else {
+                markLocalParse(batchNames, 'failed', 0);
                 if (status) status.textContent = '本批 ' + batch.length + ' 个文件多次失败，已转入待处理（可在上传记录中重试/删除）';
                 uploadBusy = false;
+                if (bar) bar.style.width = '100%';
+                if (percent) percent.textContent = '解析完成（含失败）';
+                updateParseProgress();
                 runUploadQueue();
             }
             return;
+        }
+        // 按解析结果更新：parsed/partial/duplicate=解析完成100%；failed=失败
+        var okCount = 0, failCount = 0, failList = [];
+        results.forEach(function(res) {
+            var st = res.status;
+            if (st === 'parsed' || st === 'partial' || st === 'duplicate') okCount++;
+            else if (st === 'failed') { failCount++; failList.push(res.file || ''); }
+        });
+        markLocalParse(batchNames, 'done', 100);
+        results.forEach(function(res) {
+            if (res.status === 'failed') {
+                parseLocalQueue.forEach(function(item) {
+                    if (item.name === res.file) { item.status = 'failed'; item.pct = 0; }
+                });
+            }
+        });
+        // 进度条 = 解析进度：成功数/总数
+        var donePct = Math.round((okCount / Math.max(1, results.length)) * 100);
+        if (bar) bar.style.width = donePct + '%';
+        if (percent) percent.textContent = '解析 ' + donePct + '%';
+        if (failCount) {
+            if (status) status.textContent = '解析完成：' + okCount + ' 成功，' + failCount + ' 失败（' + failList.slice(0,3).join('、') + '）可在上传记录重试';
+            setTimeout(hideUploadProgress, 6000);
+        } else {
+            if (status) status.textContent = '解析完成：' + okCount + '/' + results.length + ' 个文件';
+            // 全部成功：100% 后短暂停留再隐藏
+            setTimeout(function() {
+                // 移除已完成的本地解析项
+                parseLocalQueue = parseLocalQueue.filter(function(item) { return item.status !== 'done'; });
+                hideUploadProgress();
+                updateParseProgress();
+            }, 2000);
         }
         uploadBusy = false;
         if (uploadQueueList.length) {
             runUploadQueue();
         } else {
-            if (status) status.textContent = '上传完成，正在解析...';
-            if (bar) bar.style.width = '90%';
-            fetch('/api/scan/project', {method: 'POST'})
-                .then(function() {
-                    if (bar) bar.style.width = '100%';
-                    if (status) status.textContent = '解析完成！';
-                    setTimeout(hideUploadProgress, 2000);
-                    if (typeof loadResourceData === 'function') loadResourceData();
-                })
-                .catch(function() {
-                    if (bar) bar.style.width = '100%';
-                    if (status) status.textContent = '上传完成，解析触发失败，请手动重扫';
-                    setTimeout(hideUploadProgress, 3000);
-                    if (typeof loadResourceData === 'function') loadResourceData();
-                });
+            // 解析完成后刷新资源数据（不再依赖 /api/scan/project 的假进度）
+            if (typeof loadResourceData === 'function') loadResourceData();
+            try {
+                fetch('/api/scan/project', {method: 'POST'}).catch(function() {});
+            } catch (e) {}
         }
     };
     xhr.onerror = function() {
         if ((batch._retry || 0) < 3) {
             batch._retry = (batch._retry || 0) + 1;
             uploadQueueList = batch.concat(uploadQueueList);
+            markLocalParse(batchNames, 'waiting', 0);
             if (status) status.textContent = '网络错误，自动重试第 ' + batch._retry + ' 次...';
             setTimeout(function() { uploadBusy = false; runUploadQueue(); }, 800);
         } else {
+            markLocalParse(batchNames, 'failed', 0);
             if (status) status.textContent = '本批 ' + batch.length + ' 个文件多次失败，已转入待处理';
             uploadBusy = false;
+            if (bar) bar.style.width = '100%';
+            if (percent) percent.textContent = '上传失败';
+            updateParseProgress();
             runUploadQueue();
         }
     };
@@ -2110,11 +2175,87 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// ===== 解析进度实时可视化（v0.1.135：真实区分解析中/待上传云端） =====
+// ===== 解析进度实时可视化（v0.1.136：主区=解析进度，折叠区=待上传云端） =====
 var parseQueue = [];
+var cloudPending = [];
+var cloudPendingOpen = false;
+
+function toggleCloudPending() {
+    cloudPendingOpen = !cloudPendingOpen;
+    var area = document.getElementById('cloudPendingArea');
+    var arrow = document.getElementById('cloudPendingArrow');
+    if (area) area.style.display = cloudPendingOpen ? 'block' : 'none';
+    if (arrow) arrow.textContent = cloudPendingOpen ? '收起 ▴' : '展开 ▾';
+    if (cloudPendingOpen) renderCloudPending();
+}
+
+function renderCloudPending() {
+    var list = document.getElementById('cloudPendingList');
+    if (!list) return;
+    var count = document.getElementById('cloudPendingCount');
+    if (count) count.textContent = cloudPending.length;
+    var selAll = document.getElementById('cloudSelectAll');
+    if (selAll) selAll.checked = cloudPending.length > 0 && cloudPending.every(function(p) { return p._sel; });
+    if (!cloudPendingOpen) return;
+    list.innerHTML = '';
+    if (!cloudPending.length) {
+        list.innerHTML = '<div style="padding:8px;color:#999;font-size:12px">暂无待上传文件</div>';
+        return;
+    }
+    cloudPending.forEach(function(item) {
+        var div = document.createElement('div');
+        div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:6px;font-size:12px';
+        div.innerHTML = '<input type="checkbox" ' + (item._sel ? 'checked' : '') + ' onchange="cloudPending.forEach(function(p){ if(p.package===\'' + item.package + '\') p._sel=this.checked; }); renderCloudPending();">' +
+            '<span style="flex:1;font-weight:500;word-break:break-all">' + (item.file_name || '') + '</span>' +
+            '<span style="color:#999;flex-shrink:0">待上传云端</span>';
+        list.appendChild(div);
+    });
+}
+
+function toggleCloudSelectAll() {
+    var selAll = document.getElementById('cloudSelectAll');
+    var v = selAll ? selAll.checked : false;
+    cloudPending.forEach(function(p) { p._sel = v; });
+    renderCloudPending();
+}
+
+function uploadCloudSelected() {
+    var pkgs = cloudPending.filter(function(p) { return p._sel; }).map(function(p) { return p.package; });
+    if (!pkgs.length) { setCloudResult('请先勾选要上传的文件'); return; }
+    doUploadCloud(pkgs, '上传选中');
+}
+
+function uploadCloudAll() {
+    if (!cloudPending.length) { setCloudResult('没有待上传的文件'); return; }
+    doUploadCloud(null, '上传全部');
+}
+
+function setCloudResult(txt) {
+    var el = document.getElementById('cloudUploadResult');
+    if (el) el.textContent = txt;
+}
+
+function doUploadCloud(pkgs, label) {
+    setCloudResult(label + '：已提交，正在上传...');
+    fetch('/api/upload/cloud', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({packages: pkgs || []})
+    }).then(function(r) { return r.json().then(function(d) { return {ok: r.ok, d: d}; }); })
+      .then(function(res) {
+        if (!res.ok) {
+            setCloudResult('✗ ' + (res.d.detail || '上传失败'));
+            return;
+        }
+        setCloudResult('✓ ' + (res.d.msg || '已开始上传') + '，稍后自动刷新');
+        setTimeout(updateParseProgress, 4000);
+      })
+      .catch(function() { setCloudResult('✗ 上传请求失败'); });
+}
+
 function updateParseProgress() {
     var card = document.getElementById('parseProgressCard');
-    var list = document.getElementById('parseQueueList');
+    var main = document.getElementById('parseProgressMain');
     var count = document.getElementById('parseQueueCount');
     
     fetch('/api/parse/queue')
@@ -2123,50 +2264,51 @@ function updateParseProgress() {
             var queue = data.queue || [];
             var scan = data.scan_status || {};
             var cloud = data.cloud || {};
-            parseQueue = queue;
-            count.textContent = queue.length;
-            
-            if (queue.length === 0 && !scan.running) {
+            // 保留已有勾选状态
+            var selMap = {};
+            cloudPending.forEach(function(p) { if (p._sel) selMap[p.package] = true; });
+            cloudPending = queue.map(function(q) {
+                return {package: q.package || q.sha256 || q.file_name, file_name: q.file_name, _sel: !!selMap[q.package || q.sha256 || q.file_name]};
+            });
+            renderCloudPending();
+            // 主区域：解析进度（前端上传批次 + 扫描状态）
+            var hasLocal = parseLocalQueue.length > 0;
+            var hasScan = !!scan.running;
+            var totalItems = parseLocalQueue.length + (hasScan ? 1 : 0);
+            count.textContent = totalItems;
+            if (!hasLocal && !hasScan && cloudPending.length === 0) {
                 card.style.display = 'none';
                 return;
             }
             card.style.display = 'block';
-            list.innerHTML = '';
-            // 云端未配置提示（文件已解析完成，仅等云端上传）
-            if (!cloud.configured && queue.length > 0) {
-                var tip = document.createElement('div');
-                tip.style.cssText = 'padding:8px 10px;background:#FFF7E6;border:1px solid #FFD591;border-radius:6px;margin-bottom:8px;font-size:12px;color:#8C4E00';
-                tip.textContent = '以下文件已解析完成并保存在本地库；当前未配置云端地址，不会自动上传。配置云端地址后即可自动上传合并。';
-                list.appendChild(tip);
-            }
-            // 扫描/重试进行中
-            if (scan.running) {
+            main.innerHTML = '';
+            // 扫描/重试进行中（服务端解析）
+            if (hasScan) {
                 var s = document.createElement('div');
                 s.style.cssText = 'padding:8px 10px;background:#E6F4FF;border:1px solid #91CAFF;border-radius:6px;margin-bottom:8px;font-size:12px;color:#0958D9';
-                s.textContent = '正在解析中：' + (scan.done || 0) + '/' + (scan.total || 0) + (scan.msg ? '  ' + scan.msg : '');
-                list.appendChild(s);
+                s.textContent = '扫描解析中：' + (scan.done || 0) + '/' + (scan.total || 0) + (scan.msg ? '  ' + scan.msg : '');
+                main.appendChild(s);
             }
-            queue.forEach(function(item) {
+            // 本地上传批次解析状态
+            parseLocalQueue.forEach(function(item) {
                 var div = document.createElement('div');
                 div.style.cssText = 'padding:8px 12px;background:#f8f9fa;border-radius:6px;margin-bottom:6px';
-                var pct = item.progress || 0;
-                var statusText = item.status === 'upload_pending' ? '已解析 · 待上传云端' : (item.status === 'parsing' ? '解析中...' : item.status === 'done' ? '完成' : item.status === 'failed' ? '失败' : '待上传云端');
-                var statusColor = item.status === 'parsing' ? '#1E5AA8' : item.status === 'done' ? '#52C41A' : item.status === 'failed' ? '#EA6668' : '#999';
+                var st = item.status;
+                var statusText = st === 'done' ? '解析完成' : st === 'failed' ? '解析失败' : st === 'uploading' ? '上传中' : st === 'parsing' ? '解析中...' : '等待中';
+                var statusColor = st === 'done' ? '#52C41A' : st === 'failed' ? '#EA6668' : st === 'uploading' || st === 'parsing' ? '#1E5AA8' : '#999';
+                var pct = st === 'done' ? 100 : (item.pct || 0);
                 div.innerHTML = '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">' +
-                    '<span style="font-weight:500">' + (item.file_name || '') + '</span>' +
-                    '<span style="color:' + statusColor + '">' + statusText + (pct ? ' ' + pct + '%' : '') + '</span></div>' +
-                    (item.status === 'parsing' ? '<div class="progress"><div class="progress-bar" style="width:' + pct + '%"></div></div>' : '');
-                list.appendChild(div);
+                    '<span style="font-weight:500;word-break:break-all;padding-right:8px">' + (item.name || '') + '</span>' +
+                    '<span style="color:' + statusColor + ';flex-shrink:0">' + statusText + (st === 'done' ? ' 100%' : (st === 'uploading' || st === 'parsing') && pct ? ' ' + pct + '%' : '') + '</span></div>' +
+                    (st === 'uploading' || st === 'parsing' || st === 'waiting' ? '<div class="progress"><div class="progress-bar" style="width:' + pct + '%"></div></div>' : '');
+                main.appendChild(div);
             });
-            // 最近一次云端上传结果
-            var logs = cloud.last_logs || [];
-            var upLogs = logs.filter(function(l) { return l.action === 'upload'; });
-            if (upLogs.length) {
-                var last = upLogs[upLogs.length - 1];
-                var lg = document.createElement('div');
-                lg.style.cssText = 'margin-top:8px;font-size:11px;color:#999;border-top:1px dashed #e5e5e5;padding-top:6px';
-                lg.textContent = '最近云端上传：' + (last.result === 'ok' ? '成功' : '失败 ' + (last.detail || '')) + '（' + String(last.ts || '').slice(0, 16) + '）';
-                list.appendChild(lg);
+            // 云端未配置提示（折叠区说明）
+            if (!cloud.configured && cloudPending.length > 0) {
+                var tip = document.createElement('div');
+                tip.style.cssText = 'padding:7px 10px;background:#FFF7E6;border:1px solid #FFD591;border-radius:6px;margin-top:8px;font-size:11px;color:#8C4E00';
+                tip.textContent = '未配置云端地址（CLOUD_ENDPOINT），文件仅保存在本地库，无法上传云端。';
+                main.appendChild(tip);
             }
         })
         .catch(function() { card.style.display = 'none'; });

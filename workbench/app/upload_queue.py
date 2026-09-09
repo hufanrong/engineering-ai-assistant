@@ -118,8 +118,9 @@ def tail_logs(n=3) -> list:
         return []
 
 
-def upload_all(progress_cb=None) -> dict:
-    """把队列上传到云端主库；返回 {ok, failed, skipped}。"""
+def upload_all(packages: list = None, progress_cb=None) -> dict:
+    """把队列上传到云端主库；返回 {ok, failed, skipped}。
+    packages：可选，指定要上传的包文件名列表（不含 .json），空/None 表示全部。"""
     _ensure()
     if not config.CLOUD_ENDPOINT:
         return {"ok": 0, "failed": 0, "skipped": len(list_pending()),
@@ -131,6 +132,11 @@ def upload_all(progress_cb=None) -> dict:
     if config.CLOUD_API_KEY:
         headers["Authorization"] = f"Bearer {config.CLOUD_API_KEY}"
     files = [f for f in os.listdir(QUEUE_DIR) if f.endswith(".json")]
+    if packages:
+        want = {p if p.endswith(".json") else p + ".json" for p in packages}
+        files = [f for f in files if f in want]
+        if not files:
+            return {"ok": 0, "failed": 0, "skipped": 0, "message": "所选文件不在上传队列"}
     ok = failed = 0
     batch = config.UPLOAD_BATCH_SIZE
     for i in range(0, len(files), batch):

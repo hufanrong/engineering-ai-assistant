@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.135")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.136")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -4443,6 +4443,7 @@ def _frontend_parse_queue():
     for p in pending[:30]:
         queue.append({
             "file_name": p.get("file_name") or p.get("path") or "待上传",
+            "package": p.get("package") or "",
             "status": "upload_pending",   # 已解析完成，等待云端上传
             "progress": 0,
             "created_at": p.get("created_at") or "",
@@ -4499,6 +4500,29 @@ def frontend_files(workshop: str = "", status: str = "", q: str = "", limit: int
 def frontend_parse_queue():
     """解析队列/扫描状态（前端资源管理模块）。"""
     return _frontend_parse_queue()
+
+
+class UploadCloudReq(BaseModel):
+    packages: list = []   # 空 = 上传全部
+
+
+@app.post("/api/upload/cloud")
+def upload_cloud(req: UploadCloudReq):
+    """把待上传云端队列（可勾选部分/全部）推送到云端主库（v0.1.136）。"""
+    from . import upload_queue as _uq
+    if not config.CLOUD_ENDPOINT:
+        raise HTTPException(400, "未配置云端地址（CLOUD_ENDPOINT），请先在 config.py 配置云端地址后再上传")
+    if SCAN_STATUS.get("running"):
+        raise HTTPException(409, "解析任务进行中，请稍后再上传云端")
+    pkgs = [p for p in req.packages if isinstance(p, str) and p.strip()]
+    def _run():
+        try:
+            _uq.upload_all(packages=pkgs or None)
+        except Exception as e:  # noqa: BLE001
+            print(f"[cloud] upload error: {e}")
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "msg": "已开始上传选中文件到云端" if pkgs else "已开始上传全部到云端",
+            "count": len(pkgs)}
 
 
 @app.post("/api/files/update")
