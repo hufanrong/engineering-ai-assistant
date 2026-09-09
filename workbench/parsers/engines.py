@@ -264,11 +264,12 @@ def parse_excel(res: ParseResult):
             "sheet": ws.title,
             "header": header,
             "row_count": len(data_rows),
-            "rows": data_rows[:500],          # 前端展示上限
+            "rows": data_rows[:500],          # 前端展示上限（数据全量保留在row_count）
         })
         text_parts.append(f"【工作表：{ws.title}】")
         text_parts.append(" | ".join(header))
-        for row in data_rows[:1000]:
+        # v0.1.129：文本全量入向量库（原仅前1000行），长台账后段不再丢失
+        for row in data_rows:
             text_parts.append(" | ".join(f"{k}={v}" for k, v in row.items()))
     wb.close()
     res.text = "\n".join(text_parts)
@@ -276,10 +277,22 @@ def parse_excel(res: ParseResult):
 
 
 # ============ 文本 ============
+def _read_text_auto(path: str) -> str:
+    """v0.1.129：自动探测文本编码（utf-8 → gbk/gb18030 → latin1），
+    解决中文 GBK 编码 txt/csv 乱码问题。"""
+    with open(path, "rb") as f:
+        raw = f.read(65536)
+    for enc in ("utf-8", "gb18030", "latin1"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return raw.decode("utf-8", errors="ignore")
+
+
 def parse_text(res: ParseResult):
     res.parser = "text"
-    with open(res.file_path, "r", encoding="utf-8", errors="ignore") as f:
-        res.text = f.read()
+    res.text = _read_text_auto(res.file_path)
     res.structure = {"chars": len(res.text)}
 
 
@@ -291,7 +304,11 @@ def _get_ocr():
     global _ocr_engine
     if _ocr_engine is None:
         from paddleocr import PaddleOCR
-        _ocr_engine = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+        # PaddleOCR 3.x 移除 use_angle_cls 参数，2.x 必需；分版本构造
+        try:
+            _ocr_engine = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+        except Exception:  # noqa: BLE001
+            _ocr_engine = PaddleOCR(lang="ch", show_log=False)
     return _ocr_engine
 
 
@@ -303,18 +320,52 @@ def parse_image(res: ParseResult):
     lines = []
     blocks = []
     try:
-        result = ocr.ocr(res.file_path, cls=True)          # PaddleOCR 2.x
+        # PaddleOCR 2.x：ocr.ocr(path, cls=True) → [[(box, (text, conf)), ...], ...]
+        result = ocr.ocr(res.file_path, cls=True)
         for page in result or []:
             for item in page or []:
                 box, (text, conf) = item
                 lines.append(text)
                 blocks.append({"text": text, "conf": round(float(conf), 3), "box": box})
-    except TypeError:
-        result = ocr.predict(res.file_path)                # PaddleOCR 3.x
+    except Exception:  # noqa: BLE001 —— 3.x 无 ocr.ocr，走 predict
+        try:
+            result = ocr.predict(res.file_path)
+        except Exception as e:  # noqa: BLE001
+            res.status = "failed"
+            res.error = f"OCR 失败：{e}"
+            return
         for page in result or []:
-            for item in getattr(page, "rec_texts", []) or []:
-                lines.append(item)
-                blocks.append({"text": item, "conf": None, "box": None})
+            # 兼容 dict / 对象 / 嵌套list 三种返回结构
+            if isinstance(page, dict):
+                texts = page.get("rec_texts") or page.get("rec_text") or []
+            elif hasattr(page, "rec_texts"):
+                texts = page.rec_texts or []
+            elif isinstance(page, (list, tuple)):
+                # 嵌套 list：每项可能是 [box, (text, conf)] 或纯文本
+                for item in page:
+                    if isinstance(item, (list, tuple)) and len(item) >= 2:
+                        txt = item[1]
+                        if isinstance(txt, (list, tuple)) and txt:
+                            txt = txt[0]
+                        conf = None
+                        if isinstance(item[1], (list, tuple)) and len(item[1]) > 1:
+                            conf = item[1][1]
+                        lines.append(str(txt))
+                        blocks.append({"text": str(txt), "conf": conf, "box": item[0]})
+                    elif isinstance(item, str):
+                        lines.append(item)
+                        blocks.append({"text": item, "conf": None, "box": None})
+                continue
+            else:
+                texts = []
+            for item in texts or []:
+                # 3.x 的 rec_texts 是纯文本列表；个别版本嵌套 [text, conf]
+                if isinstance(item, (list, tuple)):
+                    lines.append(str(item[0]))
+                    blocks.append({"text": str(item[0]), "conf": item[1] if len(item) > 1 else None, "box": None})
+                else:
+                    lines.append(str(item))
+                    blocks.append({"text": str(item), "conf": None, "box": None})
 
     full = "\n".join(lines)
     # 铭牌结构化：位号 / 参数 / 厂家

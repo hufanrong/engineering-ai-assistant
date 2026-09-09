@@ -400,7 +400,37 @@ def render_template(template_id: str, equipment: str = "",
     placeholder_pattern = re.compile(r'\{\{([^}]+)\}\}')
     filled_fields = set()
     unfilled_fields = set()
-    
+
+    def _fill_para_cross_run(para, pat, data, filled, unfilled):
+        """v0.1.129：段落级跨 run 兜底替换。
+        Word 常把 {{字段}} 拆到多个 run（如 '{{' / '设备名称' / '}}'），单 run 替换会漏。
+        若段落拼接文本含占位符：把替换结果写到第一个非空 run，其余 run 清空，保留原格式。"""
+        joined = "".join(r.text for r in para.runs)
+        if "{{" not in joined or "}}" not in joined:
+            return
+        ms = list(pat.finditer(joined))
+        if not ms:
+            return
+        replaced = joined
+        for m in ms:
+            field = m.group(1).strip()
+            if field in data and data[field]:
+                replaced = replaced.replace(m.group(0), str(data[field]))
+                filled.add(field)
+            else:
+                unfilled.add(field)
+        if replaced == joined:
+            return
+        # 写回：首 run 承载全文，其余清空
+        first = None
+        for r in para.runs:
+            if first is None:
+                first = r
+            else:
+                r.text = ""
+        if first is not None:
+            first.text = replaced
+
     # 填充段落
     for para in doc.paragraphs:
         for run in para.runs:
@@ -414,6 +444,7 @@ def render_template(template_id: str, equipment: str = "",
                 else:
                     unfilled_fields.add(field)
             run.text = text
+        _fill_para_cross_run(para, placeholder_pattern, fill_data, filled_fields, unfilled_fields)
     
     # 填充表格
     for table in doc.tables:
@@ -431,6 +462,7 @@ def render_template(template_id: str, equipment: str = "",
                             else:
                                 unfilled_fields.add(field)
                         run.text = text
+                    _fill_para_cross_run(para, placeholder_pattern, fill_data, filled_fields, unfilled_fields)
     
     # 生成输出路径
     if not output_path:

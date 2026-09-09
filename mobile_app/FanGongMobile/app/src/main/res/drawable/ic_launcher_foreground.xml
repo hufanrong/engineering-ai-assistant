@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 背景圆 -->
+    <path
+        android:fillColor="#1E5AA8"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
+    <!-- 繁字简化图形 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,32 L70,32 L70,38 L38,38 Z M38,44 L70,44 L70,50 L38,50 Z M42,56 L66,56 L66,62 L42,62 Z M46,68 L62,68 L62,74 L46,74 Z"/>
+    <!-- 橙色装饰条 -->
+    <path
+        android:fillColor="#FF7A00"
+        android:pathData="M32,80 L76,80 L76,84 L32,84 Z"/>
+</vector>

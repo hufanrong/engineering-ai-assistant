@@ -50,7 +50,7 @@ EXT_CAD = [".dwg", ".dxf"]
 EXT_PROJECT = [".xml"]      # Project 另存为的 XML（主计划文件）；也可 .mpp（需 Java+mpxj，暂缓）
 
 # 设备位号正则（用于从文本/表格/图纸中识别设备，浅层实体提取）
-EQUIPMENT_TAG_RE = r"(?<![A-Za-z0-9])([A-Z]{1,3}-\d{1,6}(?:[/-][A-Z]{0,3}\d{0,4})?)(?![A-Za-z0-9])"
+EQUIPMENT_TAG_RE = r"(?<![A-Za-z0-9])(?!(?:GB|JB|HG|SH|DL|YS|SY|TB|QB|JG|JGJ|TJ|ZB|YD|SD|NB|MT|AQ|GA|FZ|QC|JT)\b/?)([A-Z]{1,3}-\d{1,6}(?:[/-][A-Z]{0,3}\d{0,4})?)(?![A-Za-z0-9])"
 
 # ============ 可选依赖自动探测 ============
 def _detect_optional():

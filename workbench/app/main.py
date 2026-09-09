@@ -36,13 +36,15 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.128")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.129")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
+# v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
+# 手机端/本地页面均无需携带Cookie，移除 credentials 使通配跨域真正生效。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -336,7 +338,14 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 fh.write(raw)
             res = parse_file(saved)
             if res.status == "parsed" or res.status == "partial":
-                _store.index_file(res)
+                # v0.1.129：向量化失败不降级为 failed（文件已解析成功），
+                # 记录到 error 提示信息，状态保持 parsed，避免前端误报上传失败
+                try:
+                    _store.index_file(res)
+                    vec_ok = True
+                except Exception as _vec_err:  # noqa: BLE001
+                    vec_ok = False
+                    res.error = (res.error or "") + f"; 向量化失败: {_vec_err}"
                 upload_queue.enqueue(res)
                 scanner._save_parsed_cache(res)
             # 登记索引（供去重/失败管理/统计共用，v0.1.22）
@@ -354,6 +363,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 "status": res.status,
                 "parser": res.parser,
                 "error": res.error,
+                "vec_ok": vec_ok if (res.status == "parsed" or res.status == "partial") else False,
                 "sha256": res.sha256,
                 "entities": len(res.entities),
                 "uploader": uploader,
@@ -3384,15 +3394,20 @@ async def mobile_combined_upload(request: Request):
     
     results = {"ok": True, "uploader": uploader, "workshop": workshop, "voice": False, "images": 0, "text": bool(text)}
     
-    # 创建临时目录保存上传文件
-    tmp_dir = tempfile.mkdtemp(prefix="combined_upload_")
+    # v0.1.129：上传文件保存到持久目录（data/uploads/mobile），不再用临时目录——
+    # 原实现 scan 临时目录后 finally 清理，导致索引里 file_path 失效、原文件丢失。
+    import re as _re
+    mobile_dir = os.path.join(config.DATA_DIR, "uploads", "mobile")
+    os.makedirs(mobile_dir, exist_ok=True)
+    tmp_dir = mobile_dir
     saved_files = []
     
     try:
         # 保存语音文件
         voice_file = form.get("voice")
         if voice_file and hasattr(voice_file, 'read'):
-            voice_path = os.path.join(tmp_dir, voice_file.filename if hasattr(voice_file, 'filename') else "voice.webm")
+            vname = _re.sub(r'[^\w.-]', '_', voice_file.filename or "voice.webm")
+            voice_path = os.path.join(tmp_dir, vname)
             content = await voice_file.read()
             with open(voice_path, "wb") as f:
                 f.write(content)
@@ -3403,7 +3418,8 @@ async def mobile_combined_upload(request: Request):
         images = form.getlist("images")
         for img in images:
             if hasattr(img, 'read'):
-                img_path = os.path.join(tmp_dir, img.filename if hasattr(img, 'filename') else f"image_{len(saved_files)}.jpg")
+                iname = _re.sub(r'[^\w.-]', '_', img.filename or f"image_{len(saved_files)}.jpg")
+                img_path = os.path.join(tmp_dir, iname)
                 content = await img.read()
                 with open(img_path, "wb") as f:
                     f.write(content)
@@ -3422,7 +3438,7 @@ async def mobile_combined_upload(request: Request):
                 f.write(text)
             saved_files.append(text_path)
         
-        # 扫描解析所有文件
+        # 扫描解析所有文件（扫描持久目录，文件不清理，索引file_path长期有效）
         if saved_files:
             stats = _scanner.scan_folder(tmp_dir, force=True)
             results["parsed"] = stats.get("parsed", 0)
@@ -3433,11 +3449,6 @@ async def mobile_combined_upload(request: Request):
         
     except Exception as e:
         return {"ok": False, "error": str(e)}
-    finally:
-        # 清理临时文件
-        import shutil
-        if os.path.isdir(tmp_dir):
-            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 @app.post("/api/mobile/offline-batch-upload")
 async def mobile_offline_batch_upload(request: Request):
@@ -3473,10 +3484,16 @@ async def mobile_offline_batch_upload(request: Request):
             if project_id:
                 _pm.set_current_project(project_id)
             
-            # 扫描解析该文件
-            import os as _os
-            tmp_dir = _os.path.dirname(tmp_path)
-            stats = _scanner.scan_folder(tmp_dir, force=True)
+            # v0.1.129：先复制到持久 uploads 目录再扫描（原实现扫描临时目录后删除，
+            # 导致索引 file_path 失效、原文件丢失）
+            import shutil as _shutil
+            persist_dir = os.path.join(config.DATA_DIR, "uploads", "mobile")
+            os.makedirs(persist_dir, exist_ok=True)
+            safe_name = file_name.replace("\\", "_").replace("/", "_").replace("..", "_")
+            persist_path = os.path.join(persist_dir, safe_name)
+            _shutil.copy2(tmp_path, persist_path)
+
+            stats = _scanner.scan_folder(persist_dir, force=True)
             
             return {
                 "ok": True,
@@ -3610,7 +3627,7 @@ def get_template_fields():
 
 
 @app.post("/api/templates/upload")
-async def upload_template(request):
+async def upload_template(request: Request):
     """上传Word模板，自动解析占位符。"""
     from . import template_engine as _te
     import tempfile
@@ -4406,6 +4423,7 @@ def frontend_file_batch_update(payload: dict):
 @app.post("/api/files/batch-reparse")
 def frontend_file_batch_reparse(payload: dict):
     """批量重解析。payload: {file_ids: []}"""
+    from . import scanner as _sc
     ids = payload.get("file_ids") or []
     idx = _frontend_index_dict()
     paths = []
@@ -4429,6 +4447,7 @@ def frontend_file_batch_reparse(payload: dict):
 @app.post("/api/files/batch-delete")
 def frontend_file_batch_delete(payload: dict):
     """批量删除文件记录。payload: {file_ids: []}"""
+    from . import scanner as _sc
     ids = payload.get("file_ids") or []
     idx = _frontend_index_dict()
     n = 0

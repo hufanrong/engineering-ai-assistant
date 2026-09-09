@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fangong_blue">#1E5AA8</color>
+    <color name="fangong_blue_dark">#154a8a</color>
+    <color name="fangong_orange">#FF7A00</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+</resources>

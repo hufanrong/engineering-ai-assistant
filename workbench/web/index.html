@@ -609,6 +609,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 </div>
 
 <script>
+// v0.1.129：HTML转义，防止文件名/用户输入注入
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 
 // ===== 全局状态 =====
 var currentProject = null;
@@ -773,7 +779,10 @@ function showWorkshopFiles(workshopName) {
     document.getElementById('workshopFilesTitle').textContent = '🏭 ' + workshopName + ' - 文件列表';
     document.getElementById('workshopGrid').style.display = 'none';
     document.getElementById('workshopFiles').style.display = 'block';
-    
+    loadWorkshopFiles(workshopName);
+}
+
+function loadWorkshopFiles(workshopName) {
     // 加载该车间文件（从已解析文件中筛选）
     fetch('/api/files?workshop=' + encodeURIComponent(workshopName))
         .then(function(r) { return r.json(); })
@@ -787,13 +796,18 @@ function showWorkshopFiles(workshopName) {
             body.innerHTML = '';
             files.forEach(function(f) {
                 var tr = document.createElement('tr');
-                tr.innerHTML = '<td>' + (f.file_name || f.name || '') + '</td>' +
-                    '<td><span class="badge badge-info">' + (f.file_type || '未知') + '</span></td>' +
-                    '<td><span class="badge badge-success">已解析</span></td>' +
-                    '<td>' + (f.upload_time || '') + '</td>' +
-                    '<td><button class="btn btn-default btn-sm">查看</button></td>';
+                var fid = f.file_id || f.sha256 || f.name || f.file_name || '';
+                tr.innerHTML = '<td><input type="checkbox" class="file-checkbox" value="' + fid + '" onchange="toggleFileSelect(this)"></td>' +
+                    '<td>' + escapeHtml(f.file_name || f.name || '') + '</td>' +
+                    '<td><span class="badge badge-info">' + escapeHtml(f.file_type || '未知') + '</span></td>' +
+                    '<td>' + (f.version || 'v1') + '</td>' +
+                    '<td><span class="badge ' + ((f.status === '已解析' || f.status === '解析成功') ? 'badge-success' : 'badge-warning') + '">' + (f.status || '已解析') + '</span></td>' +
+                    '<td>' + escapeHtml(f.upload_time || '') + '</td>' +
+                    '<td><button class="btn btn-default btn-sm" onclick="previewFile(\'' + fid + '\')">查看</button> ' +
+                    '<button class="btn btn-default btn-sm" onclick="reparseFile(\'' + fid + '\')">重解析</button></td>';
                 body.appendChild(tr);
             });
+            updateSelectedCount();
         })
         .catch(function() {
             document.getElementById('workshopFilesBody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">文件列表加载中...</td></tr>';
@@ -974,11 +988,67 @@ function analyzeDocgen() {
 }
 
 function generateDoc() {
-    alert('正在生成文件...生成完成后将提供下载');
+    // v0.1.129：真实调用后端批量生成（原为假弹窗）
+    var type = document.getElementById('docgenType').value;
+    var input = document.getElementById('docgenInput').value.trim();
+    if (!type && !input) { alert('请先选择文件类型或输入需求'); return; }
+    // 从分析结果中取设备
+    var devices = [];
+    if (input) devices.push(input);
+    var btn = document.querySelector('[onclick="generateDoc()"]');
+    if (btn) btn.disabled = true;
+    fetch('/api/smart-doc/batch-generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_type: type, devices: devices})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (btn) btn.disabled = false;
+        if (data.ok) {
+            alert('生成完成：成功 ' + (data.success || 0) + ' 个，失败 ' + (data.failed || 0) + ' 个\n文件保存在：解析库/generated_docs/ 目录');
+            loadGenHistory();
+        } else {
+            alert('生成失败：' + (data.error || ''));
+        }
+    })
+    .catch(function() {
+        if (btn) btn.disabled = false;
+        alert('生成请求失败，请检查工作台是否运行');
+    });
 }
 
 function generateDocWithMissing() {
-    alert('已补充缺失信息，正在生成文件...');
+    // v0.1.129：补齐缺失字段后真实调用后端生成
+    var type = document.getElementById('docgenType').value;
+    var inputs = document.querySelectorAll('#docgenMissingFields .input');
+    var devices = [];
+    inputs.forEach(function(inp) {
+        var v = inp.value.trim();
+        if (v) devices.push(v);
+    });
+    if (devices.length === 0) { alert('请先补充缺失信息'); return; }
+    var btn = document.querySelector('[onclick="generateDocWithMissing()"]');
+    if (btn) btn.disabled = true;
+    fetch('/api/smart-doc/batch-generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_type: type, devices: devices})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (btn) btn.disabled = false;
+        if (data.ok) {
+            alert('生成完成：成功 ' + (data.success || 0) + ' 个，失败 ' + (data.failed || 0) + ' 个\n文件保存在：解析库/generated_docs/ 目录');
+            loadGenHistory();
+        } else {
+            alert('生成失败：' + (data.error || ''));
+        }
+    })
+    .catch(function() {
+        if (btn) btn.disabled = false;
+        alert('生成请求失败，请检查工作台是否运行');
+    });
 }
 
 // ===== 竣工组卷 =====
@@ -1303,7 +1373,7 @@ function exportOperationLogs() {
 function uploadTemplate(file) {
     if (!file) return;
     var formData = new FormData();
-    formData.append('template', file);
+    formData.append('file', file);
     fetch('/api/templates/upload', {method: 'POST', body: formData})
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1682,6 +1752,16 @@ function downloadFile() {
 
 // ===== 批量操作 =====
 var selectedFiles = new Set();
+function reparseFile(fileId) {
+    if (!fileId) { alert('无法定位文件'); return; }
+    fetch('/api/files/reparse', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({file_id: fileId})})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) { alert('已加入重解析队列'); loadWorkshopFiles(currentWorkshopName); }
+            else alert('重解析失败：' + (data.error || ''));
+        })
+        .catch(function() { alert('重解析请求失败'); });
+}
 function toggleSelectAll(checkbox) {
     var checks = document.querySelectorAll('.file-checkbox');
     checks.forEach(function(c) {

@@ -11,7 +11,7 @@ from parsers.engines import parse_file, ParseResult
 from .vector_store import VectorStore
 from . import upload_queue
 
-INDEX_FILE = None
+INDEX_FILE = None  # 兼容旧引用（main.py 仅判断存在性）；实际读写不再依赖此全局变量
 
 
 def _get_data_dir(data_dir=None):
@@ -32,18 +32,18 @@ def _get_data_dir(data_dir=None):
     return config.DATA_DIR
 
 
-def _ensure(data_dir=None):
-    global INDEX_FILE
+def _ensure(data_dir=None) -> str:
+    """返回当前数据目录下的 index.json 路径（v0.1.129：不再设置全局 INDEX_FILE，消除多项目/并发竞态）。"""
     ddir = _get_data_dir(data_dir)
-    INDEX_FILE = os.path.join(ddir, "index.json")
     os.makedirs(ddir, exist_ok=True)
+    return os.path.join(ddir, "index.json")
 
 
 def _load_index(data_dir=None) -> dict:
-    _ensure(data_dir)
-    if os.path.exists(INDEX_FILE):
+    idx_file = _ensure(data_dir)
+    if os.path.exists(idx_file):
         try:
-            with open(INDEX_FILE, encoding="utf-8") as f:
+            with open(idx_file, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:  # noqa: BLE001
             return {}
@@ -51,8 +51,8 @@ def _load_index(data_dir=None) -> dict:
 
 
 def _save_index(idx: dict, data_dir=None):
-    _ensure(data_dir)
-    with open(INDEX_FILE, "w", encoding="utf-8") as f:
+    idx_file = _ensure(data_dir)
+    with open(idx_file, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=1)
 
 
@@ -184,8 +184,10 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
     return stats
 
 
-def _save_parsed_cache(res: ParseResult):
-    """把解析结果缓存到 data/parsed_cache/{sha256}.json，供详情页读取。"""
+def _save_parsed_cache(res: ParseResult, data_dir=None):
+    """把解析结果缓存到 data/parsed_cache/{sha256}.json，供详情页读取。
+    v0.1.129：修复 BUG-0 —— data_dir 缺省时自行解析当前数据目录（原来引用 scan_folder 局部变量 ddir 导致 NameError）。"""
+    ddir = _get_data_dir(data_dir)
     cache_dir = os.path.join(ddir, "parsed_cache")
     os.makedirs(cache_dir, exist_ok=True)
     with open(os.path.join(cache_dir, f"{res.sha256}.json"), "w", encoding="utf-8") as f:
