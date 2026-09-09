@@ -105,6 +105,19 @@ def list_pending() -> list:
     return out
 
 
+def tail_logs(n=3) -> list:
+    """读取最近 n 条操作日志（含云端上传结果）。"""
+    _ensure()
+    if not os.path.isfile(LOG_PATH):
+        return []
+    try:
+        with open(LOG_PATH, encoding="utf-8") as f:
+            lines = f.read().strip().splitlines()
+        return [json.loads(x) for x in lines[-n:]]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def upload_all(progress_cb=None) -> dict:
     """把队列上传到云端主库；返回 {ok, failed, skipped}。"""
     _ensure()

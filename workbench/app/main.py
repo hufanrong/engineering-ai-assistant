@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.134")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.135")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -4428,17 +4428,35 @@ def _frontend_index_dict():
 
 
 def _frontend_parse_queue():
-    from . import scanner as _sc
-    status = {}
+    """解析/上传状态（资源管理模块卡片）：真实区分「解析中」与「待上传云端」。
+    v0.1.135：修复界面永远显示『排队中 0%』的误导——原实现把待上传云端队列
+    全部标记为 pending 且永不前进，未配置云端时队列永不减少。"""
+    status = dict(SCAN_STATUS)
+    status.pop("cancel", None)
     try:
         from . import upload_queue as _uq
         pending = _uq.list_pending()
-    except Exception:
-        pending = []
+        last_logs = _uq.tail_logs(5)
+    except Exception:  # noqa: BLE001
+        pending, last_logs = [], []
     queue = []
     for p in pending[:30]:
-        queue.append({"file_name": p.get("file_name") or p.get("path") or "待上传", "status": "pending", "progress": 0})
-    return {"ok": True, "queue": queue, "scan_status": status}
+        queue.append({
+            "file_name": p.get("file_name") or p.get("path") or "待上传",
+            "status": "upload_pending",   # 已解析完成，等待云端上传
+            "progress": 0,
+            "created_at": p.get("created_at") or "",
+        })
+    return {
+        "ok": True,
+        "queue": queue,
+        "scan_status": status,
+        "cloud": {
+            "configured": bool(config.CLOUD_ENDPOINT),
+            "endpoint": config.CLOUD_ENDPOINT or "",
+            "last_logs": last_logs,
+        },
+    }
 
 
 import io as _io
