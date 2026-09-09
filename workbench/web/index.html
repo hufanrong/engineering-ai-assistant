@@ -167,6 +167,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
         <select class="select" id="projectSelect" onchange="switchProject(this.value)">
           <option value="">请选择项目...</option>
         </select>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm" id="btnRenameProject" onclick="renameProject()" disabled style="flex:1">✏️ 重命名</button>
+          <button class="btn btn-sm btn-danger" id="btnDeleteProject" onclick="openDeleteProjectDialog()" disabled style="flex:1">🗑️ 删除项目</button>
+        </div>
       </div>
       <div class="form-group">
         <label class="label">新建项目</label>
@@ -703,9 +707,70 @@ function createProject() {
     });
 }
 
+// v0.1.130：重命名项目
+function renameProject() {
+    if (!currentProject) { alert('请先选择项目'); return; }
+    var newName = prompt('请输入新的项目名称', currentProject.name);
+    if (newName === null) return;
+    newName = newName.trim();
+    if (!newName) { alert('项目名称不能为空'); return; }
+    fetch('/api/projects/rename', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: currentProject.id, new_name: newName})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            alert(data.message || '重命名成功');
+            loadProjects();
+        } else {
+            alert('重命名失败：' + (data.error || '未知错误'));
+        }
+    });
+}
+
+// v0.1.130：删除项目弹窗
+function openDeleteProjectDialog() {
+    if (!currentProject) { alert('请先选择项目'); return; }
+    document.getElementById('deleteProjectModalName').textContent =
+        '确定要删除项目「' + currentProject.name + '」吗？';
+    document.getElementById('deleteProjectModal').style.display = 'flex';
+}
+function closeDeleteProjectDialog() {
+    document.getElementById('deleteProjectModal').style.display = 'none';
+}
+function confirmDeleteProject() {
+    if (!currentProject) return;
+    var deleteData = document.getElementById('deleteDataCheckbox').checked;
+    var pid = currentProject.id;
+    var pname = currentProject.name;
+    fetch('/api/projects/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: pid, delete_data: deleteData, backup: true})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        closeDeleteProjectDialog();
+        if (data.ok) {
+            alert(data.message || '删除成功');
+            currentProject = null;
+            document.getElementById('projectSelect').value = '';
+            updateProjectUI();
+            loadProjects();
+            loadResourceData();
+        } else {
+            alert('删除失败：' + (data.error || '未知错误'));
+        }
+    });
+}
+
 function updateProjectUI() {
     if (currentProject) {
         document.getElementById('topProjectInfo').textContent = '📁 ' + currentProject.name;
+        document.getElementById('btnRenameProject').disabled = false;
+        document.getElementById('btnDeleteProject').disabled = false;
         document.getElementById('projectStats').style.display = 'block';
         var hint = document.getElementById('noProjectUploadHint');
         var wrap = document.getElementById('uploadZoneWrap');
@@ -714,6 +779,9 @@ function updateProjectUI() {
         // 所有卡片默认显示，无项目时显示空状态
     } else {
         document.getElementById('topProjectInfo').textContent = '📁 未选择项目';
+        var br = document.getElementById('btnRenameProject'), bd = document.getElementById('btnDeleteProject');
+        if (br) br.disabled = true;
+        if (bd) bd.disabled = true;
         document.getElementById('projectStats').style.display = 'none';
         // 无项目时显示提示
         var hint = document.getElementById('noProjectUploadHint');
@@ -1836,5 +1904,22 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+
+<!-- v0.1.130：删除项目确认弹窗 -->
+<div id="deleteProjectModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:20px;width:92%;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
+    <div style="font-size:16px;font-weight:700;color:#D4380D;margin-bottom:10px">🗑️ 删除项目</div>
+    <div style="font-size:13px;color:#333;margin-bottom:12px" id="deleteProjectModalName"></div>
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#555;cursor:pointer">
+      <input type="checkbox" id="deleteDataCheckbox" checked style="margin-top:2px">
+      <span>同时删除该项目全部资料（勾选后不可恢复；不勾选则资料移入回收站保留）</span>
+    </label>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn" onclick="closeDeleteProjectDialog()">取消</button>
+      <button class="btn btn-danger" onclick="confirmDeleteProject()" style="background:#D4380D;border-color:#D4380D">确认删除</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

@@ -1,7 +1,7 @@
 """
 v0.1.107：项目管理模块
 
-支持新建项目、选择项目、删除项目、项目列表。
+支持新建项目、选择项目、重命名项目、删除项目（可选保留资料）、项目列表。
 每个项目的数据存储在独立目录 data/projects/{project_id}/ 下，
 包含 index.json、relations.json、向量库、解析缓存等。
 """
@@ -181,7 +181,45 @@ def get_current_project() -> Optional[Dict]:
         return None
 
 
-def delete_project(project_id: str, force: bool = False, backup: bool = True) -> Dict:
+def rename_project(project_id: str, new_name: str) -> Dict:
+    """
+    v0.1.130：修改已有项目名称。
+
+    Args:
+        project_id: 项目ID
+        new_name: 新项目名称（非空，且不与现有项目重名）
+
+    Returns:
+        更新后的项目信息
+    """
+    new_name = (new_name or "").strip()
+    if not new_name:
+        return {"ok": False, "error": "项目名称不能为空"}
+    project = get_project(project_id)
+    if not project:
+        return {"ok": False, "error": f"项目不存在：{project_id}"}
+
+    # 重名校验（排除自身）
+    for p in list_projects():
+        if p["id"] != project_id and p["name"] == new_name:
+            return {"ok": False, "error": f"项目名称已存在：{new_name}"}
+
+    meta_path = _get_project_meta_path(project_id)
+    old_name = project.get("name", "")
+    project["name"] = new_name
+    project["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(project, f, ensure_ascii=False, indent=2)
+
+    return {
+        "ok": True,
+        "project": project,
+        "message": f"项目「{old_name}」已重命名为「{new_name}」",
+    }
+
+
+def delete_project(project_id: str, force: bool = False, backup: bool = True,
+                   delete_data: bool = True) -> Dict:
     """
     删除项目。删除前自动备份到 data/backups/ 目录。
     
@@ -196,8 +234,35 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True) ->
     project = get_project(project_id)
     if not project:
         return {"ok": False, "error": f"项目不存在：{project_id}"}
-    
-    # 删除前自动备份
+
+    project_dir = _get_project_dir(project_id)
+
+    # 如果是当前项目，清除当前项目设置
+    current = get_current_project()
+    if current and current["id"] == project_id:
+        if os.path.isfile(CURRENT_PROJECT_FILE):
+            os.remove(CURRENT_PROJECT_FILE)
+
+    if not delete_data:
+        # v0.1.130：仅删除项目记录，资料移入回收站保留（可找回）
+        recycled_root = os.path.join(
+            os.path.dirname(PROJECTS_ROOT), "recycled_projects")
+        os.makedirs(recycled_root, exist_ok=True)
+        dest = os.path.join(recycled_root, project_id)
+        if os.path.exists(dest):
+            dest = os.path.join(recycled_root,
+                                f"{project_id}_{int(datetime.datetime.now().timestamp())}")
+        if os.path.exists(project_dir):
+            shutil.move(project_dir, dest)
+        return {
+            "ok": True,
+            "message": f"项目「{project['name']}」已删除（资料已保留）",
+            "deleted_id": project_id,
+            "recycled_to": dest,
+            "data_deleted": False,
+        }
+
+    # 删除项目（含资料）：删除前自动备份
     backup_result = None
     if backup:
         try:
@@ -205,23 +270,16 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True) ->
             backup_result = _pb.backup_before_delete(project_id)
         except Exception:
             pass
-    
-    project_dir = _get_project_dir(project_id)
-    
-    # 如果是当前项目，清除当前项目设置
-    current = get_current_project()
-    if current and current["id"] == project_id:
-        if os.path.isfile(CURRENT_PROJECT_FILE):
-            os.remove(CURRENT_PROJECT_FILE)
-    
+
     # 删除项目目录
     if os.path.exists(project_dir):
         shutil.rmtree(project_dir)
-    
+
     result = {
         "ok": True,
-        "message": f"项目「{project['name']}」已删除",
+        "message": f"项目「{project['name']}」已删除（含项目资料）",
         "deleted_id": project_id,
+        "data_deleted": True,
     }
     if backup_result and backup_result.get("ok"):
         result["backup"] = backup_result

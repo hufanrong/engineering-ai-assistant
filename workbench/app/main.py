@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.129")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.130")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -3574,9 +3574,20 @@ def resolve_merge_conflict(data: dict):
 
 @app.post("/api/projects/delete")
 def delete_project(data: dict):
-    """删除项目。删除前自动备份（backup=false可跳过）。"""
+    """删除项目。backup=false 跳过自动备份；delete_data=false 仅删记录、资料移入回收站保留。"""
     from . import project_manager as _pm
-    return _pm.delete_project(data.get("project_id", ""), backup=data.get("backup", True))
+    return _pm.delete_project(
+        data.get("project_id", ""),
+        backup=data.get("backup", True),
+        delete_data=data.get("delete_data", True),
+    )
+
+
+@app.post("/api/projects/rename")
+def rename_project(data: dict):
+    """v0.1.130：修改已有项目名称。"""
+    from . import project_manager as _pm
+    return _pm.rename_project(data.get("project_id", ""), data.get("new_name", ""))
 
 
 @app.get("/api/projects/data-dir")
