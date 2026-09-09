@@ -393,8 +393,12 @@ def parse_cad(res: ParseResult):
     if path.lower().endswith(".dwg"):
         converted = _dwg_to_dxf(path)
         if not converted:
-            res.status = "failed"
-            res.error = "DWG 需先安装 ODA File Converter 并配置转换（见 README），或先用 AutoCAD 另存为 DXF"
+            if _find_oda_converter():
+                res.status = "failed"
+                res.error = "ODA File Converter 已找到但转换失败：请确认 DWG 文件未损坏、版本受支持；或用 AutoCAD 另存为 DXF 后重传"
+            else:
+                res.status = "failed"
+                res.error = "未找到 ODA File Converter：请安装（自动搜索 Program Files 任意版本目录），或设置环境变量 ODA_CONVERTER 指向 ODAFileConverter.exe，或用 AutoCAD 另存为 DXF"
             return
         path = converted
     doc = ezdxf.readfile(path)
@@ -564,11 +568,56 @@ def _extract_title_block(labels, frame):
     return out
 
 
+def _find_oda_converter():
+    """自动发现 ODA File Converter 可执行文件（支持任意安装版本/目录）。
+    查找顺序：环境变量 ODA_CONVERTER → 常见安装路径（含带版本号目录）→
+    Program Files 下递归搜索 → PATH 中的 ODAFileConverter。
+    """
+    import glob
+    import subprocess
+    candidates = []
+    env = os.environ.get("ODA_CONVERTER", "")
+    if env:
+        candidates.append(env)
+    # 常见安装路径（含 27.x 等版本目录变体）
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    candidates += [
+        os.path.join(pf, "ODA", "ODAFileConverter", "ODAFileConverter.exe"),
+        os.path.join(pf, "ODAFileConverter", "ODAFileConverter.exe"),
+        os.path.join(pf86, "ODA", "ODAFileConverter", "ODAFileConverter.exe"),
+        os.path.join(pf86, "ODAFileConverter", "ODAFileConverter.exe"),
+        r"C:\ODA\ODAFileConverter\ODAFileConverter.exe",
+    ]
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return c
+    # 递归搜索（覆盖 ODAFileConverter 27.1.0 / ODAFileConverter_27.1.0 等目录）
+    for base in (pf, pf86):
+        try:
+            hits = glob.glob(os.path.join(base, "ODA", "**", "ODAFileConverter.exe"), recursive=True) + \
+                   glob.glob(os.path.join(base, "ODAFileConverter*", "ODAFileConverter.exe"))
+            for h in hits:
+                if os.path.isfile(h):
+                    return h
+        except Exception:  # noqa: BLE001
+            continue
+    # PATH 兜底
+    try:
+        out = subprocess.run(["where", "ODAFileConverter"], capture_output=True, text=True, timeout=10)
+        line = (out.stdout or "").strip().splitlines()
+        if line and os.path.isfile(line[0]):
+            return line[0]
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _dwg_to_dxf(dwg_path: str) -> Optional[str]:
     """调用 ODA File Converter 命令行将 DWG 转 DXF；失败返回 None。"""
     import subprocess
-    oda = os.environ.get("ODA_CONVERTER", r"C:\Program Files\ODA\ODAFileConverter\ODAFileConverter.exe")
-    if not os.path.exists(oda):
+    oda = _find_oda_converter()
+    if not oda:
         return None
     src_dir = os.path.dirname(dwg_path)
     out_dir = os.path.join(src_dir, "_dxf_converted")

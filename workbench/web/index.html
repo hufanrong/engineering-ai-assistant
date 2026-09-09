@@ -198,13 +198,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       <div>请先在上方选择或新建项目，然后上传资料</div>
     </div>
     <div id="uploadZoneWrap">
-    <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
-      <div class="icon">📂</div>
-      <div class="text">点击选择文件或文件夹，或拖拽文件到此处</div>
+    <div class="upload-zone" id="uploadZone" ondragover="event.preventDefault();this.style.borderColor='#FF7A00'" ondragleave="this.style.borderColor=''" ondrop="event.preventDefault();handleDrop(event)">
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff;padding:10px 22px;font-size:14px" onclick="event.stopPropagation();document.getElementById('fileInput').click()">📄 选择文件</button>
+        <button class="btn" style="padding:10px 22px;font-size:14px" onclick="event.stopPropagation();document.getElementById('folderInput').click()">📁 选择文件夹</button>
+      </div>
+      <div class="text" style="margin-top:10px">或拖拽文件/文件夹到此处（文件夹自动递归上传）</div>
       <div class="hint">支持 DWG / PDF / Word / Excel / Project / PPT / 图片 / 语音 / 文字 / 手稿照片 / 扫描件 / 聊天记录 等</div>
     </div>
     </div>
     <input type="file" id="fileInput" style="display:none" multiple onchange="handleFileUpload(this.files)">
+<!-- v0.1.133：文件夹上传（webkitdirectory 整目录递归） -->
+<input type="file" id="folderInput" style="display:none" webkitdirectory multiple onchange="handleFolderUpload(this.files)">
     <div id="uploadProgress" style="display:none;margin-top:12px">
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
         <span id="uploadStatus">正在解析...</span>
@@ -1080,57 +1085,197 @@ function loadFailedFiles() {
     }
 }
 
-function handleFileUpload(files) {
+// ===== v0.1.133：上传引擎（文件夹递归 / 分批队列 / 失败自动重试） =====
+var UPLOAD_BATCH = 50;        // 每批文件数
+var uploadQueueList = [];     // {file, relPath}
+var uploadBusy = false;
+
+// 文件夹选择（webkitdirectory 已按目录展平，files 带 webkitRelativePath）
+function handleFolderUpload(files) {
     if (!currentProject) { alert('请先选择或创建项目'); return; }
     if (!files || files.length === 0) return;
-    
-    var progress = document.getElementById('uploadProgress');
+    var items = [];
+    for (var i = 0; i < files.length; i++) {
+        items.push({file: files[i], relPath: files[i].webkitRelativePath || files[i].name});
+    }
+    enqueueUploads(items, '选择文件夹');
+}
+
+// 拖拽：支持拖入文件夹（webkitGetAsEntry 递归）与文件
+function handleDrop(event) {
+    var dt = event.dataTransfer;
+    if (!dt) return;
+    var items = dt.items || [];
+    var files = dt.files || [];
+    if (items.length && items[0].webkitGetAsEntry) {
+        var entries = [];
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            if (it.kind === 'file') {
+                var en = it.webkitGetAsEntry();
+                if (en) entries.push(en);
+            }
+        }
+        if (entries.length) {
+            collectEntries(entries, '', function(list) {
+                if (list.length) enqueueUploads(list, '拖拽');
+                else alert('未找到可上传的文件');
+            });
+            return;
+        }
+    }
+    if (files && files.length) {
+        var fl = [];
+        for (var j = 0; j < files.length; j++) fl.push({file: files[j], relPath: files[j].name});
+        enqueueUploads(fl, '拖拽');
+    }
+}
+
+// 递归枚举文件夹内的所有文件（保留相对路径）
+function collectEntries(entries, basePath, done) {
+    var out = [];
+    var pending = 0;
+    function walk(entry, path) {
+        if (entry.isFile) {
+            pending++;
+            entry.file(function(f) {
+                out.push({file: f, relPath: path ? path + '/' + f.name : f.name});
+                pending--;
+                if (pending === 0) done(out);
+            }, function() { pending--; if (pending === 0) done(out); });
+        } else if (entry.isDirectory) {
+            var reader = entry.createReader();
+            var sub = [];
+            (function readNext() {
+                reader.readEntries(function(es) {
+                    if (!es.length) {
+                        sub.forEach(function(e) { walk(e, path); });
+                        return;
+                    }
+                    for (var i = 0; i < es.length; i++) sub.push(es[i]);
+                    readNext();
+                }, function() {
+                    sub.forEach(function(e) { walk(e, path); });
+                });
+            })();
+        }
+    }
+    entries.forEach(function(e) { walk(e, basePath); });
+    if (!entries.length) done(out);
+}
+
+// 入队并开始
+function enqueueUploads(items, source) {
+    if (!currentProject) { alert('请先选择或创建项目'); return; }
+    uploadQueueList = uploadQueueList.concat(items);
+    var msg = source + '加入 ' + items.length + ' 个文件，队列共 ' + uploadQueueList.length + ' 个';
+    var st = document.getElementById('uploadStatus');
+    if (st) st.textContent = msg;
+    showUploadProgress();
+    if (!uploadBusy) runUploadQueue();
+}
+
+function showUploadProgress() {
+    var p = document.getElementById('uploadProgress');
+    if (p) p.style.display = 'block';
+}
+function hideUploadProgress() {
+    var p = document.getElementById('uploadProgress');
+    if (p) { p.style.display = 'none'; }
+}
+
+// 分批上传：每批 UPLOAD_BATCH 个，失败自动重试 3 次
+function runUploadQueue() {
+    if (uploadBusy) return;
+    if (!uploadQueueList.length) { uploadBusy = false; hideUploadProgress(); return; }
+    uploadBusy = true;
+    var batch = uploadQueueList.splice(0, UPLOAD_BATCH);
+    var total = uploadQueueList.length + batch.length;
     var bar = document.getElementById('uploadProgressBar');
     var status = document.getElementById('uploadStatus');
     var percent = document.getElementById('uploadPercent');
-    
-    progress.style.display = 'block';
-    status.textContent = '正在上传 ' + files.length + ' 个文件...';
-    
+    if (status) status.textContent = '正在上传第 ' + (total - uploadQueueList.length) + '/' + total + ' 个（本批 ' + batch.length + ' 个）...';
+    if (bar) bar.style.width = '5%';
+
     var formData = new FormData();
     var uname = (localStorage.getItem('fangong_uploader') || '电脑端');
     formData.append('uploader', uname);
-    for (var i = 0; i < files.length; i++) {
-        formData.append('files', files[i]);
+    var relPaths = [];
+    for (var i = 0; i < batch.length; i++) {
+        formData.append('files', batch[i].file);
+        relPaths.push(batch[i].relPath || batch[i].file.name);
     }
-    
+    formData.append('paths', JSON.stringify(relPaths));
+
     var xhr = new XMLHttpRequest();
     xhr.upload.onprogress = function(e) {
-        if (e.lengthComputable) {
+        if (e.lengthComputable && bar) {
             var pct = Math.round((e.loaded / e.total) * 100);
             bar.style.width = pct + '%';
-            percent.textContent = pct + '%';
+            if (percent) percent.textContent = pct + '%';
         }
     };
     xhr.onload = function() {
-        status.textContent = '上传完成，正在解析...';
-        bar.style.width = '90%';
-        // 触发扫描解析（扫描当前项目上传目录）
-        fetch('/api/scan/project', {method: 'POST'})
-            .then(function() {
-                bar.style.width = '100%';
-                status.textContent = '解析完成！';
-                setTimeout(function() { progress.style.display = 'none'; }, 2000);
-                loadResourceData();
-            })
-            .catch(function() {
-                bar.style.width = '100%';
-                status.textContent = '上传完成，解析触发失败，请手动重扫';
-                setTimeout(function() { progress.style.display = 'none'; }, 3000);
-                loadResourceData();
-            });
+        var ok = false;
+        try { var r = JSON.parse(xhr.responseText); ok = r.ok !== false; } catch (e) {}
+        if (!ok) {
+            // 失败重试（最多3次）
+            if ((batch._retry || 0) < 3) {
+                batch._retry = (batch._retry || 0) + 1;
+                uploadQueueList = batch.concat(uploadQueueList);
+                if (status) status.textContent = '本批上传失败，自动重试第 ' + batch._retry + ' 次...';
+                setTimeout(function() { uploadBusy = false; runUploadQueue(); }, 800);
+            } else {
+                if (status) status.textContent = '本批 ' + batch.length + ' 个文件多次失败，已转入待处理（可在上传记录中重试/删除）';
+                uploadBusy = false;
+                runUploadQueue();
+            }
+            return;
+        }
+        uploadBusy = false;
+        if (uploadQueueList.length) {
+            runUploadQueue();
+        } else {
+            if (status) status.textContent = '上传完成，正在解析...';
+            if (bar) bar.style.width = '90%';
+            fetch('/api/scan/project', {method: 'POST'})
+                .then(function() {
+                    if (bar) bar.style.width = '100%';
+                    if (status) status.textContent = '解析完成！';
+                    setTimeout(hideUploadProgress, 2000);
+                    if (typeof loadResourceData === 'function') loadResourceData();
+                })
+                .catch(function() {
+                    if (bar) bar.style.width = '100%';
+                    if (status) status.textContent = '上传完成，解析触发失败，请手动重扫';
+                    setTimeout(hideUploadProgress, 3000);
+                    if (typeof loadResourceData === 'function') loadResourceData();
+                });
+        }
     };
     xhr.onerror = function() {
-        status.textContent = '上传失败，请重试';
-        setTimeout(function() { progress.style.display = 'none'; }, 3000);
+        if ((batch._retry || 0) < 3) {
+            batch._retry = (batch._retry || 0) + 1;
+            uploadQueueList = batch.concat(uploadQueueList);
+            if (status) status.textContent = '网络错误，自动重试第 ' + batch._retry + ' 次...';
+            setTimeout(function() { uploadBusy = false; runUploadQueue(); }, 800);
+        } else {
+            if (status) status.textContent = '本批 ' + batch.length + ' 个文件多次失败，已转入待处理';
+            uploadBusy = false;
+            runUploadQueue();
+        }
     };
     xhr.open('POST', '/api/upload-files');
     xhr.send(formData);
+}
+
+// 文件选择入口：转队列分批上传（与文件夹/拖拽同一引擎）
+function handleFileUpload(files) {
+    if (!currentProject) { alert('请先选择或创建项目'); return; }
+    if (!files || files.length === 0) return;
+    var items = [];
+    for (var i = 0; i < files.length; i++) items.push({file: files[i], relPath: files[i].name});
+    enqueueUploads(items, '文件选择');
 }
 
 function exportPackage() {

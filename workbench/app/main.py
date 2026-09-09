@@ -36,7 +36,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.132")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.133")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -309,15 +309,26 @@ def upload_log(limit: int = 100):
 
 
 @app.post("/api/upload-files")
-async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form("")):
+async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form(""),
+                       paths: str = Form("")):
     """浏览器/手机端直接上传文件 → 落盘 → 解析 → 向量化 → 上传队列。
-    uploader：上传人姓名（手机端场景，非必填）。"""
+    uploader：上传人姓名（手机端场景，非必填）。
+    paths：v0.1.133 可选，JSON 数组，与 files 一一对应的相对路径（文件夹上传时保留目录结构，供车间分类）。"""
     import hashlib
+    import json as _json
+    rel_paths = []
+    if paths:
+        try:
+            rel_paths = _json.loads(paths)
+            if not isinstance(rel_paths, list):
+                rel_paths = []
+        except Exception:  # noqa: BLE001
+            rel_paths = []
     _log_op("upload", f"上传 {len(files)} 个文件", uploader or "")
     save_dir = os.path.join(config.DATA_DIR, "uploads")
     os.makedirs(save_dir, exist_ok=True)
     results = []
-    for f in files:
+    for fi, f in enumerate(files):
         try:
             name = os.path.basename(f.filename or "unnamed")
             raw = await f.read()
@@ -355,6 +366,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 "status": res.status, "parser": res.parser,
                 "error": res.error, "entities": len(res.entities),
                 "retry_count": 0, "uploader": uploader,
+                "orig_path": rel_paths[fi] if fi < len(rel_paths) else "",
                 "ts": datetime.datetime.now().isoformat(),
             }
             scanner._save_index(idx)

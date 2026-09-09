@@ -20,3 +20,8 @@ tqdm==4.66.4
 # ===== DWG 竣工图清稿工具（仅 Windows 部署机需要） =====
 pywin32>=305
 pypdf>=4.0
+
+# ===== 可选增强依赖（不装则对应类型自动降级，装完重启工作台即启用）=====
+ezdxf>=1.3.1              # DWG/DXF 图纸深度解析（图框/标题栏/尺寸/设备块/空间结构）；DWG 另需 ODA File Converter
+# paddleocr                 # 图片 OCR 文字提取（体积大，按需安装）
+# faster-whisper             # 手机语音本地转写（按需安装；或配置 AI 网关）
