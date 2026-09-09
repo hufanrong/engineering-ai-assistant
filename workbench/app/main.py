@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.142")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.143")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -402,10 +402,12 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                     pass
                 # v0.1.139：网页上传同样自动归车间（与文件夹扫描一致），
                 # 未识别/多候选文件进入待确认（workshop=None）
+                # v0.1.143：传 orig_path 目录信号（用户按车间分文件夹上传时目录名优先）
                 try:
                     from . import workshop_assign as _wa2
                     _wa2.assign_workshop(res.sha256, name, res.text or "",
-                                         res.structure or {})
+                                         res.structure or {},
+                                         file_path=rel_paths[fi] if fi < len(rel_paths) else "")
                 except Exception:  # noqa: BLE001
                     pass
             # v0.1.141：解析失败/跳过的文件也按文件名自动归车间
@@ -415,7 +417,8 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 try:
                     from . import workshop_assign as _wa2
                     _wa2.assign_workshop(res.sha256, name, res.text or "",
-                                         res.structure or {})
+                                         res.structure or {},
+                                         file_path=rel_paths[fi] if fi < len(rel_paths) else "")
                 except Exception:  # noqa: BLE001
                     pass
             # 登记索引（供去重/失败管理/统计共用，v0.1.22）
@@ -930,7 +933,8 @@ def workshop_batch_assign(req: WorkshopBatchReq):
 
 @app.post("/api/workshop/re-auto")
 def workshop_re_auto():
-    """对未归车间的文件重新自动识别。"""
+    """v0.1.143：重新自动识别未归车间 + 低置信度文件（人工登记跳过）。
+    修复：v0.1.141 此接口调用不存在的 scanner._load_cache 恒空转返回 0。"""
     n = workshop_assign.re_auto_unassigned()
     return {"ok": True, "newly_assigned": n}
 

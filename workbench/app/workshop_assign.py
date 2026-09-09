@@ -213,9 +213,41 @@ def _from_text(text: str, limit=5):
     return out
 
 
-def detect_workshop(file_name: str = "", text: str = "", structure: dict = None) -> dict:
+def _norm_path(path: str):
+    """v0.1.143：目录路径信号——用户资料一般按车间分文件夹，
+    目录名（磨浮车间/锂辉石库/0101-主厂房）是最强线索，优先于文件名。
+    按 / \\ 分段逐段识别，返回第一个命中的空间单元。"""
+    if not path:
+        return None
+    for seg in re.split(r"[\\/]+", path or ""):
+        seg = seg.strip()
+        if not seg or seg in (".", ".."):
+            continue
+        if re.match(r"^[A-Za-z]:$", seg):  # 盘符 D:
+            continue
+        w = _norm_filename(seg)
+        if w:
+            return w
+    return None
+
+
+def _known_set() -> set:
+    """v0.1.143：项目已知车间集合（从已确认的 workshop_assign 记录学习）。
+    用于最终兜底：文件名/路径包含已确认车间名 → 直接命中。"""
+    m = _load()
+    s = set()
+    for rec in m.values():
+        w = rec.get("workshop")
+        if w and isinstance(w, str) and w != "未归车间":
+            s.add(w)
+    return s
+
+
+def detect_workshop(file_name: str = "", text: str = "", structure: dict = None,
+                    file_path: str = "") -> dict:
     """按优先级识别车间 → {workshop, source, confidence, candidates}。
-    无法唯一确认 → workshop=None，candidates 列出候选（供人工）。"""
+    无法唯一确认 → workshop=None，candidates 列出候选（供人工）。
+    v0.1.143：新增目录路径信号（file_path，0.85）与已知车间兜底（0.6）。"""
     structure = structure or {}
     # 1) CAD 标题栏图名（设计院）
     cad_title = ""
@@ -227,29 +259,42 @@ def detect_workshop(file_name: str = "", text: str = "", structure: dict = None)
         w = _norm(cad_title)
         if w:
             return {"workshop": w, "source": "cad_title", "confidence": 0.9, "candidates": [w]}
-    # 2) 文件名（v0.1.141：分段解析，识别 0101-锂辉石库-xxx.dwg → 锂辉石库）
+    # 2) 目录路径（用户按车间分文件夹是最强工程信号；v0.1.143 新增）
+    if file_path:
+        w = _norm_path(file_path)
+        if w:
+            return {"workshop": w, "source": "file_path", "confidence": 0.85, "candidates": [w]}
+    # 3) 文件名（v0.1.141：分段解析，识别 0101-锂辉石库-xxx.dwg → 锂辉石库）
     if file_name:
         w = _norm_filename(file_name)
         if w:
             return {"workshop": w, "source": "filename", "confidence": 0.75, "candidates": [w]}
-    # 3) 正文关键词
+    # 4) 正文关键词
     cands = _from_text(text or "", limit=3)
     if len(cands) == 1:
         return {"workshop": cands[0], "source": "content", "confidence": 0.55, "candidates": cands}
     if len(cands) > 1:
         # 多车间（如台账/清单跨车间）→ 不强行归单车间，列候选
         return {"workshop": None, "source": "content_multi", "confidence": 0.3, "candidates": cands}
+    # 5) 已知车间兜底（v0.1.143）：项目已确认车间，文件名/路径包含该车间名 → 命中
+    known = _known_set()
+    if known:
+        hay = f"{file_path or ''} {file_name or ''}"
+        for w in sorted(known, key=len, reverse=True):
+            if w and w in hay:
+                return {"workshop": w, "source": "known", "confidence": 0.6, "candidates": [w]}
     return {"workshop": None, "source": "none", "confidence": 0.0, "candidates": []}
 
 
 def assign_workshop(sha: str, file_name: str = "", text: str = "", structure: dict = None,
-                    force: bool = False) -> dict:
-    """解析后自动归车间；已有人工登记不覆盖（force=True 才覆盖）。"""
+                    force: bool = False, file_path: str = "") -> dict:
+    """解析后自动归车间；已有人工登记不覆盖（force=True 才覆盖）。
+    v0.1.143：新增 file_path 目录路径信号（网页上传传 orig_path，扫描传绝对路径）。"""
     m = _load()
     existing = m.get(sha)
     if existing and existing.get("source") == "manual" and not force:
         return existing
-    info = detect_workshop(file_name, text, structure)
+    info = detect_workshop(file_name, text, structure, file_path)
     rec = {
         "sha256": sha,
         "file_name": file_name,
@@ -257,6 +302,7 @@ def assign_workshop(sha: str, file_name: str = "", text: str = "", structure: di
         "source": info["source"],
         "confidence": info["confidence"],
         "candidates": info["candidates"],
+        "file_path": file_path,
         "ts": datetime.datetime.now().isoformat(),
     }
     m[sha] = rec
@@ -292,20 +338,28 @@ def batch_assign(shas: list, workshop: str) -> int:
 
 
 def re_auto_unassigned() -> int:
-    """对未归车间的文件重新自动识别（基于 parsed_cache）。"""
+    """重新自动识别：未归车间 + 低置信度（<0.6）的文件，人工登记跳过。
+    v0.1.143：修复空转——此前调用 scanner._load_cache 但该函数不存在，
+    hasattr 恒 False → 所有文件 continue，按钮永远返回 0。
+    现在正确读取解析缓存，并用 index 里的路径（orig_path/绝对路径）作目录信号。"""
     from . import scanner
     idx = scanner._load_index()
     n = 0
     for sha, info in idx.items():
-        m = _load()
-        if m.get(sha, {}).get("workshop"):
+        if sha in scanner.INDEX_RESERVED_KEYS or not isinstance(info, dict):
             continue
-        cache = scanner._load_cache(sha) if hasattr(scanner, "_load_cache") else None
-        if not cache:
+        rec = _load().get(sha, {})
+        if rec.get("source") == "manual":
             continue
-        rec = assign_workshop(sha, cache.get("file_name", ""), cache.get("text", ""),
-                               cache.get("structure") or {})
-        if rec.get("workshop"):
+        if rec.get("workshop") and float(rec.get("confidence", 0)) >= 0.6:
+            continue
+        cache = scanner._load_cache(sha)
+        fname = (cache or {}).get("file_name") or info.get("file_name", "")
+        text = (cache or {}).get("text", "") or ""
+        structure = (cache or {}).get("structure") or {}
+        fpath = info.get("orig_path") or info.get("file_path", "") or ""
+        new_rec = assign_workshop(sha, fname, text, structure, force=True, file_path=fpath)
+        if new_rec.get("workshop"):
             n += 1
     return n
 

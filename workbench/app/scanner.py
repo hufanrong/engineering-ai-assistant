@@ -166,6 +166,15 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 _save_parsed_cache(res)
             else:
                 stats["skipped" if res.status == "skipped" else "failed"] += 1
+                # v0.1.143：解析失败/跳过的文件也按文件名+目录路径自动归车间
+                # （与网页上传 elif 分支一致；DWG 无 ezdxf 等场景不依赖解析成功）
+                try:
+                    from . import workshop_assign
+                    workshop_assign.assign_workshop(res.sha256, res.file_name,
+                                                    res.text or "", res.structure or {},
+                                                    file_path=path)
+                except Exception:  # noqa: BLE001
+                    pass
 
             key = key or res.sha256
             idx[key] = {
@@ -203,6 +212,21 @@ def _save_parsed_cache(res: ParseResult, data_dir=None):
             "text": res.text[:20000], "structure": res.structure,
             "entities": res.entities, "created_at": res.created_at,
         }, f, ensure_ascii=False, indent=1)
+
+
+def _load_cache(sha: str, data_dir=None) -> dict:
+    """读取解析缓存 data/parsed_cache/{sha256}.json。
+    v0.1.143：此前不存在该函数，导致 workshop_assign.re_auto_unassigned()
+    的 hasattr 判断恒为 False，车间重新识别按钮永远空转（返回 0）。"""
+    ddir = _get_data_dir(data_dir)
+    p = os.path.join(ddir, "parsed_cache", f"{sha}.json")
+    if os.path.exists(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
 
 
 MAX_RETRY = 3   # 单个文件失败重试上限（v0.1.21）
