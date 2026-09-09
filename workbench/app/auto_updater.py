@@ -697,11 +697,18 @@ if __name__ == "__main__":
 
 
 def schedule_staged_apply() -> Dict:
-    """把 staging 的更新交给独立进程执行：停服→替换→重启（当前进程继续返回响应）。"""
+    """把 staging 的更新交给独立进程执行：停服→替换→重启（当前进程继续返回响应）。
+    v0.1.140：修复「调度更新失败：name 'config' is not defined」——本模块无模块级 config 导入，
+    此前 schedule_staged_apply 直接引用 config.PORT 触发 NameError，导致在线更新永远无法执行。"""
+    from . import config  # noqa: F401  （局部导入，避免模块级循环依赖）
     try:
         script_path = os.path.join(WORKSPACE_ROOT, "updates", "apply_update.py")
         with open(script_path, "w", encoding="utf-8") as f:
-            f.write(_APPLY_SCRIPT.format(ws=WORKSPACE_ROOT, port=config.PORT))
+            # v0.1.140：不能用 .format()——模板内含 apply 脚本自身的 f-string/format 占位符
+            # （{0}/{pid}/{e} 等）会被误解析，导致「Replacement index 0 out of range」。
+            # 改为只定向替换两个模板变量，其余花括号原样保留。
+            f.write(_APPLY_SCRIPT.replace("{ws!r}", repr(WORKSPACE_ROOT))
+                                     .replace("{port!r}", str(config.PORT)))
         pending = {
             "staging": STAGING_DIR,
             "created": datetime.datetime.now().isoformat(),
