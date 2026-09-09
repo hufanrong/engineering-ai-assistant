@@ -249,6 +249,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
         <div style="font-weight:600;font-size:14px" id="workshopFilesTitle"></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-warning btn-sm" onclick="batchEditWorkshop()">📝 批量改车间</button>
+          <button class="btn btn-success btn-sm" onclick="reAutoAssign()">🔁 重新识别车间</button>
           <button class="btn btn-primary btn-sm" onclick="batchReParse()">🔄 批量重解析</button>
           <button class="btn btn-danger btn-sm" onclick="batchDelete()">🗑️ 批量删除</button>
           <button class="btn btn-default btn-sm" onclick="closeWorkshopFiles()">← 返回</button>
@@ -1017,6 +1018,30 @@ function loadWorkshops() {
                 opt.textContent = w.name || w;
                 exportSel.appendChild(opt);
             });
+        });
+}
+
+function reAutoAssign() {
+    // v0.1.141：重新自动识别未归车间文件（增强识别引擎）
+    var btn = document.querySelector('button[onclick="reAutoAssign()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '识别中...'; }
+    fetch('/api/workshop/re-auto', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var msg = (data && data.newly_assigned > 0)
+                ? '已重新识别，' + data.newly_assigned + ' 个文件成功归入车间'
+                : '重新识别完成，没有新增可归车间的文件（无法确认的仍留在待确认）';
+            showToast(msg);
+            if (typeof currentWorkshop !== 'undefined' && currentWorkshop) {
+                loadWorkshopFiles(currentWorkshop);
+            }
+            loadResourceData();
+        })
+        .catch(function() {
+            showToast('重新识别失败，请查看后台日志', true);
+        })
+        .finally(function() {
+            if (btn) { btn.disabled = false; btn.textContent = '🔁 重新识别车间'; }
         });
 }
 

@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.140")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.141")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -402,6 +402,16 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                     pass
                 # v0.1.139：网页上传同样自动归车间（与文件夹扫描一致），
                 # 未识别/多候选文件进入待确认（workshop=None）
+                try:
+                    from . import workshop_assign as _wa2
+                    _wa2.assign_workshop(res.sha256, name, res.text or "",
+                                         res.structure or {})
+                except Exception:  # noqa: BLE001
+                    pass
+            # v0.1.141：解析失败/跳过的文件也按文件名自动归车间
+            # （0101-锂辉石库-xxx.dwg 即使 ezdxf 缺失也能归入锂辉石库，
+            #   不依赖解析成功；正文/structure 为空时仅用文件名识别）
+            elif getattr(res, "sha256", None):
                 try:
                     from . import workshop_assign as _wa2
                     _wa2.assign_workshop(res.sha256, name, res.text or "",
@@ -4532,6 +4542,8 @@ def pending_files():
 
 
 
+@app.get("/api/files")
+def frontend_files(workshop: str = "", status: str = "", q: str = "", limit: int = 500):
     """文件列表：按车间/状态/关键词过滤（前端资源管理模块）。"""
     from . import workshop_assign as _wa
     raw_items = _frontend_index_items()
@@ -4545,8 +4557,14 @@ def pending_files():
             continue
         sha = info.get("id") or info.get("sha256") or ""
         ws = _wa.get_workshop(sha) or info.get("workshop") or ""
-        if workshop and ws != workshop:
-            continue
+        # v0.1.141：修复「未归车间」筛选——未识别文件（ws 为空）必须能匹配，
+        # 此前 ws="" 永远不等于"未归车间"，导致待确认文件在未归车间列表显示"暂无文件"
+        if workshop:
+            if workshop == "未归车间":
+                if ws:
+                    continue
+            elif ws != workshop:
+                continue
         items.append({
             "id": sha or fname,
             "sha256": sha,
