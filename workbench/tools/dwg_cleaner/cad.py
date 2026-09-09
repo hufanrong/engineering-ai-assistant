@@ -15,8 +15,29 @@
 
 import re
 
-# SaveAs 格式枚举（AutoCAD 2020 / R2018 DWG = 64）
-AC_2018_DWG = 64
+# SaveAs 格式枚举（AutoCAD 2018 DWG = 64；低版本 AutoCAD 无法保存高版本格式）
+AC_2018_DWG = 64   # R2018+
+AC_2013_DWG = 61   # R2013-R2017
+AC_2010_DWG = 60   # R2010-R2012
+AC_2007_DWG = 57   # R2007-R2009
+AC_2004_DWG = 51   # R2004-R2006
+AC_2000_DWG = 49   # R2000-R2003
+
+
+def saveas_format_for_release(release: float) -> int:
+    """按 AutoCAD 内部版本号（如 24.0=2020）选择可保存的最高通用格式，
+    保证任意版本 AutoCAD 都能另存清稿副本。"""
+    if release >= 23.0:
+        return AC_2018_DWG
+    if release >= 19.1:
+        return AC_2013_DWG
+    if release >= 18.1:
+        return AC_2010_DWG
+    if release >= 17.1:
+        return AC_2007_DWG
+    if release >= 16.0:
+        return AC_2004_DWG
+    return AC_2000_DWG
 
 # PlotConfiguration 枚举
 PAPER_UNITS_MM = 1          # acMillimeters
@@ -46,7 +67,12 @@ class CadSession:
         try:
             self.app = win32com.client.Dispatch("AutoCAD.Application")
         except Exception as e:
-            raise CadError("无法启动 AutoCAD，请确认本机已安装 AutoCAD 2020 并能正常打开。原始错误：%s" % e)
+            raise CadError("无法启动 AutoCAD，请确认本机已安装 AutoCAD 并能正常打开。原始错误：%s" % e)
+        # v1.1：读取实际 AutoCAD 版本（任意版本兼容），用于选择可保存的 DWG 格式
+        try:
+            self.release = float(str(self.app.Version))
+        except Exception:
+            self.release = 0.0
         try:
             self.app.Visible = bool(self.visible)
         except Exception:
@@ -92,13 +118,18 @@ class CadSession:
         return doc
 
     def save_as(self, doc, path):
-        """另存为清稿副本（AutoCAD 2018 格式，2020 可打开）。"""
+        """另存为清稿副本。v1.1：按当前 AutoCAD 版本选择可保存的最高通用格式
+        （2018+ 存 2018 格式；低版本存对应格式，保证其他机器可打开）。"""
         if os_path_exists(path):
             os_remove(path)
+        fmt = saveas_format_for_release(self.release)
         try:
-            doc.SaveAs(path, AC_2018_DWG)
+            doc.SaveAs(path, fmt)
         except Exception:
-            doc.SaveAs(path)
+            try:
+                doc.SaveAs(path)
+            except Exception:
+                pass
 
     def close_document(self, doc, save=False):
         try:

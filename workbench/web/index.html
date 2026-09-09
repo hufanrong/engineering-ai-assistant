@@ -673,21 +673,29 @@ function loadProjects() {
                 opt.textContent = p.name + (p.file_count ? ' (' + p.file_count + '文件)' : '');
                 select.appendChild(opt);
             });
-            // 加载当前项目
+            // 加载当前项目（v0.1.132：无论是否有当前项目都刷新按钮状态，
+            // 避免 current 指向已删除项目时按钮永久 disabled）
             fetch('/api/projects/current')
                 .then(function(r) { return r.json(); })
                 .then(function(d) {
                     if (d.ok && d.project) {
                         currentProject = d.project;
                         select.value = d.project.id;
-                        updateProjectUI();
+                    } else {
+                        currentProject = null;
+                        select.value = '';
                     }
+                    updateProjectUI();
                 });
         });
 }
 
 function switchProject(projectId) {
-    if (!projectId) return;
+    if (!projectId) {
+        currentProject = null;
+        updateProjectUI();
+        return;
+    }
     fetch('/api/projects/switch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -721,13 +729,22 @@ function createProject() {
     });
 }
 
-// v0.1.130：重命名项目
+// v0.1.132：重命名项目（自建弹窗，兼容桌面WebView；不用 prompt）
 function renameProject() {
     if (!currentProject) { alert('请先选择项目'); return; }
-    var newName = prompt('请输入新的项目名称', currentProject.name);
-    if (newName === null) return;
-    newName = newName.trim();
+    var input = document.getElementById('renameProjectInput');
+    input.value = currentProject.name;
+    document.getElementById('renameProjectModal').style.display = 'flex';
+    setTimeout(function(){ input.focus(); input.select(); }, 50);
+}
+function closeRenameProjectDialog() {
+    document.getElementById('renameProjectModal').style.display = 'none';
+}
+function confirmRenameProject() {
+    if (!currentProject) return;
+    var newName = document.getElementById('renameProjectInput').value.trim();
     if (!newName) { alert('项目名称不能为空'); return; }
+    if (newName === currentProject.name) { closeRenameProjectDialog(); return; }
     fetch('/api/projects/rename', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -735,6 +752,7 @@ function renameProject() {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
+        closeRenameProjectDialog();
         if (data.ok) {
             alert(data.message || '重命名成功');
             loadProjects();
@@ -749,6 +767,8 @@ function openDeleteProjectDialog() {
     if (!currentProject) { alert('请先选择项目'); return; }
     document.getElementById('deleteProjectModalName').textContent =
         '确定要删除项目「' + currentProject.name + '」吗？';
+    var ci = document.getElementById('deleteProjectConfirmInput');
+    if (ci) ci.value = '';
     document.getElementById('deleteProjectModal').style.display = 'flex';
 }
 function closeDeleteProjectDialog() {
@@ -756,6 +776,13 @@ function closeDeleteProjectDialog() {
 }
 function confirmDeleteProject() {
     if (!currentProject) return;
+    // v0.1.132：输入项目名二次确认，防误删
+    var confirmInput = document.getElementById('deleteProjectConfirmInput');
+    if (!confirmInput || confirmInput.value.trim() !== currentProject.name) {
+        alert('请输入正确的项目名称「' + currentProject.name + '」以确认删除');
+        if (confirmInput) confirmInput.focus();
+        return;
+    }
     var deleteData = document.getElementById('deleteDataCheckbox').checked;
     var pid = currentProject.id;
     var pname = currentProject.name;
@@ -1906,21 +1933,36 @@ function closePreview() {
 }
 function editFileWorkshop() {
     if (!currentPreviewFile) return;
-    var newWorkshop = prompt('请输入新的车间名称：', currentPreviewFile.workshop || '');
-    if (newWorkshop && newWorkshop.trim()) {
-        fetch('/api/files/update', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({file_id: currentPreviewFile.id, workshop: newWorkshop.trim()})
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.ok) { alert('车间已修改为：' + newWorkshop); closePreview(); loadWorkshops(); }
-            else alert('修改失败：' + (data.error || ''));
-        });
-    }
+    var input = document.getElementById('renameWorkshopInput');
+    input.value = currentPreviewFile.workshop || '';
+    document.getElementById('renameWorkshopTitle').textContent = '🏭 修改「' + (currentPreviewFile.file_name || '') + '」的车间';
+    document.getElementById('renameWorkshopModal').style.display = 'flex';
+    setTimeout(function(){ input.focus(); input.select(); }, 50);
 }
-function reParseFile() {
+function closeRenameWorkshopDialog() {
+    document.getElementById('renameWorkshopModal').style.display = 'none';
+}
+function confirmRenameWorkshop() {
+    var input = document.getElementById('renameWorkshopInput');
+    var newWorkshop = (input ? input.value : '').trim();
+    if (!newWorkshop) { alert('车间名称不能为空'); return; }
+    var fileId = currentPreviewFile ? (currentPreviewFile.id || currentPreviewFile.sha256 || currentPreviewFile.file_id) : '';
+    fetch('/api/files/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file_id: fileId, workshop: newWorkshop})
+    }).then(function(r){ return r.json(); }).then(function(data) {
+        closeRenameWorkshopDialog();
+        if (data.ok) {
+            alert('车间已修改为：' + newWorkshop);
+            if (typeof closePreview === 'function') closePreview();
+            if (typeof loadWorkshops === 'function') loadWorkshops();
+            if (typeof loadResourceData === 'function') loadResourceData();
+        } else {
+            alert('修改失败：' + (data.error || '未知错误'));
+        }
+    });
+}function reParseFile() {
     if (!currentPreviewFile) return;
     if (!confirm('确定要重新解析该文件吗？')) return;
     fetch('/api/files/reparse', {
@@ -1971,20 +2013,30 @@ function updateSelectedCount() {
 }
 function batchEditWorkshop() {
     if (selectedFiles.size === 0) { alert('请先选择文件'); return; }
-    var workshop = prompt('请输入要修改到的车间名称：');
-    if (workshop && workshop.trim()) {
+    var input = document.getElementById('renameWorkshopInput');
+    input.value = '';
+    document.getElementById('renameWorkshopTitle').textContent = '🏭 批量修改 ' + selectedFiles.size + ' 个文件的车间';
+    document.getElementById('renameWorkshopOk').onclick = function() {
+        var newWorkshop = input.value.trim();
+        if (!newWorkshop) { alert('车间名称不能为空'); return; }
         fetch('/api/files/batch-update', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({file_ids: Array.from(selectedFiles), workshop: workshop.trim()})
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.ok) { alert('已修改 ' + data.updated + ' 个文件的车间'); selectedFiles.clear(); loadWorkshops(); }
+            body: JSON.stringify({file_ids: Array.from(selectedFiles), workshop: newWorkshop})
+        }).then(function(r){ return r.json(); }).then(function(data) {
+            closeRenameWorkshopDialog();
+            if (data.ok) {
+                alert('已批量修改 ' + (data.updated || 0) + ' 个文件车间');
+                if (typeof loadWorkshopFiles === 'function') loadWorkshopFiles();
+                if (typeof loadResourceData === 'function') loadResourceData();
+            } else {
+                alert('修改失败：' + (data.error || '未知错误'));
+            }
         });
-    }
-}
-function batchReParse() {
+    };
+    document.getElementById('renameWorkshopModal').style.display = 'flex';
+    setTimeout(function(){ input.focus(); }, 50);
+}function batchReParse() {
     if (selectedFiles.size === 0) { alert('请先选择文件'); return; }
     if (!confirm('确定要重新解析选中的 ' + selectedFiles.size + ' 个文件吗？')) return;
     fetch('/api/files/batch-reparse', {
@@ -2025,8 +2077,32 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
+<!-- v0.1.132：重命名项目弹窗（不用 prompt，兼容桌面WebView） -->
+<div id="renameProjectModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9998;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:20px;width:92%;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
+    <div style="font-size:16px;font-weight:700;color:#1E5AA8;margin-bottom:10px">✏️ 重命名项目</div>
+    <input class="input" id="renameProjectInput" style="width:100%;box-sizing:border-box" placeholder="输入新的项目名称">
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn" onclick="closeRenameProjectDialog()">取消</button>
+      <button class="btn btn-primary" onclick="confirmRenameProject()" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">确认重命名</button>
+    </div>
+  </div>
+</div>
+
+<!-- v0.1.132：车间改名弹窗（WebView兼容，替代prompt） -->
+<div id="renameWorkshopModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9997;align-items:center;justify-content:center" onclick="if(event.target===this)closeRenameWorkshopDialog()">
+  <div style="background:#fff;border-radius:12px;padding:20px;width:92%;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
+    <div style="font-size:16px;font-weight:700;color:#1E5AA8;margin-bottom:10px" id="renameWorkshopTitle">🏭 修改车间名称</div>
+    <input class="input" id="renameWorkshopInput" style="width:100%;box-sizing:border-box" placeholder="输入车间名称">
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn" onclick="closeRenameWorkshopDialog()">取消</button>
+      <button class="btn btn-primary" id="renameWorkshopOk" onclick="confirmRenameWorkshop()" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">确认</button>
+    </div>
+  </div>
+</div>
+
 <!-- v0.1.130：删除项目确认弹窗 -->
-<div id="deleteProjectModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center">
+<div id="deleteProjectModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:10000;align-items:center;justify-content:center" onclick="if(event.target===this)closeDeleteProjectDialog()">
   <div style="background:#fff;border-radius:12px;padding:20px;width:92%;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
     <div style="font-size:16px;font-weight:700;color:#D4380D;margin-bottom:10px">🗑️ 删除项目</div>
     <div style="font-size:13px;color:#333;margin-bottom:12px" id="deleteProjectModalName"></div>
@@ -2034,6 +2110,8 @@ document.addEventListener('DOMContentLoaded', function() {
       <input type="checkbox" id="deleteDataCheckbox" checked style="margin-top:2px">
       <span>同时删除该项目全部资料（勾选后不可恢复；不勾选则资料移入回收站保留）</span>
     </label>
+    <div style="font-size:12px;color:#888;margin-top:10px">输入项目名称确认删除：</div>
+    <input class="input" id="deleteProjectConfirmInput" style="width:100%;box-sizing:border-box;margin-top:6px" placeholder="输入项目名称以确认">
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
       <button class="btn" onclick="closeDeleteProjectDialog()">取消</button>
       <button class="btn btn-danger" onclick="confirmDeleteProject()" style="background:#D4380D;border-color:#D4380D">确认删除</button>

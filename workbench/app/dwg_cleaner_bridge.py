@@ -33,8 +33,8 @@ DEFAULT_CONFIG = os.path.join(TOOL_PACKAGE_DIR, "config.json")
 
 # 供前端展示的下载/安装指引
 HELP_TEXT = {
-    "autocad": "未检测到 AutoCAD。竣工图清稿依赖 AutoCAD 2020 及以上版本（COM 驱动）。"
-               "请到 Autodesk 官网下载安装 AutoCAD 2020 或更高版本："
+    "autocad": "未检测到 AutoCAD。竣工图清稿依赖已安装的 AutoCAD（任意版本，COM 驱动）。"
+               "请到 Autodesk 官网下载安装 AutoCAD（建议 2018 及以上版本）："
                "https://www.autodesk.com/products/autocad/overview （安装后重启工作台）。",
     "pywin32": "缺少 pywin32（Windows COM 组件）。请在命令提示符执行："
                "pip install pywin32",
@@ -57,7 +57,7 @@ def detect_environment() -> Dict:
         "tool_version": "v1.0",
         "platform": sys.platform,
         "windows": sys.platform.startswith("win"),
-        "autocad": {"installed": False, "version": ""},
+        "autocad": {"installed": False, "version": "", "release": ""},
         "pywin32": False,
         "pypdf": False,
         "plot_device": "DWG To PDF.pc3",
@@ -89,7 +89,7 @@ def detect_environment() -> Dict:
         result["missing"].append("pypdf")
         result["hint"].append(HELP_TEXT["pypdf"])
 
-    # 4) AutoCAD（COM Dispatch + 版本）
+    # 4) AutoCAD（COM Dispatch + 版本；任意版本兼容，不限定 2020）
     if result["pywin32"]:
         try:
             import pythoncom
@@ -98,13 +98,20 @@ def detect_environment() -> Dict:
             try:
                 app = win32com.client.Dispatch("AutoCAD.Application")
                 try:
-                    result["autocad"]["version"] = str(app.Version)
+                    rel = float(str(app.Version))
+                    year = _release_to_year(rel)
+                    result["autocad"]["version"] = f"AutoCAD {year} (R{app.Version})" if year else f"AutoCAD R{app.Version}"
+                    result["autocad"]["release"] = str(app.Version)
                 except Exception:
                     pass
                 result["autocad"]["installed"] = True
             except Exception:
-                # COM 失败 → 查注册表兜底
-                result["autocad"]["installed"] = _autocad_in_registry()
+                # COM 失败 → 注册表读取具体版本
+                reg = _autocad_registry_info()
+                result["autocad"]["installed"] = reg["installed"]
+                if reg["installed"]:
+                    result["autocad"]["version"] = reg["version"]
+                    result["autocad"]["release"] = reg["release"]
             finally:
                 try:
                     pythoncom.CoUninitialize()
@@ -125,6 +132,89 @@ def detect_environment() -> Dict:
         result["missing"].append("unknown")
         result["hint"].append("环境检测异常，请检查工作台安装完整性后重试。")
     return result
+
+
+def _release_to_year(release: float) -> str:
+    """AutoCAD 内部版本号 → 年份（如 24.0 → 2020）。"""
+    mapping = [
+        (25.0, "2026"), (24.4, "2025"), (24.3, "2023"), (24.2, "2022"),
+        (24.1, "2021"), (24.0, "2020"), (23.1, "2019"), (23.0, "2018"),
+        (22.0, "2017"), (21.0, "2016"), (20.1, "2015"), (20.0, "2014"),
+        (19.1, "2013"), (19.0, "2012"), (18.2, "2011"), (18.1, "2010"),
+        (18.0, "2009"), (17.2, "2008"), (17.1, "2007"), (17.0, "2006"),
+        (16.2, "2005"), (16.1, "2005"), (16.0, "2004"), (15.0, "2000"),
+    ]
+    for rel, year in mapping:
+        if release >= rel:
+            return year
+    return ""
+
+
+def _autocad_registry_info() -> Dict:
+    """从注册表读取 AutoCAD 安装信息：{installed, version, release}。
+    遍历 HKLM/HKCU 的 SOFTWARE\\Autodesk\\AutoCAD 下所有版本键（Rxx.x），
+    取第一个含 ProductName 的版本。支持任意 AutoCAD 版本。"""
+    info = {"installed": False, "version": "", "release": ""}
+    try:
+        import winreg
+    except Exception:
+        return info
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            base = winreg.OpenKey(hive, r"SOFTWARE\Autodesk\AutoCAD")
+        except OSError:
+            continue
+        try:
+            i = 0
+            while True:
+                try:
+                    rel = winreg.EnumKey(base, i)
+                except OSError:
+                    break
+                i += 1
+                if not (rel.startswith("R") and "." in rel):
+                    continue
+                try:
+                    sub = winreg.OpenKey(base, rel)
+                except OSError:
+                    continue
+                try:
+                    j = 0
+                    while True:
+                        try:
+                            prod = winreg.EnumKey(sub, j)
+                        except OSError:
+                            break
+                        j += 1
+                        try:
+                            pk = winreg.OpenKey(sub, prod)
+                            try:
+                                pname = ""
+                                try:
+                                    pname = str(winreg.QueryValueEx(pk, "ProductName")[0])
+                                except OSError:
+                                    pass
+                                release = ""
+                                try:
+                                    release = str(winreg.QueryValueEx(pk, "Release")[0])
+                                except OSError:
+                                    pass
+                                if pname or release:
+                                    info = {
+                                        "installed": True,
+                                        "version": pname or rel,
+                                        "release": release or rel,
+                                    }
+                                    return info
+                            finally:
+                                winreg.CloseKey(pk)
+                        except OSError:
+                            continue
+                finally:
+                    winreg.CloseKey(sub)
+        finally:
+            winreg.CloseKey(base)
+    return info
 
 
 def _autocad_in_registry() -> bool:
