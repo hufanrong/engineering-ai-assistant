@@ -233,6 +233,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
           <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="cloudSelectAll" onchange="toggleCloudSelectAll()"> 全选</label>
           <button class="btn btn-primary btn-sm" onclick="uploadCloudSelected()">⬆️ 上传选中</button>
           <button class="btn btn-default btn-sm" onclick="uploadCloudAll()">⬆️ 全部上传</button>
+          <button class="btn btn-default btn-sm" onclick="clearCloudQueue()" style="color:#d4380d">🗑️ 清空队列</button>
           <span style="font-size:11px;color:#999" id="cloudUploadResult"></span>
         </div>
         <div id="cloudPendingList" style="max-height:220px;overflow-y:auto"></div>
@@ -2306,6 +2307,18 @@ function uploadCloudSelected() {
 function uploadCloudAll() {
     if (!cloudPending.length) { setCloudResult('没有待上传的文件'); return; }
     doUploadCloud(null, '上传全部');
+}
+
+// v0.1.144：清空上传队列（仅删除待上传包，不影响已入库数据）
+function clearCloudQueue() {
+    if (!confirm('确定清空全部待上传队列？\n（仅删除待上传包，已解析入库的数据不受影响）')) return;
+    fetch('/api/queue/clear', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            setCloudResult('已清空 ' + (d.deleted || 0) + ' 个待上传包');
+            loadCloudPending();
+        })
+        .catch(function() { setCloudResult('清空队列失败'); });
 }
 
 function setCloudResult(txt) {

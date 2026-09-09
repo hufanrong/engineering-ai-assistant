@@ -39,8 +39,24 @@ def _ensure():
 
 def enqueue(parse_result) -> str:
     """把一个解析结果打包进上传队列，返回包文件名（不含扩展）。
-    v0.1.138：payload 附带 project_id/project_name，云端按项目合并（同项目合并，不同项目不合并）。"""
+    v0.1.138：payload 附带 project_id/project_name，云端按项目合并（同项目合并，不同项目不合并）。
+    v0.1.144：按 sha256 去重——队列中已有相同内容的包时跳过（重复解析不重复入队）。"""
     _ensure()
+    # v0.1.144：sha256 去重（队列文件名格式 sha16_时间戳.json，遍历比对 payload.sha256）
+    try:
+        for existing in os.listdir(QUEUE_DIR):
+            if not existing.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(QUEUE_DIR, existing), encoding="utf-8") as _ef:
+                    _ep = json.load(_ef)
+                if _ep.get("payload", {}).get("sha256") == parse_result.sha256:
+                    _log("enqueue_skip", existing, parse_result.file_name, "duplicate", "队列中已存在相同 sha256")
+                    return existing[:-5]  # 去掉 .json
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
     proj_id, proj_name = "", ""
     try:
         from . import project_manager as _pm
@@ -181,3 +197,34 @@ def _log(action: str, package: str, file_name: str, result: str, detail: str):
             "action": action, "package": package, "file_name": file_name,
             "result": result, "detail": detail,
         }, ensure_ascii=False) + "\n")
+
+
+def clear_all() -> dict:
+    """清空上传队列（v0.1.144）。返回 {deleted, message}。
+    仅删除队列中的 .json 包文件，不影响已解析入库的数据和 upload_log。"""
+    _ensure()
+    deleted = 0
+    for f in os.listdir(QUEUE_DIR):
+        if f.endswith(".json"):
+            try:
+                os.remove(os.path.join(QUEUE_DIR, f))
+                deleted += 1
+            except Exception:  # noqa: BLE001
+                pass
+    _log("clear_queue", "-", "-", "ok", f"清空 {deleted} 个队列包")
+    return {"deleted": deleted, "message": f"已清空 {deleted} 个待上传包"}
+
+
+def remove_packages(packages: list) -> dict:
+    """从队列中移除指定包（v0.1.144）。packages 为包文件名列表（不含 .json 也可）。"""
+    _ensure()
+    want = {p if p.endswith(".json") else p + ".json" for p in (packages or [])}
+    removed = 0
+    for f in os.listdir(QUEUE_DIR):
+        if f.endswith(".json") and f in want:
+            try:
+                os.remove(os.path.join(QUEUE_DIR, f))
+                removed += 1
+            except Exception:  # noqa: BLE001
+                pass
+    return {"removed": removed, "message": f"已移除 {removed} 个队列包"}

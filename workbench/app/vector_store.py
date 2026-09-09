@@ -21,7 +21,13 @@ class VectorStore:
     def _get_model(self):
         if self._model is None:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(config.EMBED_MODEL)
+            # v0.1.144：优先本地加载（local_files_only=True），避免网络受限环境下
+            # 向 huggingface.co 发 HEAD 请求检查版本导致扫描卡死/进程退出。
+            # 若本地无缓存则回退联网下载（首次部署场景）。
+            try:
+                self._model = SentenceTransformer(config.EMBED_MODEL, local_files_only=True)
+            except Exception:  # noqa: BLE001
+                self._model = SentenceTransformer(config.EMBED_MODEL)
         return self._model
 
     def _get_collection(self):

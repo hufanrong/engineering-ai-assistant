@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.143")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.144")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -130,15 +130,22 @@ def start_scan(req: ScanReq):
     SCAN_STATUS.update({"running": False, "done": 0, "total": 0, "msg": "", "stats": None})
     
     def _scan_with_stats(folders, force, status):
-        """扫描完成后自动更新项目统计。"""
+        """扫描完成后自动更新项目统计。
+        v0.1.144：_refresh_project_stats 挪到 finally——扫描异常时也保证统计刷新，
+        避免"索引已更新但 project_meta.file_count 仍为 0"。"""
         def _hb():
             try:
                 status["heartbeat"] = time.time()
             except Exception:  # noqa: BLE001
                 pass
         status["heartbeat"] = time.time()
-        scanner.background_scan(folders, force, status, progress_cb=lambda *_: _hb())
-        _refresh_project_stats()
+        try:
+            scanner.background_scan(folders, force, status, progress_cb=lambda *_: _hb())
+        finally:
+            try:
+                _refresh_project_stats()
+            except Exception:  # noqa: BLE001
+                pass
     
     SCAN_STATUS.update({"start_ts": time.time(), "heartbeat": time.time()})
     t = threading.Thread(target=_scan_with_stats, args=(folders, req.force, SCAN_STATUS), daemon=True)
@@ -317,6 +324,21 @@ def do_upload():
     return result
 
 
+@app.post("/api/queue/clear")
+def queue_clear():
+    """清空上传队列（v0.1.144）。仅删除待上传包，不影响已入库数据。"""
+    return upload_queue.clear_all()
+
+
+@app.post("/api/queue/remove")
+def queue_remove(data: dict):
+    """从队列移除指定包（v0.1.144）。data: {"packages": ["包名1", "包名2"]}"""
+    packages = data.get("packages") or []
+    if not packages:
+        return {"removed": 0, "message": "未指定要移除的包"}
+    return upload_queue.remove_packages(packages)
+
+
 @app.get("/api/upload/log")
 def upload_log(limit: int = 100):
     """上传/打包留痕记录（upload_log.jsonl 尾部）。"""
@@ -360,6 +382,12 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     for fi, f in enumerate(files):
         try:
             name = os.path.basename(f.filename or "unnamed")
+            # v0.1.144：排除 CAD/Office 临时锁定文件（.dwl/.dwl2/.bak/~$*），
+            # 避免用户误判为"该类型未启用解析"或解析失败
+            if scanner._is_temp_file(name):
+                results.append({"file": name, "status": "skipped", "parser": "",
+                                "error": "临时锁定文件，已自动忽略（CAD/Office 打开时产生）", "uploader": uploader})
+                continue
             raw = await f.read()
             if len(raw) > config.MAX_FILE_MB * 1024 * 1024:
                 results.append({"file": name, "status": "failed", "error": "超过大小上限"})

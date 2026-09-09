@@ -65,6 +65,17 @@ SUPPORTED_EXTS = (
 # v0.1.134：索引保留键（非文件数据），遍历扁平键时必须跳过（P1 系列修复）
 INDEX_RESERVED_KEYS = ("files", "devices", "workshops", "version", "updated_at", "relations")
 
+# v0.1.144：CAD/Office 临时锁定文件黑名单（扫描与上传均排除，避免误判为解析失败）
+_TEMP_EXTS = (".dwl", ".dwl2", ".bak", ".tmp", ".temp", ".swp", ".swo")
+
+
+def _is_temp_file(fn: str) -> bool:
+    """判断是否为 CAD/Office 临时锁定文件（.dwl/.dwl2/.bak/~$* 等）。"""
+    low = (fn or "").lower()
+    if low.startswith("~$"):
+        return True
+    return any(low.endswith(ext) for ext in _TEMP_EXTS)
+
 
 def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None, data_dir=None) -> dict:
     """扫描一个或多个文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
@@ -84,7 +95,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
         for root, _dirs, files in os.walk(folder):
             for fn in sorted(files):
                 ext = os.path.splitext(fn)[1].lower()
-                if ext in SUPPORTED_EXTS:
+                if ext in SUPPORTED_EXTS and not _is_temp_file(fn):
                     file_list.append(os.path.join(root, fn))
     stats["found"] = len(file_list)
 
@@ -339,8 +350,11 @@ def delete_failed(shas: list) -> dict:
     return {"deleted": n}
 
 
-def background_scan(folder, force: bool = False, status: dict = None):
-    """后台线程执行扫描（任务线程，不阻塞 API）。status: 共享 dict 用于轮询进度。"""
+def background_scan(folder, force: bool = False, status: dict = None, progress_cb=None):
+    """后台线程执行扫描（任务线程，不阻塞 API）。status: 共享 dict 用于轮询进度。
+    v0.1.144：修复致命 Bug——main.py 调用时传 progress_cb=... 但本函数签名缺失该参数，
+    导致每次扫描启动即抛 TypeError 被吞掉，上传文件永不入库。
+    同时异常时也写入 stats（此前异常分支 stats 为 null，前端误判为"没数据"）。"""
     cancel = threading.Event()
     if status is not None:
         status["running"] = True
@@ -350,10 +364,19 @@ def background_scan(folder, force: bool = False, status: dict = None):
         if status is not None:
             status.update({"done": done, "total": total, "msg": msg})
 
+    # 组合回调：内部 cb 更新 status，外部 progress_cb（如心跳）同步调用
+    def combined_cb(done, total, msg):
+        cb(done, total, msg)
+        if progress_cb is not None:
+            try:
+                progress_cb(done, total, msg)
+            except Exception:  # noqa: BLE001
+                pass
+
     try:
-        stats = scan_folder(folder, force=force, progress_cb=cb, cancel_event=cancel)
+        stats = scan_folder(folder, force=force, progress_cb=combined_cb, cancel_event=cancel)
         if status is not None:
             status.update({"running": False, "done": stats.get("found", 0), "stats": stats, "msg": "完成"})
     except Exception as e:  # noqa: BLE001
         if status is not None:
-            status.update({"running": False, "msg": f"扫描异常: {e}"})
+            status.update({"running": False, "stats": {"error": str(e)}, "msg": f"扫描异常: {e}"})

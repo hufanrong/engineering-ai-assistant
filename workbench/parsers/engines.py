@@ -405,82 +405,86 @@ def parse_cad(res: ParseResult):
                 res.error = "未找到 ODA File Converter：请安装（自动搜索 Program Files 任意版本目录），或设置环境变量 ODA_CONVERTER 指向 ODAFileConverter.exe，或用 AutoCAD 另存为 DXF"
             return
         path = converted
-        _tmp_dxf_dir = os.path.dirname(converted)
-    doc = ezdxf.readfile(path)
-    msp = doc.modelspace()
+        # v0.1.144：converted 在 work_dir/out/ 下，清理整个 work_dir（含 in/ DWG 副本）
+        _tmp_dxf_root = os.path.dirname(os.path.dirname(converted))
+    try:
+        doc = ezdxf.readfile(path)
+        msp = doc.modelspace()
 
-    texts, labels, tags, dims, layers, lines_p = [], [], [], [], {}, []
-    for e in msp:
-        t = e.dxftype()
-        if t == "TEXT":
-            texts.append(e.dxf.text)
-            labels.append({"text": e.dxf.text, "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2), "layer": e.dxf.layer})
-        elif t == "MTEXT":
-            texts.append(e.plain_text())
-            labels.append({"text": e.plain_text(), "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2), "layer": e.dxf.layer})
-        elif t == "INSERT":
-            attrs = []
+        texts, labels, tags, dims, layers, lines_p = [], [], [], [], {}, []
+        for e in msp:
+            t = e.dxftype()
+            if t == "TEXT":
+                texts.append(e.dxf.text)
+                labels.append({"text": e.dxf.text, "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2), "layer": e.dxf.layer})
+            elif t == "MTEXT":
+                texts.append(e.plain_text())
+                labels.append({"text": e.plain_text(), "x": round(e.dxf.insert.x, 2), "y": round(e.dxf.insert.y, 2), "layer": e.dxf.layer})
+            elif t == "INSERT":
+                attrs = []
+                try:
+                    for a in e.attribs:
+                        attrs.append({"tag": a.dxf.tag, "value": a.dxf.text})
+                except Exception:  # noqa: BLE001
+                    pass
+                tags.append({
+                    "block": e.dxf.name,
+                    "x": round(e.dxf.insert.x, 2),
+                    "y": round(e.dxf.insert.y, 2),
+                    "layer": e.dxf.layer,
+                    "attrs": attrs[:50],
+                    "scale": round(e.dxf.xscale or 1, 3),
+                })
+            elif t == "DIMENSION":
+                try:
+                    m = e.get_measurement()
+                except Exception:  # noqa: BLE001
+                    m = None
+                dims.append({
+                    "text": (e.dxf.text or "").strip(),
+                    "measurement": round(m, 3) if m is not None else None,
+                    "x": round(e.dxf.defpoint.x, 2), "y": round(e.dxf.defpoint.y, 2),
+                    "layer": e.dxf.layer,
+                })
+            elif t == "LINE":
+                lines_p.append((round(e.dxf.start.x, 2), round(e.dxf.start.y, 2), round(e.dxf.end.x, 2), round(e.dxf.end.y, 2)))
+            layers[e.dxf.layer] = layers.get(e.dxf.layer, 0) + 1
+
+        # —— 图框检测：取几何范围（若有闭合矩形 LWPOLYLINE 则用其范围）——
+        frame = _detect_frame(msp, lines_p)
+        # —— 标题栏：图框/图面右下角区域的键值字段提取 ——
+        title_fields = _extract_title_block(labels, frame)
+
+        res.text = "\n".join(texts)
+        res.structure = {
+            "spatial": {
+                "frame": frame,                       # 图框边界 [xmin, ymin, xmax, ymax]
+                "title_block": title_fields,          # 图号/图名/比例/设计/日期等
+                "blocks": tags[:800],                 # 设备/图块 + 坐标 + 属性（空间库打底）
+                "dimensions": dims[:800],             # 尺寸标注 + 测量值
+                "lines": lines_p[:2000],              # v0.1.47：线段（管线/管道/连接线）
+            },
+            "text_labels": labels[:500],
+            "version": doc.dxfversion,
+            "layers": [{"layer": k, "count": v} for k, v in sorted(layers.items(), key=lambda x: -x[1])][:100],
+            "entity_counts": {
+                "TEXT": len([1 for e in msp.query("TEXT")]),
+                "MTEXT": len([1 for e in msp.query("MTEXT")]),
+                "INSERT": len([1 for e in msp.query("INSERT")]),
+                "LINE": len([1 for e in msp.query("LINE")]),
+                "DIMENSION": len([1 for e in msp.query("DIMENSION")]),
+            },
+        }
+        res.entities = extract_entities("\n".join(texts + [a.get("value", "") for t in tags for a in t.get("attrs", [])]))
+    finally:
+        # v0.1.144：清理 DWG→DXF 临时根目录（in/ DWG 副本 + out/ 转换结果），
+        # 用 finally 确保解析异常时也清理（此前仅正常路径清理，异常时 %TEMP% 无限膨胀）
+        if "_tmp_dxf_root" in dir() and _tmp_dxf_root and os.path.isdir(_tmp_dxf_root):
             try:
-                for a in e.attribs:
-                    attrs.append({"tag": a.dxf.tag, "value": a.dxf.text})
+                import shutil as _sh
+                _sh.rmtree(_tmp_dxf_root, ignore_errors=True)
             except Exception:  # noqa: BLE001
                 pass
-            tags.append({
-                "block": e.dxf.name,
-                "x": round(e.dxf.insert.x, 2),
-                "y": round(e.dxf.insert.y, 2),
-                "layer": e.dxf.layer,
-                "attrs": attrs[:50],
-                "scale": round(e.dxf.xscale or 1, 3),
-            })
-        elif t == "DIMENSION":
-            try:
-                m = e.get_measurement()
-            except Exception:  # noqa: BLE001
-                m = None
-            dims.append({
-                "text": (e.dxf.text or "").strip(),
-                "measurement": round(m, 3) if m is not None else None,
-                "x": round(e.dxf.defpoint.x, 2), "y": round(e.dxf.defpoint.y, 2),
-                "layer": e.dxf.layer,
-            })
-        elif t == "LINE":
-            lines_p.append((round(e.dxf.start.x, 2), round(e.dxf.start.y, 2), round(e.dxf.end.x, 2), round(e.dxf.end.y, 2)))
-        layers[e.dxf.layer] = layers.get(e.dxf.layer, 0) + 1
-
-    # —— 图框检测：取几何范围（若有闭合矩形 LWPOLYLINE 则用其范围）——
-    frame = _detect_frame(msp, lines_p)
-    # —— 标题栏：图框/图面右下角区域的键值字段提取 ——
-    title_fields = _extract_title_block(labels, frame)
-
-    res.text = "\n".join(texts)
-    res.structure = {
-        "spatial": {
-            "frame": frame,                       # 图框边界 [xmin, ymin, xmax, ymax]
-            "title_block": title_fields,          # 图号/图名/比例/设计/日期等
-            "blocks": tags[:800],                 # 设备/图块 + 坐标 + 属性（空间库打底）
-            "dimensions": dims[:800],             # 尺寸标注 + 测量值
-            "lines": lines_p[:2000],              # v0.1.47：线段（管线/管道/连接线）
-        },
-        "text_labels": labels[:500],
-        "version": doc.dxfversion,
-        "layers": [{"layer": k, "count": v} for k, v in sorted(layers.items(), key=lambda x: -x[1])][:100],
-        "entity_counts": {
-            "TEXT": len([1 for e in msp.query("TEXT")]),
-            "MTEXT": len([1 for e in msp.query("MTEXT")]),
-            "INSERT": len([1 for e in msp.query("INSERT")]),
-            "LINE": len([1 for e in msp.query("LINE")]),
-            "DIMENSION": len([1 for e in msp.query("DIMENSION")]),
-        },
-    }
-    res.entities = extract_entities("\n".join(texts + [a.get("value", "") for t in tags for a in t.get("attrs", [])]))
-    # v0.1.134：清理 DWG→DXF 临时目录（不在项目目录留中间文件）
-    if "_tmp_dxf_dir" in dir() and _tmp_dxf_dir and os.path.isdir(_tmp_dxf_dir):
-        try:
-            import shutil as _sh
-            _sh.rmtree(_tmp_dxf_dir, ignore_errors=True)
-        except Exception:  # noqa: BLE001
-            pass
 
 
 def _detect_frame(msp, lines_p):
@@ -628,17 +632,25 @@ def _find_oda_converter():
 def _dwg_to_dxf(dwg_path: str) -> Optional[str]:
     """调用 ODA File Converter 命令行将 DWG 转 DXF；失败返回 None。
     v0.1.134（P4）：转换输出到独立临时目录（不再落在 uploads/_dxf_converted，
-    避免被扫描器递归重复处理）；调用方 parse_cad 用完即删。"""
+    避免被扫描器递归重复处理）；调用方 parse_cad 用完即删。
+    v0.1.144：用独立 work_dir（in/ 只放单个 DWG 副本），避免 ODA 按目录批量转换
+    时把原始目录里所有 DWG 都转一遍（慢且产生大量临时文件）；异常时清理 work_dir。"""
     import subprocess
     import tempfile
+    import shutil as _shutil
     oda = _find_oda_converter()
     if not oda:
         return None
-    src_dir = os.path.dirname(dwg_path)
-    out_dir = tempfile.mkdtemp(prefix="dxf_convert_")
-    # ODAFileConverter 输入目录 输出目录 输出版本 输出类型 递归 审计
-    cmd = [oda, src_dir, out_dir, "ACAD2018", "DXF", "0", "1"]
+    work_dir = tempfile.mkdtemp(prefix="dxf_convert_")
+    in_dir = os.path.join(work_dir, "in")
+    out_dir = os.path.join(work_dir, "out")
+    os.makedirs(in_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
     try:
+        # 只复制单个 DWG 到 in/，避免 ODA 转换整个原始目录
+        _shutil.copy2(dwg_path, os.path.join(in_dir, os.path.basename(dwg_path)))
+        # ODAFileConverter 输入目录 输出目录 输出版本 输出类型 递归 审计
+        cmd = [oda, in_dir, out_dir, "ACAD2018", "DXF", "0", "1"]
         subprocess.run(cmd, timeout=300, check=True, capture_output=True)
         base = os.path.splitext(os.path.basename(dwg_path))[0] + ".dxf"
         cand = os.path.join(out_dir, base)
@@ -648,7 +660,7 @@ def _dwg_to_dxf(dwg_path: str) -> Optional[str]:
             cand = hits[0] if hits else None
         return cand
     except Exception:  # noqa: BLE001
-        shutil.rmtree(out_dir, ignore_errors=True)
+        _shutil.rmtree(work_dir, ignore_errors=True)
         return None
 
 
