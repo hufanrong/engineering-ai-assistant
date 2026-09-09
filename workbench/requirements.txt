@@ -1,4 +1,8 @@
 # 繁工AI 本地解析工作台 - 核心依赖（安装：pip install -r requirements.txt）
+# Python 版本组合（P3 说明）：
+#   Python 3.9~3.12（推荐）：按下方锁定版本安装即可
+#   Python 3.13（受管新环境）：chromadb 改用 >=1.5.9、sentence-transformers 改用 >=3.3.1（下方旧版无 py3.13 轮子，hnswlib 编译失败）；
+#                            paddlepaddle 需 >=3.0 + paddleocr 3.x（engines 已兼容 2.x/3.x 两版参数）
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
 python-multipart==0.0.9

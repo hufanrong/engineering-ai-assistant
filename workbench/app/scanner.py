@@ -62,6 +62,9 @@ SUPPORTED_EXTS = (
     + config.EXT_IMAGE + config.EXT_CAD + config.EXT_PROJECT
 )
 
+# v0.1.134：索引保留键（非文件数据），遍历扁平键时必须跳过（P1 系列修复）
+INDEX_RESERVED_KEYS = ("files", "devices", "workshops", "version", "updated_at", "relations")
+
 
 def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None, data_dir=None) -> dict:
     """扫描一个或多个文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
@@ -210,10 +213,13 @@ def retry_failed_files(status: dict = None, shas: list = None) -> dict:
     store = VectorStore()
     if shas:
         targets = [(sha, info) for sha, info in idx.items()
-                   if sha in set(shas) and info.get("status") in ("failed", "pending_manual")]
+                   if sha in set(shas) and sha not in INDEX_RESERVED_KEYS
+                   and isinstance(info, dict)
+                   and info.get("status") in ("failed", "pending_manual")]
     else:
         targets = [(sha, info) for sha, info in idx.items()
-                   if info.get("status") in ("failed", "pending_manual")]
+                   if sha not in INDEX_RESERVED_KEYS and isinstance(info, dict)
+                   and info.get("status") in ("failed", "pending_manual")]
     stats = {"retried": 0, "recovered": 0, "still_failed": 0, "missing": 0,
              "pending_manual": 0, "pending_list": []}
 
@@ -276,6 +282,8 @@ def list_failed() -> list:
     idx = _load_index()
     out = []
     for sha, info in idx.items():
+        if sha in INDEX_RESERVED_KEYS or not isinstance(info, dict):
+            continue
         if info.get("status") in ("failed", "pending_manual"):
             out.append({
                 "sha256": sha,
@@ -296,7 +304,9 @@ def delete_failed(shas: list) -> dict:
     idx = _load_index()
     n = 0
     for sha in shas:
-        if sha in idx and idx[sha].get("status") in ("failed", "pending_manual"):
+        info = idx.get(sha)
+        if sha not in INDEX_RESERVED_KEYS and isinstance(info, dict) \
+                and info.get("status") in ("failed", "pending_manual"):
             del idx[sha]
             n += 1
     _save_index(idx)

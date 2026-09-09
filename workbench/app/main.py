@@ -5,6 +5,7 @@
 import os
 import json
 import threading
+import time
 from typing import Union, List
 
 from fastapi import Request, FastAPI, HTTPException, UploadFile, File, Form, Body
@@ -36,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.133")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.134")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -50,8 +51,30 @@ app.add_middleware(
 )
 
 # 共享扫描状态（单任务）
-SCAN_STATUS = {"running": False}
+# v0.1.134：增加 start_ts/heartbeat 用于卡死检测（守护线程自动恢复）
+SCAN_STATUS = {"running": False, "start_ts": 0, "heartbeat": 0}
 _store = VectorStore()
+
+# v0.1.134：向量库"项目/全局"双轨制（补丁合入）
+# 上传/检索按当前项目取向量库，与 scanner 的项目化存储保持一致；
+# 未选项目时回退全局库。修复"项目内解析内容全局检索查不到、检索也查不到项目内容"的断链。
+_store_cache = {}
+
+
+def _get_store():
+    """按当前项目取向量库；未选项目时用全局库。"""
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if cur:
+            db = os.path.join(_pm.get_project_data_dir(cur["id"]), "vector_db")
+            st = _store_cache.get(db)
+            if st is None:
+                st = _store_cache[db] = VectorStore(db_path=db)
+            return st
+    except Exception:  # noqa: BLE001
+        pass
+    return _store
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 os.makedirs(config.DATA_DIR, exist_ok=True)
@@ -78,7 +101,7 @@ def status():
             "cad": config.OPTIONAL_READY.get("cad", False) and (config.AUTO_DETECT_OPTIONAL or config.PARSE_CAD),
             "project": config.PARSE_PROJECT,
         },
-        "vector_count": _store.stats().get("count", 0),
+        "vector_count": _get_store().stats().get("count", 0),
         "queue_pending": upload_queue.pending_count(),
         "indexed_files": len(scanner._load_index()),
         "cloud_endpoint": config.CLOUD_ENDPOINT or "(未配置)",
@@ -108,7 +131,13 @@ def start_scan(req: ScanReq):
     
     def _scan_with_stats(folders, force, status):
         """扫描完成后自动更新项目统计。"""
-        scanner.background_scan(folders, force, status)
+        def _hb():
+            try:
+                status["heartbeat"] = time.time()
+            except Exception:  # noqa: BLE001
+                pass
+        status["heartbeat"] = time.time()
+        scanner.background_scan(folders, force, status, progress_cb=lambda *_: _hb())
         try:
             from . import project_manager as _pm2
             cur = _pm2.get_current_project()
@@ -125,6 +154,7 @@ def start_scan(req: ScanReq):
         except Exception:
             pass
     
+    SCAN_STATUS.update({"start_ts": time.time(), "heartbeat": time.time()})
     t = threading.Thread(target=_scan_with_stats, args=(folders, req.force, SCAN_STATUS), daemon=True)
     t.start()
     return {"ok": True, "folders": folders}
@@ -160,6 +190,10 @@ class RetryOneReq(BaseModel):
     sha256: str
 
 
+class RetryFailedReq(BaseModel):
+    shas: list[str] | None = None
+
+
 class DeleteFailedReq(BaseModel):
     shas: list[str]
 
@@ -173,32 +207,39 @@ def retry_failed_one(sha: str):
 
 @app.post("/api/scan/failed/delete")
 def delete_failed(req: DeleteFailedReq):
+    if SCAN_STATUS.get("running"):
+        raise HTTPException(409, "扫描/重试正在进行中，请稍候再删除")
     return scanner.delete_failed(req.shas)
 
 
 @app.post("/api/scan/failed/clear")
 def clear_failed():
     """清空全部失败/待处理登记。"""
+    if SCAN_STATUS.get("running"):
+        raise HTTPException(409, "扫描/重试正在进行中，请稍候再清空")
     items = scanner.list_failed()
     return scanner.delete_failed([it["sha256"] for it in items])
 
 
 @app.post("/api/scan/retry-failed")
-def retry_failed():
-    """重试全部 failed/pending_manual 文件（人工触发，后台执行）。"""
+def retry_failed(req: RetryFailedReq | None = None):
+    """重试失败文件（v0.1.134：支持批量选中 shas；不传则全部），后台执行。
+    达到最大重试次数自动转 pending_manual（待处理人工介入）。"""
     if SCAN_STATUS.get("running"):
         raise HTTPException(409, "已有任务在运行")
-    SCAN_STATUS.update({"running": False, "done": 0, "total": 0, "msg": "", "stats": None})
+    shas = req.shas if req and req.shas else None
+    SCAN_STATUS.update({"running": True, "done": 0, "total": 0, "msg": "",
+                        "stats": None, "start_ts": time.time(), "heartbeat": time.time()})
 
     def _run():
         try:
-            scanner.retry_failed_files(SCAN_STATUS)
+            scanner.retry_failed_files(SCAN_STATUS, shas=shas)
         except Exception as e:  # noqa: BLE001
             SCAN_STATUS.update({"running": False, "msg": f"重试异常: {e}"})
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
-    return {"ok": True}
+    return {"ok": True, "shas": shas}
 
 
 # ---------- 结果 ----------
@@ -207,6 +248,8 @@ def results(status_filter: str = None, limit: int = 200):
     idx = scanner._load_index()
     items = []
     for sha, info in idx.items():
+        if sha in scanner.INDEX_RESERVED_KEYS or not isinstance(info, dict):
+            continue
         if status_filter and info.get("status") != status_filter:
             continue
         items.append({"sha256": sha, **info})
@@ -235,7 +278,7 @@ class SearchReq(BaseModel):
 @app.post("/api/search")
 def search(req: SearchReq):
     try:
-        results = _store.search(req.query, top_k=req.top_k)
+        results = _get_store().search(req.query, top_k=req.top_k)
         for r in results:
             r["source"] = "project"
     except Exception as e:  # noqa: BLE001
@@ -352,7 +395,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 # v0.1.129：向量化失败不降级为 failed（文件已解析成功），
                 # 记录到 error 提示信息，状态保持 parsed，避免前端误报上传失败
                 try:
-                    _store.index_file(res)
+                    _get_store().index_file(res)
                     vec_ok = True
                 except Exception as _vec_err:  # noqa: BLE001
                     vec_ok = False
@@ -4249,6 +4292,39 @@ async def platform_import(file: UploadFile = File(...)):
 app.mount("/web", StaticFiles(directory=WEB_DIR), name="web")
 
 
+
+# ============ v0.1.134：扫描/重试卡死守护（自动恢复） ============
+_STUCK_TIMEOUT = 30 * 60  # 扫描/重试超过 30 分钟无心跳视为卡死
+
+
+def _guardian_loop():
+    """后台守护：SCAN_STATUS 卡死时自动重置，并自动重试一次未达上限的失败文件。"""
+    import logging as _lg
+    _lg.basicConfig(level=_lg.INFO)
+    while True:
+        try:
+            time.sleep(60)
+            if not SCAN_STATUS.get("running"):
+                continue
+            hb = SCAN_STATUS.get("heartbeat", 0) or 0
+            if time.time() - hb > _STUCK_TIMEOUT:
+                _lg.warning("检测到扫描/重试卡死（无心跳超 30 分钟），自动重置并重试失败文件")
+                SCAN_STATUS.update({"running": False, "msg": "检测到卡死，已自动恢复并重试失败文件",
+                                    "heartbeat": time.time()})
+                try:
+                    from . import scanner as _sc
+                    _sc.retry_failed_files(shas=None)  # 自动重试全部未达上限的失败文件
+                except Exception as _e:  # noqa: BLE001
+                    _lg.warning(f"卡死恢复后自动重试异常: {_e}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _start_guardian():
+    t = threading.Thread(target=_guardian_loop, daemon=True)
+    t.start()
+
+
 def run():
     import uvicorn
     print("=" * 56)
@@ -4257,6 +4333,8 @@ def run():
     print(f"  数据目录: {config.DATA_DIR}")
     print(f"  解析节点: {config.NODE_NAME}")
     print("=" * 56)
+    _start_guardian()
+    _start_guardian()
     uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")
 
 
@@ -4297,27 +4375,44 @@ def _frontend_index():
     return _sc._load_index(data_dir=ddir)
 
 
+# v0.1.134：索引保留键（非文件数据），合并读取时必须跳过
+_INDEX_RESERVED_KEYS = ("files", "devices", "workshops", "version", "updated_at", "relations")
+
+
 def _frontend_index_items():
     """将项目索引统一转换为 [{id, file_name, ...}] 列表。
-    兼容两种格式：{sha: info} 和 {files: [...], ...}（项目级 index.json）。
+    兼容合并两种格式（P1 修复）：项目初始化产生的 {files: [], devices: {}, ...}
+    与上传/扫描写入的 {sha: info} 扁平键可能同时存在，必须合并读取，
+    否则前端文件列表永远为空（原实现二选一导致上传文件显示 0）。
     """
     idx = _frontend_index()
     if not isinstance(idx, dict):
         return []
     items = []
-    if "files" in idx and isinstance(idx["files"], list):
-        # 项目级格式：files 列表
+    seen = set()
+    # 1) files 列表格式（项目级）
+    if isinstance(idx.get("files"), list):
         for f in idx["files"]:
-            if isinstance(f, dict):
-                items.append(f)
-    else:
-        # 全局格式：{sha: info}
-        for sha, info in idx.items():
-            if isinstance(info, dict):
-                item = dict(info)
-                item.setdefault("id", sha)
-                item.setdefault("sha256", sha)
-                items.append(item)
+            if not isinstance(f, dict):
+                continue
+            key = f.get("id") or f.get("sha256") or f.get("file_name") or ""
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            items.append(f)
+    # 2) 扁平 {sha: info} 格式（上传/扫描写入），跳过保留键
+    for sha, info in idx.items():
+        if not isinstance(info, dict) or sha in _INDEX_RESERVED_KEYS:
+            continue
+        key = sha or info.get("file_name") or ""
+        if key in seen:
+            continue
+        seen.add(key)
+        item = dict(info)
+        item.setdefault("id", sha)
+        item.setdefault("sha256", sha)
+        items.append(item)
     return items
 
 
@@ -4527,7 +4622,7 @@ def frontend_file_download(name: str = ""):
 def frontend_search(q: str = "", top_k: int = 5):
     """关键词搜索（前端全局搜索框，GET方式）。"""
     try:
-        results = _store.search(q, top_k=top_k)
+        results = _get_store().search(q, top_k=top_k)
         files = []
         for r in results:
             files.append({

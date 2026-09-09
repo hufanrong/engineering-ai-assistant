@@ -261,8 +261,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
   <div class="card" id="failedCard">
     <div class="card-title"><span class="icon">❌</span>处理失败文件 <span class="badge badge-danger" id="failedCount">0</span></div>
     <div class="empty" id="failedEmpty" style="display:none"><div class="icon">✅</div><div class="text">暂无失败文件</div></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap" id="failedActions">
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#555;cursor:pointer">
+        <input type="checkbox" id="failedSelectAll" onchange="toggleAllFailed()"> 全选
+      </label>
+      <button class="btn btn-sm" onclick="retrySelectedFailed()" style="padding:4px 14px">🔄 批量重试</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteSelectedFailed()" style="padding:4px 14px">🗑️ 批量删除</button>
+      <button class="btn btn-sm" onclick="retryAllFailed()" style="padding:4px 14px">🔄 重试全部</button>
+      <button class="btn btn-sm btn-danger" onclick="clearAllFailed()" style="padding:4px 14px">🗑️ 清空</button>
+      <span style="font-size:11px;color:#999;align-self:center" id="failedAutoTip">多次重试失败自动转"待处理"，卡住的扫描会自动恢复重试</span>
+    </div>
     <table class="table" id="failedTable" style="display:none">
-      <thead><tr><th>文件名</th><th>失败原因</th><th>失败时间</th><th>重试次数</th><th>操作</th></tr></thead>
+      <thead><tr><th style="width:28px"></th><th>文件名</th><th>失败原因</th><th>失败时间</th><th>重试次数</th><th>状态</th><th>操作</th></tr></thead>
       <tbody id="failedBody"></tbody>
     </table>
   </div>
@@ -1068,21 +1078,112 @@ function loadPendingFiles() {
     }
 }
 
+// v0.1.134：失败/待处理文件管理（真实拉取 + 批量重试/删除 + 卡死自动恢复提示）
+var failedFilesCache = [];
 function loadFailedFiles() {
-    var body = document.getElementById('failedBody');
-    var empty = document.getElementById('failedEmpty');
-    var table = document.getElementById('failedTable');
-    var count = document.getElementById('failedCount');
-    
-    var failed = [];
-    count.textContent = failed.length;
-    if (failed.length === 0) {
-        empty.style.display = 'block';
-        table.style.display = 'none';
-    } else {
-        empty.style.display = 'none';
-        table.style.display = '';
-    }
+    fetch('/api/scan/failed-list')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            failedFilesCache = (data && data.items) || [];
+            var body = document.getElementById('failedBody');
+            var empty = document.getElementById('failedEmpty');
+            var table = document.getElementById('failedTable');
+            var count = document.getElementById('failedCount');
+            var actions = document.getElementById('failedActions');
+            count.textContent = failedFilesCache.length;
+            if (failedFilesCache.length === 0) {
+                empty.style.display = 'block';
+                table.style.display = 'none';
+                if (actions) actions.style.display = 'none';
+            } else {
+                empty.style.display = 'none';
+                table.style.display = '';
+                if (actions) actions.style.display = 'flex';
+            }
+            body.innerHTML = '';
+            failedFilesCache.forEach(function(it) {
+                var tr = document.createElement('tr');
+                var st = it.status === 'pending_manual'
+                    ? '<span style="color:#FF7A00;font-size:12px">待处理</span>'
+                    : '<span style="color:#D4380D;font-size:12px">失败</span>';
+                var note = it.pending_note ? '<br><span style="color:#FF7A00;font-size:11px">' + it.pending_note + '</span>' : '';
+                tr.innerHTML =
+                    '<td><input type="checkbox" class="failed-check" value="' + it.sha256 + '"></td>' +
+                    '<td>' + (it.file_name || '') + '</td>' +
+                    '<td style="font-size:12px;color:#666">' + (it.error || '') + note + '</td>' +
+                    '<td style="font-size:12px;color:#888;white-space:nowrap">' + (it.ts || '').replace('T', ' ').slice(0, 16) + '</td>' +
+                    '<td style="text-align:center">' + (it.retry_count || 0) + '</td>' +
+                    '<td>' + st + '</td>' +
+                    '<td style="white-space:nowrap">' +
+                    '<button class="btn btn-sm" onclick="retryOneFailed(\'' + it.sha256 + '\')" style="padding:2px 10px">重试</button> ' +
+                    '<button class="btn btn-sm btn-danger" onclick="deleteOneFailed(\'' + it.sha256 + '\')" style="padding:2px 10px">删除</button>' +
+                    '</td>';
+                body.appendChild(tr);
+            });
+        })
+        .catch(function() {
+            var count = document.getElementById('failedCount');
+            if (count) count.textContent = '0';
+        });
+}
+
+function toggleAllFailed() {
+    var checked = document.getElementById('failedSelectAll').checked;
+    var cbs = document.querySelectorAll('.failed-check');
+    for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked;
+}
+function selectedFailedShas() {
+    var out = [];
+    var cbs = document.querySelectorAll('.failed-check');
+    for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) out.push(cbs[i].value);
+    return out;
+}
+function retryOneFailed(sha) {
+    fetch('/api/scan/retry-failed/' + sha, {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function() { alert('已重试，请稍后刷新查看结果'); loadFailedFiles(); })
+        .catch(function() { alert('重试请求失败'); });
+}
+function deleteOneFailed(sha) {
+    if (!confirm('确定删除该失败记录？')) return;
+    fetch('/api/scan/failed/delete', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({shas: [sha]})
+    }).then(function(r) { return r.json(); }).then(function() { loadFailedFiles(); });
+}
+function retrySelectedFailed() {
+    var shas = selectedFailedShas();
+    if (!shas.length) { alert('请先勾选要重试的文件'); return; }
+    fetch('/api/scan/retry-failed', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({shas: shas})
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+          if (d.ok) { alert('已提交 ' + shas.length + ' 个文件重试（后台执行，稍后刷新）'); }
+          else alert(d.detail || '提交失败');
+      });
+}
+function retryAllFailed() {
+    fetch('/api/scan/retry-failed', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.ok) alert('已提交全部失败文件重试（后台执行，稍后刷新）');
+            else alert(d.detail || '提交失败');
+        });
+}
+function deleteSelectedFailed() {
+    var shas = selectedFailedShas();
+    if (!shas.length) { alert('请先勾选要删除的文件'); return; }
+    if (!confirm('确定删除选中的 ' + shas.length + ' 条失败记录？')) return;
+    fetch('/api/scan/failed/delete', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({shas: shas})
+    }).then(function(r) { return r.json(); }).then(function() { loadFailedFiles(); });
+}
+function clearAllFailed() {
+    if (!confirm('确定清空全部失败记录？')) return;
+    fetch('/api/scan/failed/clear', {method: 'POST'})
+        .then(function(r) { return r.json(); }).then(function() { loadFailedFiles(); });
 }
 
 // ===== v0.1.133：上传引擎（文件夹递归 / 分批队列 / 失败自动重试） =====

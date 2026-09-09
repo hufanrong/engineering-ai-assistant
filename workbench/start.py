@@ -17,7 +17,9 @@ from app import config  # noqa: E402
 def _open_browser():
     import time
     time.sleep(1.5)
-    webbrowser.open(f"http://{config.HOST}:{config.PORT}")
+    # v0.1.134：HOST=0.0.0.0/:: 时浏览器打不开，回退 127.0.0.1
+    host = "127.0.0.1" if config.HOST in ("0.0.0.0", "::", "") else config.HOST
+    webbrowser.open(f"http://{host}:{config.PORT}")
 
 
 if __name__ == "__main__":

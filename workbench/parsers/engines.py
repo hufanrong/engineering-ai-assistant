@@ -304,11 +304,15 @@ def _get_ocr():
     global _ocr_engine
     if _ocr_engine is None:
         from paddleocr import PaddleOCR
-        # PaddleOCR 3.x 移除 use_angle_cls 参数，2.x 必需；分版本构造
+        # v0.1.134：PaddleOCR 3.x 移除 use_angle_cls/show_log 参数（2.x 必需）；
+        # 先按 3.x 构造，失败再按 2.x 构造，保证两版都可用
         try:
-            _ocr_engine = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+            _ocr_engine = PaddleOCR(lang="ch")
         except Exception:  # noqa: BLE001
-            _ocr_engine = PaddleOCR(lang="ch", show_log=False)
+            try:
+                _ocr_engine = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+            except Exception:  # noqa: BLE001
+                _ocr_engine = PaddleOCR(lang="ch", show_log=False)
     return _ocr_engine
 
 
@@ -401,6 +405,7 @@ def parse_cad(res: ParseResult):
                 res.error = "未找到 ODA File Converter：请安装（自动搜索 Program Files 任意版本目录），或设置环境变量 ODA_CONVERTER 指向 ODAFileConverter.exe，或用 AutoCAD 另存为 DXF"
             return
         path = converted
+        _tmp_dxf_dir = os.path.dirname(converted)
     doc = ezdxf.readfile(path)
     msp = doc.modelspace()
 
@@ -469,6 +474,13 @@ def parse_cad(res: ParseResult):
         },
     }
     res.entities = extract_entities("\n".join(texts + [a.get("value", "") for t in tags for a in t.get("attrs", [])]))
+    # v0.1.134：清理 DWG→DXF 临时目录（不在项目目录留中间文件）
+    if "_tmp_dxf_dir" in dir() and _tmp_dxf_dir and os.path.isdir(_tmp_dxf_dir):
+        try:
+            import shutil as _sh
+            _sh.rmtree(_tmp_dxf_dir, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _detect_frame(msp, lines_p):
@@ -614,22 +626,29 @@ def _find_oda_converter():
 
 
 def _dwg_to_dxf(dwg_path: str) -> Optional[str]:
-    """调用 ODA File Converter 命令行将 DWG 转 DXF；失败返回 None。"""
+    """调用 ODA File Converter 命令行将 DWG 转 DXF；失败返回 None。
+    v0.1.134（P4）：转换输出到独立临时目录（不再落在 uploads/_dxf_converted，
+    避免被扫描器递归重复处理）；调用方 parse_cad 用完即删。"""
     import subprocess
+    import tempfile
     oda = _find_oda_converter()
     if not oda:
         return None
     src_dir = os.path.dirname(dwg_path)
-    out_dir = os.path.join(src_dir, "_dxf_converted")
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = tempfile.mkdtemp(prefix="dxf_convert_")
     # ODAFileConverter 输入目录 输出目录 输出版本 输出类型 递归 审计
     cmd = [oda, src_dir, out_dir, "ACAD2018", "DXF", "0", "1"]
     try:
-        subprocess.run(cmd, timeout=180, check=True, capture_output=True)
+        subprocess.run(cmd, timeout=300, check=True, capture_output=True)
         base = os.path.splitext(os.path.basename(dwg_path))[0] + ".dxf"
         cand = os.path.join(out_dir, base)
-        return cand if os.path.exists(cand) else None
+        if not os.path.exists(cand):
+            # 兜底：找转换目录下任意 .dxf
+            hits = [os.path.join(out_dir, x) for x in os.listdir(out_dir) if x.lower().endswith(".dxf")]
+            cand = hits[0] if hits else None
+        return cand
     except Exception:  # noqa: BLE001
+        shutil.rmtree(out_dir, ignore_errors=True)
         return None
 
 

@@ -35,6 +35,11 @@ BACKUP_DIR = os.path.join(WORKSPACE_ROOT, "updates", "backups")
 # 更新日志
 UPDATE_LOG_FILE = os.path.join(WORKSPACE_ROOT, "updates", "update_log.json")
 
+# v0.1.134：staging 暂存目录（P2 修复：运行中不直接覆盖，停服后原子替换）
+STAGING_DIR = os.path.join(WORKSPACE_ROOT, "updates", "staging")
+PENDING_FILE = os.path.join(WORKSPACE_ROOT, "updates", "pending_update.json")
+APPLY_LOG = os.path.join(WORKSPACE_ROOT, "updates", "apply.log")
+
 # 需要保留的数据目录（更新时不覆盖）
 PRESERVE_DIRS = [
     "data",
@@ -310,6 +315,7 @@ def update_via_download() -> Dict:
             SYNC_FILES = [
                 "start.py", "run_workbench.bat", "README.md", "requirements.txt",
                 "requirements-ocr.txt", ".gitignore", "config.local.py.example",
+                "install_optional.bat", "open_or_start.bat",
             ]
             # 保护：本地用户数据/配置，更新时跳过
             LOCAL_PRESERVE = [
@@ -319,16 +325,21 @@ def update_via_download() -> Dict:
             
             copied_count = 0
             
-            # 1) 同步目录
+            # v0.1.134（P2 修复）：所有文件先复制到 staging 暂存目录，
+            # 由独立 apply 进程在停服后原子替换，避免运行中覆盖 Permission denied
+            if os.path.isdir(STAGING_DIR):
+                shutil.rmtree(STAGING_DIR, ignore_errors=True)
+            os.makedirs(STAGING_DIR, exist_ok=True)
+            
+            # 1) 同步目录 → staging
             for dname in SYNC_DIRS:
                 src_dir = os.path.join(workbench_root, dname)
                 if not os.path.isdir(src_dir):
                     continue
-                dst_dir = os.path.join(WORKSPACE_ROOT, dname)
+                dst_dir = os.path.join(STAGING_DIR, dname)
                 os.makedirs(dst_dir, exist_ok=True)
                 for root, dirs, files in os.walk(src_dir):
                     rel_path = os.path.relpath(root, src_dir)
-                    # 跳过保护目录（含 cloud_server/cloud_data）
                     skip = False
                     for p in LOCAL_PRESERVE:
                         if rel_path == p or rel_path.startswith(p + os.sep):
@@ -349,15 +360,16 @@ def update_via_download() -> Dict:
                         shutil.copy2(src_file, dst_file)
                         copied_count += 1
             
-            # 2) 同步根文件（跳过config.py——本地配置保护见下）
-            for fname in SYNC_FILES:
+            # 2) 同步根文件 → staging（含新增 install_optional.bat / open_or_start.bat）
+            root_extra = ["install_optional.bat", "open_or_start.bat", "run_workbench.bat"]
+            for fname in list(SYNC_FILES) + root_extra:
                 src_file = os.path.join(workbench_root, fname)
                 if os.path.isfile(src_file):
-                    dst_file = os.path.join(WORKSPACE_ROOT, fname)
+                    dst_file = os.path.join(STAGING_DIR, fname)
                     shutil.copy2(src_file, dst_file)
                     copied_count += 1
             
-            # 【Bug3 修复】保护本地 config.py：更新前把本地配置存为 config.local.py，再更新 config.py
+            # 3) staging 内保护本地配置（config.py → config.local.py 机制）
             _preserve_local_config()
             
             # 清理临时文件
@@ -367,7 +379,8 @@ def update_via_download() -> Dict:
                 "ok": True,
                 "method": "download",
                 "copied_files": copied_count,
-                "message": f"下载更新成功，已更新 {copied_count} 个程序文件",
+                "staged": True,
+                "message": f"已下载并暂存 {copied_count} 个程序文件，将自动停服替换并重启",
             }
         finally:
             if os.path.exists(zip_path):
@@ -547,6 +560,172 @@ def restart_service(port: int = 8756) -> Dict:
         }
 
 
+# ============ v0.1.134：staging 自动替换（P2 修复）============
+
+_APPLY_SCRIPT = r"""# -*- coding: utf-8 -*-
+# 由繁工AI auto_updater 生成：停服 → 原子替换 → 回滚 → 重启
+import os, sys, json, time, shutil, subprocess, datetime
+
+WS = {ws!r}
+PORT = {port!r}
+STAGING = os.path.join(WS, "updates", "staging")
+PENDING = os.path.join(WS, "updates", "pending_update.json")
+LOG = os.path.join(WS, "updates", "apply.log")
+BACKUP_DIR = os.path.join(WS, "updates", "backups")
+
+
+def log(msg):
+    try:
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write("[{0}] {1}\n".format(
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg))
+    except Exception:
+        pass
+
+
+def pid_by_port(port):
+    pids = []
+    try:
+        if sys.platform.startswith("win"):
+            out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=15).stdout
+            for line in out.splitlines():
+                if (":" + str(port)) in line and "LISTENING" in line:
+                    parts = line.split()
+                    if parts and parts[-1].isdigit():
+                        pids.append(int(parts[-1]))
+        else:
+            out = subprocess.run(["fuser", str(port) + "/tcp"], capture_output=True, text=True, timeout=10)
+            for tok in (out.stdout or "").split():
+                if tok.isdigit():
+                    pids.append(int(tok))
+    except Exception:
+        pass
+    return list(set(pids))
+
+
+def kill_tree(pid):
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=15)
+        else:
+            subprocess.run(["kill", "-9", str(pid)], capture_output=True, timeout=10)
+        return True
+    except Exception:
+        return False
+
+
+def main():
+    log("apply 开始，等待主进程响应返回…")
+    time.sleep(2)
+    if not os.path.isdir(STAGING):
+        log("staging 不存在，跳过")
+        return
+    # 1. 停服
+    for pid in pid_by_port(PORT):
+        if pid == os.getpid():
+            continue
+        log(f"结束旧进程 PID={pid}")
+        kill_tree(pid)
+    time.sleep(1.5)
+    # 2. 原子替换
+    replaced, failed = [], []
+    for root, _dirs, files in os.walk(STAGING):
+        rel = os.path.relpath(root, STAGING)
+        for f in files:
+            src = os.path.join(root, f)
+            dst = os.path.join(WS, rel, f) if rel != "." else os.path.join(WS, f)
+            try:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                if os.path.exists(dst):
+                    os.remove(dst)  # 先释放旧句柄
+                os.replace(src, dst)
+                replaced.append(dst)
+            except Exception as e:
+                failed.append((dst, str(e)))
+    log(f"替换完成：成功 {len(replaced)}，失败 {len(failed)}")
+    # 3. 失败回滚：从最近备份恢复失败文件
+    if failed:
+        if os.path.isdir(BACKUP_DIR):
+            baks = sorted([d for d in os.listdir(BACKUP_DIR) if os.path.isdir(os.path.join(BACKUP_DIR, d))], reverse=True)
+            if baks:
+                bak_root = os.path.join(BACKUP_DIR, baks[0])
+                for dst, err in failed:
+                    rel = os.path.relpath(dst, WS)
+                    src_bak = os.path.join(bak_root, rel)
+                    try:
+                        if os.path.isfile(src_bak):
+                            os.makedirs(os.path.dirname(dst), exist_ok=True)
+                            os.replace(src_bak, dst)
+                            log(f"已回滚 {rel}")
+                    except Exception as e2:
+                        log(f"回滚失败 {rel}: {e2}")
+    # 4. 清理
+    try:
+        shutil.rmtree(STAGING, ignore_errors=True)
+    except Exception:
+        pass
+    for p in (PENDING,):
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            pass
+    # 5. 重启服务
+    time.sleep(0.5)
+    try:
+        python = sys.executable or "python"
+        start_py = os.path.join(WS, "start.py")
+        cmd = [python, start_py] if os.path.isfile(start_py) else [python, os.path.join(WS, "app", "main.py")]
+        log_path = os.path.join(WS, "updates", "restart.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as lf:
+            lf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 更新后自动重启 ===\n")
+            if sys.platform.startswith("win"):
+                subprocess.Popen(cmd, cwd=WS, stdout=lf, stderr=lf,
+                                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                                 close_fds=True)
+            else:
+                subprocess.Popen(cmd, cwd=WS, stdout=lf, stderr=lf, start_new_session=True, close_fds=True)
+        log("服务已重启")
+    except Exception as e:
+        log(f"重启失败: {e}")
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+def schedule_staged_apply() -> Dict:
+    """把 staging 的更新交给独立进程执行：停服→替换→重启（当前进程继续返回响应）。"""
+    try:
+        script_path = os.path.join(WORKSPACE_ROOT, "updates", "apply_update.py")
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(_APPLY_SCRIPT.format(ws=WORKSPACE_ROOT, port=config.PORT))
+        pending = {
+            "staging": STAGING_DIR,
+            "created": datetime.datetime.now().isoformat(),
+        }
+        with open(PENDING_FILE, "w", encoding="utf-8") as f:
+            json.dump(pending, f, ensure_ascii=False)
+        # 分离进程执行（主进程立即返回）
+        log_path = os.path.join(WORKSPACE_ROOT, "updates", "apply.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as lf:
+            lf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 调度 apply ===\n")
+            if sys.platform.startswith("win"):
+                subprocess.Popen([sys.executable, script_path], cwd=WORKSPACE_ROOT,
+                                 stdout=lf, stderr=lf,
+                                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                                 close_fds=True)
+            else:
+                subprocess.Popen([sys.executable, script_path], cwd=WORKSPACE_ROOT,
+                                 stdout=lf, stderr=lf, start_new_session=True, close_fds=True)
+        return {"ok": True, "message": "更新已暂存，正在自动停服替换并重启（约10秒），页面将自动恢复"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"调度更新失败：{e}"}
+
+
 def perform_update(backup: bool = True, force: bool = False) -> Dict:
     """
     执行更新。
@@ -603,6 +782,47 @@ def perform_update(backup: bool = True, force: bool = False) -> Dict:
             "error": f"更新失败：{update_result.get('error')}",
             "backup": backup_result,
             "suggestion": "更新失败，当前版本未受影响。可尝试手动下载更新包。",
+        }
+    
+    # v0.1.134（P2）：下载方式为 staging 暂存 → 调度独立进程停服替换并自动重启
+    if update_result.get("staged"):
+        sched = schedule_staged_apply()
+        if not sched.get("ok"):
+            return {
+                "ok": False,
+                "error": sched.get("error"),
+                "backup": backup_result,
+                "suggestion": "暂存成功但调度失败：请手动关闭服务后，将 updates/staging/ 内文件覆盖到工作台目录，再重启。",
+            }
+        log_entry = {
+            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "from_version": version_info["current_version"],
+            "to_version": version_info["latest_version"],
+            "method": "download(staged)",
+            "backup_path": backup_result.get("backup_path", "") if backup_result else "",
+            "result": "success",
+        }
+        try:
+            logs = []
+            if os.path.isfile(UPDATE_LOG_FILE):
+                with open(UPDATE_LOG_FILE, "r", encoding="utf-8") as f:
+                    logs = json.load(f)
+            logs.insert(0, log_entry)
+            logs = logs[:50]
+            with open(UPDATE_LOG_FILE, "w", encoding="utf-8") as f:
+                json.dump(logs, f, ensure_ascii=False, indent=2)
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "ok": True,
+            "message": sched.get("message"),
+            "from_version": version_info["current_version"],
+            "to_version": version_info["latest_version"],
+            "method": "download(staged)",
+            "backup": backup_result,
+            "need_restart": True,
+            "auto_restarting": True,
+            "restart_hint": "更新文件已就绪，正在自动停服替换并重启（约10秒）。页面若断开请稍等后刷新。",
         }
     
     # 4. 记录更新日志
