@@ -41,18 +41,41 @@ app = FastAPI(title="繁工AI 云端合并主库", version="0.1.19")
 
 
 def _load_index() -> dict:
+    """云库索引：{project_name: {sha: info}}（v0.1.138 按项目合并）。
+    兼容旧平铺格式 {sha: info}：自动迁移到『未归项目』分组。"""
     if os.path.exists(INDEX_PATH):
         try:
             with open(INDEX_PATH, encoding="utf-8") as f:
-                return json.load(f)
+                idx = json.load(f)
         except Exception:  # noqa: BLE001
             return {}
+        if not isinstance(idx, dict):
+            return {}
+        # 旧格式检测：顶层 key 是 64 位 sha（无项目嵌套）→ 迁移到『未归项目』
+        sample = next(iter(idx), None)
+        if sample and isinstance(idx[sample], dict) and isinstance(sample, str) and len(sample) == 64:
+            try:
+                int(sample, 16)
+                idx = {"未归项目": idx}
+                _save_index(idx)
+            except ValueError:
+                pass
+        return idx
     return {}
 
 
 def _save_index(idx: dict):
     with open(INDEX_PATH, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=1)
+
+
+def _project_map(idx: dict) -> dict:
+    """归一化返回 {project: {sha: info}}，兼容缺省项目键。"""
+    out = {}
+    for k, v in idx.items():
+        if isinstance(v, dict):
+            out[k] = v
+    return out
 
 
 def _check_auth(authorization: str):
@@ -65,57 +88,76 @@ def _check_auth(authorization: str):
 @app.get("/api/cloud/status")
 def cloud_status():
     idx = _load_index()
+    proj = _project_map(idx)
+    total = sum(len(v) for v in proj.values())
     return {"app": "fangong-cloud", "version": app.version,
-            "files": len(idx), "dir": BASE_DIR}
+            "files": total, "projects": len(proj),
+            "project_names": sorted(proj.keys()), "dir": BASE_DIR}
 
 
 # ---------- 工作台上传队列对接（upload_queue.upload_all 打这个接口） ----------
 @app.post("/api/parse-nodes/payloads")
 def receive_payload(payload: dict, authorization: str = Header("")):
+    """v0.1.138：按项目合并——同项目同 sha 去重；不同项目同 sha 各自保留。"""
     _check_auth(authorization)
     sha = (payload.get("payload") or {}).get("sha256", "")
     if not sha:
         raise HTTPException(400, "缺少 sha256")
+    project = (payload.get("project_name") or "").strip() or "未归项目"
     idx = _load_index()
-    if sha in idx:
-        return {"ok": True, "status": "duplicate", "sha256": sha}
+    proj_idx = idx.setdefault(project, {})
+    if sha in proj_idx:
+        return {"ok": True, "status": "duplicate", "sha256": sha, "project": project}
     pkg = {"received_at": datetime.datetime.now().isoformat(), **payload}
     with open(os.path.join(PAYLOAD_DIR, f"{sha}.json"), "w", encoding="utf-8") as f:
         json.dump(pkg, f, ensure_ascii=False)
-    idx[sha] = {
+    proj_idx[sha] = {
         "sha256": sha,
         "file_name": (payload.get("payload") or {}).get("file_name", ""),
         "parser": (payload.get("payload") or {}).get("parser", ""),
         "status": (payload.get("payload") or {}).get("status", ""),
         "node_name": payload.get("node_name", ""),
+        "project_id": payload.get("project_id", ""),
+        "project": project,
         "received_at": pkg["received_at"],
     }
     _save_index(idx)
-    return {"ok": True, "status": "added", "sha256": sha}
+    return {"ok": True, "status": "added", "sha256": sha, "project": project}
 
 
 @app.get("/api/cloud/list")
-def cloud_list(limit: int = 500):
+def cloud_list(project: str = "", limit: int = 500):
     idx = _load_index()
-    items = [dict(v, sha256=k) for k, v in idx.items()]
+    proj = _project_map(idx)
+    items = []
+    for pname, pidx in proj.items():
+        if project and pname != project:
+            continue
+        for k, v in pidx.items():
+            it = dict(v, sha256=k)
+            it.setdefault("project", pname)
+            items.append(it)
     items.sort(key=lambda x: x.get("received_at", ""), reverse=True)
     return {"count": len(items), "items": items[:limit]}
 
 
 @app.post("/api/cloud/search")
 def cloud_search(req: dict):
-    """云库检索（手机端/外部 Agent 读取入口）。query/top_k。"""
+    """云库检索（手机端/外部 Agent 读取入口）。query/top_k/project（v0.1.138 按项目检索）。"""
     query = (req or {}).get("query", "")
     top_k = int((req or {}).get("top_k", 5))
+    project = (req or {}).get("project", "")
     if not query:
         raise HTTPException(400, "缺少 query")
     idx = _load_index()
+    proj = _project_map(idx)
     # 轻量检索（v0.1.19 增强：大小写不敏感 + 中文二连字子串计分，手机端 AI 检索质量）
     ql = query.lower()
     qs = set(ql.split())
     grams = [ql[i:i+2] for i in range(max(len(ql) - 1, 0))] if len(ql) >= 2 else []
     scored = []
-    for sha in list(idx)[:2000]:
+    all_shas = [s for pv in proj.values() for s in list(pv)[:2000]]
+    for sha in all_shas:
         p = os.path.join(PAYLOAD_DIR, f"{sha}.json")
         if not os.path.exists(p):
             continue
@@ -384,20 +426,24 @@ async def cloud_import(file: UploadFile = File(...)):
             return stats
         idx = _load_index()
         incoming = json.loads(zf.read("index.json").decode("utf-8"))
+        # v0.1.138：按项目归组导入（旧平铺包归『未归项目』）
         for sha, info in incoming.items():
-            if sha in idx:
+            project = (info.get("project") or "").strip() or "未归项目"
+            proj_idx = idx.setdefault(project, {})
+            if sha in proj_idx:
                 stats["dup"] += 1
                 continue
             entry = f"parsed_cache/{sha}.json"
             if entry in names:
                 with open(os.path.join(PAYLOAD_DIR, f"{sha}.json"), "wb") as f:
                     f.write(zf.read(entry))
-            idx[sha] = {
+            proj_idx[sha] = {
                 "sha256": sha,
                 "file_name": info.get("file_name", ""),
                 "parser": info.get("parser", ""),
                 "status": info.get("status", ""),
                 "node_name": "fglib-import",
+                "project": project,
                 "received_at": datetime.datetime.now().isoformat(),
             }
             stats["added"] += 1

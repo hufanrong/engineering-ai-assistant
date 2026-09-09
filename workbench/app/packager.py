@@ -12,13 +12,21 @@ import datetime
 from . import config
 
 
-def export_library() -> bytes:
-    """把 data/ 下可迁移部分打成 .fglib（index.json + parsed_cache/ + relations.json + upload_log 摘要）。"""
+def export_library(project_id: str = None) -> bytes:
+    """把指定项目（默认当前项目）数据打成 .fglib。
+    v0.1.138：按项目导出，manifest 携带 project_id/project_name，导入端按项目合并。"""
+    from . import project_manager as _pm
+    proj = None
+    if project_id:
+        proj = _pm.get_project(project_id)
+    if not proj:
+        proj = _pm.get_current_project()
+    ddir = _pm.get_project_data_dir(proj["id"]) if proj else config.DATA_DIR
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        index_path = os.path.join(config.DATA_DIR, "index.json")
-        rel_path = os.path.join(config.DATA_DIR, "relations.json")
-        cache_dir = os.path.join(config.DATA_DIR, "parsed_cache")
+        index_path = os.path.join(ddir, "index.json")
+        rel_path = os.path.join(ddir, "relations.json")
+        cache_dir = os.path.join(ddir, "parsed_cache")
         if os.path.exists(index_path):
             zf.write(index_path, "index.json")
         if os.path.exists(rel_path):
@@ -33,6 +41,8 @@ def export_library() -> bytes:
             "format": "fglib-v1",
             "exported_at": datetime.datetime.now().isoformat(),
             "node": config.NODE_NAME,
+            "project_id": proj.get("id", "") if proj else "",
+            "project_name": proj.get("name", "") if proj else "",
         }
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
     return buf.getvalue()
@@ -40,6 +50,8 @@ def export_library() -> bytes:
 
 def import_library(raw: bytes) -> dict:
     """导入 .fglib：SHA256 去重合并进本地库，随后重建关联图谱。
+    v0.1.138：按包内项目合并——包声明项目在本机存在则并入该项目，
+    不存在则自动创建同名项目再并入（多电脑并库场景）；不同项目不合并。
     返回合并统计：{index_added, index_dup, caches_added, cache_conflict, relations_merged}"""
     stats = {"index_added": 0, "index_dup": 0, "caches_added": 0,
              "cache_conflict": 0, "relations_merged": False, "error": None}
@@ -54,9 +66,31 @@ def import_library(raw: bytes) -> dict:
             stats["error"] = "库包格式不兼容"
             return stats
 
+        # v0.1.138：确定目标项目（按包声明项目名；本机无则自动创建）
+        from . import project_manager as _pm
+        target_proj = None
+        pname = (manifest.get("project_name") or "").strip()
+        for p in _pm.list_projects():
+            if p.get("name") == pname:
+                target_proj = p
+                break
+        if not target_proj:
+            if pname:
+                try:
+                    created = _pm.create_project(pname, description="多电脑并库自动创建")
+                    if created.get("ok"):
+                        target_proj = created.get("project")
+                except Exception:  # noqa: BLE001
+                    target_proj = None
+        if target_proj:
+            stats["project"] = target_proj.get("name", "")
+            ddir = _pm.get_project_data_dir(target_proj["id"])
+        else:
+            ddir = config.DATA_DIR
+
         # 1) 合并 index.json
         idx = {}
-        idx_path = os.path.join(config.DATA_DIR, "index.json")
+        idx_path = os.path.join(ddir, "index.json")
         if os.path.exists(idx_path):
             with open(idx_path, encoding="utf-8") as f:
                 idx = json.load(f)
@@ -82,12 +116,12 @@ def import_library(raw: bytes) -> dict:
                 continue
             idx[sha] = info
             stats["index_added"] += 1
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+        os.makedirs(ddir, exist_ok=True)
         with open(idx_path, "w", encoding="utf-8") as f:
             json.dump(idx, f, ensure_ascii=False, indent=1)
 
         # 2) 合并 parsed_cache（同 sha 内容一致即跳过；不一致以导入库为准覆盖，旧版备份 .conflict.json）
-        cache_dir = os.path.join(config.DATA_DIR, "parsed_cache")
+        cache_dir = os.path.join(ddir, "parsed_cache")
         os.makedirs(cache_dir, exist_ok=True)
         for fn in sorted(n for n in names if n.startswith("parsed_cache/") and n.endswith(".json")):
             content = zf.read(fn)
@@ -107,7 +141,7 @@ def import_library(raw: bytes) -> dict:
             stats["caches_added"] += 1
 
         # 3) relations.json 若本地缺失或更旧 → 合并后重建（幂等）
-        rel_path = os.path.join(config.DATA_DIR, "relations.json")
+        rel_path = os.path.join(ddir, "relations.json")
         if "relations.json" in names:
             rel = json.loads(zf.read("relations.json").decode("utf-8"))
             rel["stats"]["merged_from"] = manifest.get("node", "unknown")

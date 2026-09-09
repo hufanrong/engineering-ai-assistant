@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.137")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.138")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -393,9 +393,11 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 # 否则同名不同版本永远无法匹配成组）
                 try:
                     from . import version_manager
+                    _dv, _dd, _mt = version_manager.extract_doc_meta(res.structure, saved)
                     version_manager.record_version(name, res.sha256,
                                                     ts=datetime.datetime.now().isoformat(),
-                                                    size=len(raw), status=res.status)
+                                                    size=len(raw), status=res.status,
+                                                    doc_version=_dv, doc_date=_dd, mtime=_mt)
                 except Exception:  # noqa: BLE001
                     pass
             # 登记索引（供去重/失败管理/统计共用，v0.1.22）

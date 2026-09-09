@@ -134,9 +134,11 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     from . import version_manager
                     import os as _os
                     _fsize = _os.path.getsize(path) if _os.path.exists(path) else 0
+                    _dv, _dd, _mt = version_manager.extract_doc_meta(res.structure, path)
                     version_manager.record_version(res.file_name, res.sha256,
                                                     ts=datetime.datetime.now().isoformat(),
-                                                    size=_fsize, status=res.status)
+                                                    size=_fsize, status=res.status,
+                                                    doc_version=_dv, doc_date=_dd, mtime=_mt)
                 except Exception:  # noqa: BLE001
                     pass
                 # v0.1.34：群聊文件自动解析关联（检测到聊天记录则解析消息+提取位号/车间/事项）

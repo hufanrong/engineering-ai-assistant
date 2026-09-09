@@ -8,31 +8,92 @@ import re
 
 from . import config
 
-_ASSIGN_FILE = None
+_LEGACY_FILE = None      # 全局旧文件路径（迁移用）
+_MIGRATED = False
 
 
-def _ensure():
-    global _ASSIGN_FILE
-    if _ASSIGN_FILE is None:
-        _ASSIGN_FILE = os.path.join(config.DATA_DIR, "workshop_assign.json")
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+def _assign_file() -> str:
+    """v0.1.138：车间归属按项目隔离——写入当前项目数据目录，
+    未选择项目时回退全局目录（兼容单项目/迁移期）。"""
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if cur:
+            pdir = _pm.get_project_data_dir(cur["id"])
+            os.makedirs(pdir, exist_ok=True)
+            return os.path.join(pdir, "workshop_assign.json")
+    except Exception:  # noqa: BLE001
+        pass
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    return os.path.join(config.DATA_DIR, "workshop_assign.json")
+
+
+def _legacy_file() -> str:
+    global _LEGACY_FILE
+    if _LEGACY_FILE is None:
+        _LEGACY_FILE = os.path.join(config.DATA_DIR, "workshop_assign.json")
+    return _LEGACY_FILE
+
+
+def _migrate_legacy():
+    """一次性迁移：旧全局 workshop_assign.json 按 sha 匹配各项目 index，
+    把记录迁入对应项目目录；匹配不到的留在全局备份。"""
+    global _MIGRATED
+    if _MIGRATED:
+        return
+    _MIGRATED = True
+    legacy = _legacy_file()
+    if not os.path.exists(legacy):
+        return
+    try:
+        with open(legacy, encoding="utf-8") as f:
+            legacy_map = json.load(f)
+        if not isinstance(legacy_map, dict) or not legacy_map:
+            return
+        from . import project_manager as _pm
+        moved = 0
+        for proj in _pm.list_projects():
+            pdir = _pm.get_project_data_dir(proj["id"])
+            idx_path = os.path.join(pdir, "index.json")
+            if not os.path.exists(idx_path):
+                continue
+            with open(idx_path, encoding="utf-8") as f:
+                idx = json.load(f)
+            target = {}
+            tpath = os.path.join(pdir, "workshop_assign.json")
+            if os.path.exists(tpath):
+                with open(tpath, encoding="utf-8") as f:
+                    target = json.load(f)
+            for sha, rec in legacy_map.items():
+                if sha in idx and sha not in target:
+                    target[sha] = rec
+                    moved += 1
+            if target:
+                with open(tpath, "w", encoding="utf-8") as f:
+                    json.dump(target, f, ensure_ascii=False, indent=1)
+        # 迁移后全局文件改名备份（保留可追溯）
+        if moved > 0 or True:
+            os.rename(legacy, legacy + ".migrated_bak")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _load() -> dict:
-    _ensure()
-    if os.path.exists(_ASSIGN_FILE):
+    _migrate_legacy()
+    f = _assign_file()
+    if os.path.exists(f):
         try:
-            with open(_ASSIGN_FILE, encoding="utf-8") as f:
-                return json.load(f)
+            with open(f, encoding="utf-8") as fh:
+                return json.load(fh)
         except Exception:  # noqa: BLE001
             return {}
     return {}
 
 
 def _save(m: dict):
-    _ensure()
-    with open(_ASSIGN_FILE, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=1)
+    f = _assign_file()
+    with open(f, "w", encoding="utf-8") as fh:
+        json.dump(m, fh, ensure_ascii=False, indent=1)
 
 
 _WORKSHOP_RE = re.compile(r"(\d{1,2}|[一二三四五六七八九十]+)\s*号?\s*车间")

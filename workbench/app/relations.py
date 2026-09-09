@@ -58,9 +58,10 @@ CONFIRM_FILE = None  # v0.1.23 人工确认持久化
 
 def _ensure_confirm():
     global CONFIRM_FILE
-    if CONFIRM_FILE is None:
-        CONFIRM_FILE = os.path.join(config.DATA_DIR, "confirmed_relations.json")
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+    # v0.1.138：人工确认记录随项目隔离（与车间归属一致）
+    ddir = _get_data_dir()
+    CONFIRM_FILE = os.path.join(ddir, "confirmed_relations.json")
+    os.makedirs(ddir, exist_ok=True)
 
 
 def _load_confirmed() -> dict:

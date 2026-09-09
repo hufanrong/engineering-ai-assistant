@@ -38,13 +38,25 @@ def _ensure():
 
 
 def enqueue(parse_result) -> str:
-    """把一个解析结果打包进上传队列，返回包文件名（不含扩展）。"""
+    """把一个解析结果打包进上传队列，返回包文件名（不含扩展）。
+    v0.1.138：payload 附带 project_id/project_name，云端按项目合并（同项目合并，不同项目不合并）。"""
     _ensure()
+    proj_id, proj_name = "", ""
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if cur:
+            proj_id = cur.get("id", "")
+            proj_name = cur.get("name", "")
+    except Exception:  # noqa: BLE001
+        pass
     key = f"{parse_result.sha256[:16]}_{int(time.time()*1000)}"
     pkg = {
         "schema": "fangong-parse-payload-v1",
         "node_name": config.NODE_NAME,
         "node_id": _node_id(),
+        "project_id": proj_id,
+        "project_name": proj_name,
         "created_at": datetime.datetime.now().isoformat(),
         "payload": {
             "file_name": parse_result.file_name,

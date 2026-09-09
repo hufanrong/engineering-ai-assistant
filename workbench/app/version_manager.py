@@ -11,6 +11,7 @@
 #   {file_name: [{sha256, status, ts, source_node, size, is_latest, note}]}
 
 import os
+import re
 import json
 import datetime
 
@@ -41,13 +42,19 @@ def _norm_name(name: str) -> str:
 
 def record_version(file_name: str, sha256: str, ts: str = "",
                     source_node: str = "", size: int = 0,
-                    status: str = "parsed", note: str = "") -> dict:
+                    status: str = "parsed", note: str = "",
+                    doc_version: str = "", doc_date: str = "",
+                    mtime: str = "") -> dict:
     """登记一个文件版本。同一文件名不同 SHA256 → 多版本；同 SHA256 更新元数据。
-    自动按 ts 判断最新版；ts 缺失或相同 → 标记 conflict 待人工确认。
+    v0.1.138：最新版判定优先级 = CAD 标题栏/命名版本号 > 标题栏/命名日期 > 文件修改时间 > 入库时间；
+    不再以入库时间为准。关键维度相同才标记 conflict 待人工确认。
     返回 {action: added|updated|duplicate, is_latest, conflict}。"""
     fname = _norm_name(file_name)
     if not fname or not sha256:
         return {"action": "error", "is_latest": False, "conflict": False}
+    dv = _parse_doc_version(doc_version)
+    dd = _parse_doc_date(doc_date) or _parse_name_date(fname)
+    mt = _parse_ts(mtime)
     m = _load()
     versions = m.setdefault(fname, [])
     existing = next((v for v in versions if v["sha256"] == sha256), None)
@@ -60,6 +67,12 @@ def record_version(file_name: str, sha256: str, ts: str = "",
         if size:
             existing["size"] = size
         existing["status"] = status
+        existing["doc_version_raw"] = doc_version
+        existing["doc_version_num"] = dv
+        existing["doc_date"] = doc_date
+        existing["doc_date_ts"] = dd
+        existing["mtime"] = mtime
+        existing["mtime_ts"] = mt
         if note:
             existing["note"] = note
         _save(m)
@@ -75,6 +88,12 @@ def record_version(file_name: str, sha256: str, ts: str = "",
         "size": size,
         "is_latest": False,
         "note": note,
+        "doc_version_raw": doc_version,
+        "doc_version_num": dv,
+        "doc_date": doc_date,
+        "doc_date_ts": dd,
+        "mtime": mtime,
+        "mtime_ts": mt,
     }
     versions.append(entry)
     conflict = _recompute_latest(fname, m)
@@ -82,36 +101,138 @@ def record_version(file_name: str, sha256: str, ts: str = "",
     return {"action": "added", "is_latest": entry.get("is_latest", False), "conflict": conflict}
 
 
+# ---------- v0.1.138：版本/日期解析辅助 ----------
+_VER_R_RE = re.compile(r"[Rr]\s*(\d+)")
+_VER_REV_RE = re.compile(r"[Rr][Ee][Vv]\.?\s*([A-Za-z0-9]+)")
+_VER_V_RE = re.compile(r"(?:[Vv]|第|版本)[^\d]{0,2}(\d+(?:\.\d+)?)")
+_DATE_RE = re.compile(r"(\d{4})[._/-](\d{1,2})[._/-](\d{1,2})")
+
+
+def _parse_doc_version(raw) -> float:
+    """CAD 标题栏/文件名版本号数值化：R0→0、Rev A→0、V1.2→1.2、无→None。"""
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    m = _VER_R_RE.search(s)
+    if m:
+        return float(m.group(1))
+    m = _VER_REV_RE.search(s)
+    if m:
+        g = m.group(1).strip()
+        if g.isdigit():
+            return float(g)
+        if len(g) == 1 and g.isalpha():
+            return float(ord(g.upper()) - ord("A"))
+    m = _VER_V_RE.search(s)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"\d+(?:\.\d+)?", s)
+    if m:
+        return float(m.group(0))
+    return None
+
+
+def _parse_doc_date(raw) -> str:
+    """标题栏日期多种格式 → 归一化 ISO；无法解析返回空。"""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    m = _DATE_RE.search(s)
+    if m:
+        try:
+            return datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except Exception:  # noqa: BLE001
+            return ""
+    m = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?", s)
+    if m:
+        try:
+            day = int(m.group(3) or 1)
+            return datetime.datetime(int(m.group(1)), int(m.group(2)), day).isoformat()
+        except Exception:  # noqa: BLE001
+            return ""
+    return ""
+
+
+def _parse_name_date(name: str) -> str:
+    """文件名中的日期（如 0101 锂辉石库工艺图（2025.06.05）-R0.dwg → 2025-06-05）。"""
+    m = _DATE_RE.search(name or "")
+    if m:
+        try:
+            return datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except Exception:  # noqa: BLE001
+            return ""
+    return ""
+
+
+def extract_doc_meta(structure, path=None):
+    """从解析结果提取版本判定元数据：(doc_version, doc_date, mtime_iso)。
+    CAD 标题栏版本/日期优先（title_block），文件修改时间兜底。"""
+    dv = dd = ""
+    if isinstance(structure, dict):
+        tb = (structure.get("spatial") or {}).get("title_block") or {}
+        dv = str(tb.get("版本", "") or tb.get("rev", "") or tb.get("version", "") or "").strip()
+        dd = str(tb.get("日期", "") or "").strip()
+    mt = ""
+    if path and os.path.exists(path):
+        try:
+            mt = datetime.datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
+        except Exception:  # noqa: BLE001
+            pass
+    return dv, dd, mt
+
+
+def _parse_ts(v) -> float:
+    """ISO 时间字符串 → 数值（用于排序），失败返回 0。"""
+    if not v:
+        return 0.0
+    try:
+        dt = datetime.datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return dt.timestamp()
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _version_sort_key(v: dict):
+    """v0.1.138 排序键：版本号 → 文档日期 → 文件修改时间 → 入库时间。"""
+    return (
+        1 if v.get("doc_version_num") is not None else 0,
+        v.get("doc_version_num") or -1.0,
+        1 if v.get("doc_date_ts") else 0,
+        v.get("doc_date_ts") or 0.0,
+        v.get("mtime_ts") or 0.0,
+        _parse_ts(v.get("ts")) or 0.0,
+    )
+
+
 def _recompute_latest(fname: str, m: dict) -> bool:
-    """重新计算最新版。按 ts 降序，ts 相同或缺失 → conflict。返回是否有冲突。"""
+    """重新计算最新版。v0.1.138 优先级：CAD 标题栏/命名版本号 > 标题栏/命名日期 > 文件修改时间 > 入库时间。
+    多个版本关键维度相同 → conflict 待人工确认。返回是否有冲突。"""
     versions = m.get(fname, [])
     if len(versions) <= 1:
         for v in versions:
             v["is_latest"] = True
         return False
-    # 按 ts 排序（有 ts 的优先）
-    with_ts = [v for v in versions if v.get("ts")]
-    without_ts = [v for v in versions if not v.get("ts")]
-    if not with_ts:
-        # 全部无 ts → 冲突，第一个暂标 latest
-        for v in versions:
-            v["is_latest"] = False
-        versions[0]["is_latest"] = True
-        versions[0]["note"] = (versions[0].get("note", "") + "；无时间戳，待人工确认最新版").strip("；")
-        return True
-    with_ts.sort(key=lambda v: v["ts"], reverse=True)
-    latest_ts = with_ts[0]["ts"]
-    # 检查是否有多个版本 ts 相同
-    same_ts = [v for v in with_ts if v["ts"] == latest_ts]
-    conflict = len(same_ts) > 1
+    # 排序：最新在前
+    ordered = sorted(versions, key=_version_sort_key, reverse=True)
     for v in versions:
         v["is_latest"] = False
-    if conflict:
-        same_ts[0]["is_latest"] = True
-        same_ts[0]["note"] = (same_ts[0].get("note", "") + "；时间戳相同，待人工确认最新版").strip("；")
-    else:
-        with_ts[0]["is_latest"] = True
-    return conflict
+    top = ordered[0]
+    top["is_latest"] = True
+    # 冲突判定：与第一名在所有判定维度上完全相同 → 无法自动分辨
+    def _key_dim(v):
+        return (v.get("doc_version_num"), v.get("doc_date_ts"), v.get("mtime_ts"))
+    for v in ordered[1:]:
+        if _key_dim(v) == _key_dim(top) and v.get("doc_version_num") is None:
+            # 都没有版本号、日期、mtime 可分辨（只有入库时间不同）→ 人工确认
+            top["note"] = (top.get("note", "") + "；时间维度无法区分，待人工确认最新版").strip("；")
+            v["note"] = (v.get("note", "") + "；时间维度无法区分，待人工确认最新版").strip("；")
+            return True
+        if _key_dim(v) == _key_dim(top) and v.get("doc_version_num") is not None:
+            # 版本号相同但内容不同（同一版本多个文件）→ 按日期/mtime 已排过，仍相同则人工确认
+            if v.get("doc_date_ts") == top.get("doc_date_ts") and v.get("mtime_ts") == top.get("mtime_ts"):
+                top["note"] = (top.get("note", "") + "；版本/日期相同，待人工确认最新版").strip("；")
+                return True
+    return False
 
 
 def get_versions(file_name: str) -> list:
@@ -119,7 +240,10 @@ def get_versions(file_name: str) -> list:
     fname = _norm_name(file_name)
     m = _load()
     versions = m.get(fname, [])
-    return sorted(versions, key=lambda v: (not v.get("is_latest", False), v.get("ts", "")), reverse=True)
+    # v0.1.138：修复排序方向（原 reverse=True 把最新版排到最后）
+    return sorted(versions,
+                  key=lambda v: (0 if v.get("is_latest") else 1,
+                                 -(_parse_ts(v.get("ts")) or 0.0)))
 
 
 def list_multi_version() -> list:
