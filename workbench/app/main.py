@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.138")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.139")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -398,6 +398,14 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                                                     ts=datetime.datetime.now().isoformat(),
                                                     size=len(raw), status=res.status,
                                                     doc_version=_dv, doc_date=_dd, mtime=_mt)
+                except Exception:  # noqa: BLE001
+                    pass
+                # v0.1.139：网页上传同样自动归车间（与文件夹扫描一致），
+                # 未识别/多候选文件进入待确认（workshop=None）
+                try:
+                    from . import workshop_assign as _wa2
+                    _wa2.assign_workshop(res.sha256, name, res.text or "",
+                                         res.structure or {})
                 except Exception:  # noqa: BLE001
                     pass
             # 登记索引（供去重/失败管理/统计共用，v0.1.22）
@@ -3219,10 +3227,20 @@ def switch_project(data: dict):
 
 @app.get("/api/projects/current")
 def get_current_project():
-    """获取当前项目。"""
+    """获取当前项目。
+    v0.1.139：返回前实时重算统计（file_count/workshop_count/device_count），
+    并附带 pending_count（待人工确认的未归车间文件数），保证打开页面即最新、无需等上传触发。"""
     from . import project_manager as _pm
+    _refresh_project_stats()
     current = _pm.get_current_project()
     if current:
+        # 待确认 = 未归车间文件数（人工确认区域口径，与资源管理待确认列表一致）
+        try:
+            from . import workshop_assign as _wa
+            _bw = _wa.list_by_workshop()
+            current["pending_count"] = len(_bw.get("未归车间", [])) if isinstance(_bw, dict) else 0
+        except Exception:  # noqa: BLE001
+            current["pending_count"] = 0
         return {"ok": True, "project": current}
     return {"ok": False, "error": "当前未选择项目，请先新建或选择项目"}
 
@@ -4472,7 +4490,9 @@ def _refresh_project_stats():
         # 车间/设备数取真实数据源（车间登记表/关联图谱），保证卡片统计同步
         try:
             from . import workshop_assign as _wa
-            wcount = len(_wa.list_by_workshop())
+            # v0.1.139：车间数排除「未归车间」分组（避免待确认文件把车间数虚高）
+            _bw = _wa.list_by_workshop()
+            wcount = len([k for k in (_bw or {}) if k != "未归车间"])
         except Exception:  # noqa: BLE001
             wcount = None
         try:
@@ -4489,8 +4509,29 @@ def _refresh_project_stats():
 import io as _io
 from urllib.parse import quote as _quote
 
-@app.get("/api/files")
-def frontend_files(workshop: str = "", status: str = "", q: str = "", limit: int = 500):
+@app.get("/api/files/pending")
+def pending_files():
+    """v0.1.139：待人工确认文件（车间识别未唯一/未识别）。
+    数据源 = 车间登记表 workshop 为空的记录，含候选车间供人工选择。"""
+    from . import workshop_assign as _wa
+    m = _wa._load()
+    items = []
+    for sha, rec in m.items():
+        if rec.get("workshop"):
+            continue
+        items.append({
+            "sha256": sha,
+            "file_name": rec.get("file_name", ""),
+            "workshop": rec.get("workshop") or "",
+            "confidence": rec.get("confidence", 0),
+            "candidates": rec.get("candidates", []) or [],
+            "ts": rec.get("ts", ""),
+        })
+    items.sort(key=lambda x: x.get("ts", ""), reverse=True)
+    return {"ok": True, "count": len(items), "items": items}
+
+
+
     """文件列表：按车间/状态/关键词过滤（前端资源管理模块）。"""
     from . import workshop_assign as _wa
     raw_items = _frontend_index_items()

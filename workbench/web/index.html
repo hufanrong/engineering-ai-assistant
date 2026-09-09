@@ -700,7 +700,7 @@ function loadProjects() {
             allProjects.forEach(function(p) {
                 var opt = document.createElement('option');
                 opt.value = p.id;
-                opt.textContent = p.name + (p.file_count ? ' (' + p.file_count + '文件)' : '');
+                opt.textContent = p.name;   // v0.1.139：项目名后不再附加文件数
                 select.appendChild(opt);
             });
             // 加载当前项目（v0.1.132：无论是否有当前项目都刷新按钮状态，
@@ -979,6 +979,7 @@ function loadResourceData() {
                 document.getElementById('statFiles').textContent = data.project.file_count || 0;
                 document.getElementById('statWorkshops').textContent = data.project.workshop_count || 0;
                 document.getElementById('statDevices').textContent = data.project.device_count || 0;
+                document.getElementById('statPending').textContent = data.project.pending_count || 0;
             }
         });
     // 加载车间
@@ -1066,31 +1067,83 @@ function closeWorkshopFiles() {
 }
 
 function loadPendingFiles() {
-    // 待确认文件（车间识别不唯一的）
+    // v0.1.139：待确认文件（车间识别未唯一/未识别）——真实拉取 /api/files/pending，
+    // 不再使用模拟空数据；确认/修改走自建弹窗（WebView 兼容，不用 prompt）
     var body = document.getElementById('pendingBody');
     var empty = document.getElementById('pendingEmpty');
     var table = document.getElementById('pendingTable');
     var count = document.getElementById('pendingCount');
-    
-    // 模拟数据（实际从API获取）
-    var pending = [];
-    count.textContent = pending.length;
-    if (pending.length === 0) {
-        empty.style.display = 'block';
-        table.style.display = 'none';
-    } else {
-        empty.style.display = 'none';
-        table.style.display = '';
-        body.innerHTML = '';
-        pending.forEach(function(f) {
-            var tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + f.file_name + '</td><td>' + f.workshop + '</td>' +
-                '<td><span class="badge badge-warning">' + f.confidence + '</span></td>' +
-                '<td>' + f.candidates.join(', ') + '</td>' +
-                '<td><button class="btn btn-primary btn-sm">确认</button> <button class="btn btn-default btn-sm">修改</button></td>';
-            body.appendChild(tr);
-        });
-    }
+    fetch('/api/files/pending')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var pending = (data && data.items) || [];
+            count.textContent = pending.length;
+            if (pending.length === 0) {
+                empty.style.display = 'block';
+                table.style.display = 'none';
+            } else {
+                empty.style.display = 'none';
+                table.style.display = '';
+                body.innerHTML = '';
+                pending.forEach(function(f) {
+                    var tr = document.createElement('tr');
+                    var cands = (f.candidates && f.candidates.length) ? f.candidates.join('、') : '—';
+                    var safename = String(f.file_name || '').replace(/'/g, '');
+                    tr.innerHTML = '<td>' + (f.file_name || '') + '</td><td>未识别</td>' +
+                        '<td><span class="badge badge-warning">' + (f.confidence || 0) + '</span></td>' +
+                        '<td>' + cands + '</td>' +
+                        '<td><button class="btn btn-primary btn-sm" onclick="openPendingAssign(\'' + f.sha256 + '\',\'' + safename + '\',\'' + cands.replace(/'/g, '') + '\')">确认/修改</button></td>';
+                    body.appendChild(tr);
+                });
+            }
+        })
+        .catch(function() { count.textContent = 0; });
+}
+
+// v0.1.139：待确认车间指派弹窗（WebView 兼容）
+var pendingAssignSha = '';
+function openPendingAssign(sha, name, cands) {
+    pendingAssignSha = sha;
+    document.getElementById('pendingAssignTitle').textContent = '确认车间：' + name;
+    var box = document.getElementById('pendingAssignCands');
+    box.innerHTML = '';
+    (cands || '').split('、').forEach(function(c) {
+        c = c.trim();
+        if (!c) return;
+        var b = document.createElement('button');
+        b.className = 'btn btn-default btn-sm';
+        b.style.cssText = 'margin:4px 6px 4px 0;border-radius:6px';
+        b.textContent = c;
+        b.onclick = function() { document.getElementById('pendingAssignInput').value = c; };
+        box.appendChild(b);
+    });
+    document.getElementById('pendingAssignInput').value = '';
+    document.getElementById('pendingAssignModal').style.display = 'flex';
+}
+function closePendingAssignDialog() {
+    document.getElementById('pendingAssignModal').style.display = 'none';
+}
+function confirmPendingAssign() {
+    var ws = document.getElementById('pendingAssignInput').value.trim();
+    if (!ws) { alert('请输入或选择车间名称'); return; }
+    fetch('/api/workshop/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sha: pendingAssignSha, workshop: ws })
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            closePendingAssignDialog();
+            if (d && d.ok) {
+                alert('已确认归入「' + ws + '」');
+                loadPendingFiles();
+                loadWorkshops();
+                loadResourceData();
+            } else {
+                alert('确认失败，请重试');
+            }
+        })
+        .catch(function() { alert('确认失败，请检查服务'); });
 }
 
 // v0.1.134：失败/待处理文件管理（真实拉取 + 批量重试/删除 + 卡死自动恢复提示）
@@ -2511,6 +2564,21 @@ document.addEventListener('DOMContentLoaded', function() {
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
       <button class="btn" onclick="closeRenameWorkshopDialog()">取消</button>
       <button class="btn btn-primary" id="renameWorkshopOk" onclick="confirmRenameWorkshop()" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- v0.1.139：待确认车间指派弹窗（WebView 兼容，替代 prompt） -->
+<div id="pendingAssignModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center" onclick="if(event.target===this)closePendingAssignDialog()">
+  <div style="background:#fff;border-radius:12px;padding:20px;width:92%;max-width:440px;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
+    <div style="font-size:16px;font-weight:700;color:#1E5AA8;margin-bottom:10px" id="pendingAssignTitle">🏭 确认车间</div>
+    <div style="font-size:13px;color:#666;margin-bottom:8px">候选车间（点击填入）：</div>
+    <div id="pendingAssignCands" style="margin-bottom:8px"></div>
+    <div style="font-size:13px;color:#666;margin-bottom:6px">或输入车间名称：</div>
+    <input class="input" id="pendingAssignInput" style="width:100%;box-sizing:border-box" placeholder="输入车间名称">
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn" onclick="closePendingAssignDialog()">取消</button>
+      <button class="btn btn-primary" onclick="confirmPendingAssign()" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">确认</button>
     </div>
   </div>
 </div>

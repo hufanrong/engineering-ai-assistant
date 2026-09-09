@@ -96,25 +96,57 @@ def _save(m: dict):
         json.dump(m, fh, ensure_ascii=False, indent=1)
 
 
-_WORKSHOP_RE = re.compile(r"(\d{1,2}|[一二三四五六七八九十]+)\s*号?\s*车间")
+# v0.1.139：车间识别同时支持编号车间（2号车间/二号车间）与命名车间（磨浮车间/焙烧车间），
+# 命名车间直接从资料文本提取，不再漏识别（以项目资料为准，不能确认时留人工）
+_WORKSHOP_RE = re.compile(
+    r"(?P<num>\d{1,2}|[一二三四五六七八九十]+)\s*号?\s*车间"
+    r"|(?P<name>[\u4e00-\u9fa5]{2,8})车间"
+)
 _CN = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5",
        "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"}
+# v0.1.139：命名车间干扰前缀清洗（如「今日磨浮车间」→ 磨浮车间）
+_BAD_PREFIX = ("今日", "本次", "当天", "现在", "现场", "项目", "整个", "全部",
+               "有关", "相关", "各个", "以及", "本", "该", "在", "和", "与",
+               "及", "对", "将", "已", "正在", "进行", "使用", "安装")
+
+
+def _clean_name(name: str):
+    """去掉命名车间前的干扰前缀，返回核心车间名（<2 字返回 None）。"""
+    for b in _BAD_PREFIX:
+        if name.startswith(b):
+            name = name[len(b):]
+            break
+    if len(name) < 2:
+        return None
+    return name
 
 
 def _norm(raw: str):
+    """文件名/标题识别车间：编号车间归一化（2号车间），命名车间保留原名（磨浮车间）。"""
     m = _WORKSHOP_RE.search(raw or "")
     if not m:
         return None
-    n = _CN.get(m.group(1), m.group(1))
-    return f"{n}号车间"
+    if m.group("num"):
+        n = _CN.get(m.group("num"), m.group("num"))
+        return f"{n}号车间"
+    name = _clean_name(m.group("name"))
+    if not name or "车间" in name or "车" in name:
+        return None
+    return f"{name}车间"
 
 
 def _from_text(text: str, limit=5):
     """正文关键词提取车间（取前 N 个去重）。"""
     out = []
     for m in _WORKSHOP_RE.finditer(text or ""):
-        n = _CN.get(m.group(1), m.group(1))
-        w = f"{n}号车间"
+        if m.group("num"):
+            n = _CN.get(m.group("num"), m.group("num"))
+            w = f"{n}号车间"
+        else:
+            name = _clean_name(m.group("name"))
+            if not name or "车间" in name or "车" in name:
+                continue
+            w = f"{name}车间"
         if w not in out:
             out.append(w)
         if len(out) >= limit:
