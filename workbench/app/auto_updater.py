@@ -40,6 +40,57 @@ STAGING_DIR = os.path.join(WORKSPACE_ROOT, "updates", "staging")
 PENDING_FILE = os.path.join(WORKSPACE_ROOT, "updates", "pending_update.json")
 APPLY_LOG = os.path.join(WORKSPACE_ROOT, "updates", "apply.log")
 
+
+def _safe_copy(src: str, dst: str, retries: int = 3) -> str:
+    """Windows 安全复制：目标存在先清只读位并删除，PermissionError（占用/只读）重试。
+    成功返回 None，失败返回错误描述。"""
+    last = None
+    for i in range(retries):
+        try:
+            if os.path.exists(dst):
+                try:
+                    os.chmod(dst, 0o666)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    os.remove(dst)
+                except Exception:  # noqa: BLE001
+                    pass
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+            return None
+        except PermissionError as e:
+            last = e
+            time.sleep(0.4 * (i + 1))
+        except OSError as e:
+            last = e
+            time.sleep(0.4 * (i + 1))
+    return f"{dst}: {last}"
+
+
+def _fresh_staging_dir() -> str:
+    """获取可写 staging 目录。v0.1.142：默认 updates/staging 清理失败
+    （旧残留文件被占用/只读）时，改用带时间戳的唯一目录，保证全新写入，
+    避免「Permission denied: updates\\staging\\app\\xxx.py」。"""
+    base = STAGING_DIR
+    for _ in range(3):
+        if os.path.isdir(base):
+            shutil.rmtree(base, ignore_errors=True)
+        try:
+            os.makedirs(base, exist_ok=True)
+            # 验证可写
+            probe = os.path.join(base, ".probe")
+            with open(probe, "w", encoding="utf-8") as _f:
+                _f.write("ok")
+            os.remove(probe)
+            return base
+        except Exception:  # noqa: BLE001
+            base = os.path.join(
+                os.path.dirname(STAGING_DIR),
+                "staging_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            )
+    return STAGING_DIR
+
 # 需要保留的数据目录（更新时不覆盖）
 PRESERVE_DIRS = [
     "data",
@@ -324,19 +375,19 @@ def update_via_download() -> Dict:
             ]
             
             copied_count = 0
-            
+            copy_errors = []
+
             # v0.1.134（P2 修复）：所有文件先复制到 staging 暂存目录，
             # 由独立 apply 进程在停服后原子替换，避免运行中覆盖 Permission denied
-            if os.path.isdir(STAGING_DIR):
-                shutil.rmtree(STAGING_DIR, ignore_errors=True)
-            os.makedirs(STAGING_DIR, exist_ok=True)
-            
+            # v0.1.142：默认目录清理失败（残留被占用/只读）时自动换唯一目录，并全部走 _safe_copy
+            staging_dir = _fresh_staging_dir()
+
             # 1) 同步目录 → staging
             for dname in SYNC_DIRS:
                 src_dir = os.path.join(workbench_root, dname)
                 if not os.path.isdir(src_dir):
                     continue
-                dst_dir = os.path.join(STAGING_DIR, dname)
+                dst_dir = os.path.join(staging_dir, dname)
                 os.makedirs(dst_dir, exist_ok=True)
                 for root, dirs, files in os.walk(src_dir):
                     rel_path = os.path.relpath(root, src_dir)
@@ -357,17 +408,36 @@ def update_via_download() -> Dict:
                             continue
                         src_file = os.path.join(root, f)
                         dst_file = os.path.join(target_dir, f)
-                        shutil.copy2(src_file, dst_file)
-                        copied_count += 1
-            
+                        err = _safe_copy(src_file, dst_file)
+                        if err:
+                            copy_errors.append(err)
+                        else:
+                            copied_count += 1
+
             # 2) 同步根文件 → staging（含新增 install_optional.bat / open_or_start.bat）
             root_extra = ["install_optional.bat", "open_or_start.bat", "run_workbench.bat"]
             for fname in list(SYNC_FILES) + root_extra:
                 src_file = os.path.join(workbench_root, fname)
                 if os.path.isfile(src_file):
-                    dst_file = os.path.join(STAGING_DIR, fname)
-                    shutil.copy2(src_file, dst_file)
-                    copied_count += 1
+                    dst_file = os.path.join(staging_dir, fname)
+                    err = _safe_copy(src_file, dst_file)
+                    if err:
+                        copy_errors.append(err)
+                    else:
+                        copied_count += 1
+
+            if copy_errors:
+                # 有文件无法写入（被占用/只读/杀毒锁定）→ 明确告知用户，不进入调度
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                return {
+                    "ok": False,
+                    "method": "download",
+                    "error": "暂存失败：以下文件无法写入（可能被其他程序占用或设为只读）：\n"
+                             + "\n".join(copy_errors[:10])
+                             + "\n\n请关闭杀毒软件/编辑器/OneDrive 同步后重试，或在 Windows 资源管理器中取消文件只读属性。",
+                    "suggestion": "也可手动下载安装包覆盖更新（data 目录不受影响）。",
+                }
+            staging_dir = staging_dir  # noqa: PLW0127  （供下方返回引用）
             
             # 3) staging 内保护本地配置（config.py → config.local.py 机制）
             _preserve_local_config()
@@ -380,6 +450,7 @@ def update_via_download() -> Dict:
                 "method": "download",
                 "copied_files": copied_count,
                 "staged": True,
+                "staging": staging_dir,
                 "message": f"已下载并暂存 {copied_count} 个程序文件，将自动停服替换并重启",
             }
         finally:
@@ -568,10 +639,18 @@ import os, sys, json, time, shutil, subprocess, datetime
 
 WS = {ws!r}
 PORT = {port!r}
-STAGING = os.path.join(WS, "updates", "staging")
 PENDING = os.path.join(WS, "updates", "pending_update.json")
 LOG = os.path.join(WS, "updates", "apply.log")
 BACKUP_DIR = os.path.join(WS, "updates", "backups")
+
+# v0.1.142：staging 目录从 pending_update.json 读取（可能为带时间戳的唯一目录），
+# 旧版本 PENDING 无 staging 字段时回退默认目录
+try:
+    with open(PENDING, encoding="utf-8") as _f:
+        _pending = json.load(_f)
+    STAGING = _pending.get("staging") or os.path.join(WS, "updates", "staging")
+except Exception:
+    STAGING = os.path.join(WS, "updates", "staging")
 
 
 def log(msg):
@@ -614,6 +693,30 @@ def kill_tree(pid):
         return False
 
 
+def force_replace(src, dst, retries=4):
+    # v0.1.142：Windows 替换文件——清只读位 + 重试（停服后句柄延迟释放/杀毒锁定）。
+    # 注意：此模板为原始三引号字符串，函数内部禁止出现连续三个双引号。
+    last = None
+    for i in range(retries):
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.exists(dst):
+                try:
+                    os.chmod(dst, 0o666)
+                except Exception:
+                    pass
+                try:
+                    os.remove(dst)
+                except Exception:
+                    pass
+            os.replace(src, dst)
+            return None
+        except Exception as e:
+            last = e
+            time.sleep(0.5 * (i + 1))
+    return last
+
+
 def main():
     log("apply 开始，等待主进程响应返回…")
     time.sleep(2)
@@ -634,14 +737,11 @@ def main():
         for f in files:
             src = os.path.join(root, f)
             dst = os.path.join(WS, rel, f) if rel != "." else os.path.join(WS, f)
-            try:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                if os.path.exists(dst):
-                    os.remove(dst)  # 先释放旧句柄
-                os.replace(src, dst)
+            err = force_replace(src, dst)
+            if err is None:
                 replaced.append(dst)
-            except Exception as e:
-                failed.append((dst, str(e)))
+            else:
+                failed.append((dst, str(err)))
     log(f"替换完成：成功 {len(replaced)}，失败 {len(failed)}")
     # 3. 失败回滚：从最近备份恢复失败文件
     if failed:
@@ -696,13 +796,24 @@ if __name__ == "__main__":
 """
 
 
-def schedule_staged_apply() -> Dict:
+def schedule_staged_apply(staging: str = "") -> Dict:
     """把 staging 的更新交给独立进程执行：停服→替换→重启（当前进程继续返回响应）。
     v0.1.140：修复「调度更新失败：name 'config' is not defined」——本模块无模块级 config 导入，
-    此前 schedule_staged_apply 直接引用 config.PORT 触发 NameError，导致在线更新永远无法执行。"""
+    此前 schedule_staged_apply 直接引用 config.PORT 触发 NameError，导致在线更新永远无法执行。
+    v0.1.142：支持传入唯一 staging 目录（staging_时间戳），PENDING 记录实际目录供 apply 读取。"""
     from . import config  # noqa: F401  （局部导入，避免模块级循环依赖）
     try:
+        staging = staging or STAGING_DIR
         script_path = os.path.join(WORKSPACE_ROOT, "updates", "apply_update.py")
+        if os.path.exists(script_path):
+            try:
+                os.chmod(script_path, 0o666)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                os.remove(script_path)
+            except Exception:  # noqa: BLE001
+                pass
         with open(script_path, "w", encoding="utf-8") as f:
             # v0.1.140：不能用 .format()——模板内含 apply 脚本自身的 f-string/format 占位符
             # （{0}/{pid}/{e} 等）会被误解析，导致「Replacement index 0 out of range」。
@@ -710,7 +821,7 @@ def schedule_staged_apply() -> Dict:
             f.write(_APPLY_SCRIPT.replace("{ws!r}", repr(WORKSPACE_ROOT))
                                      .replace("{port!r}", str(config.PORT)))
         pending = {
-            "staging": STAGING_DIR,
+            "staging": staging,
             "created": datetime.datetime.now().isoformat(),
         }
         with open(PENDING_FILE, "w", encoding="utf-8") as f:
@@ -793,7 +904,8 @@ def perform_update(backup: bool = True, force: bool = False) -> Dict:
     
     # v0.1.134（P2）：下载方式为 staging 暂存 → 调度独立进程停服替换并自动重启
     if update_result.get("staged"):
-        sched = schedule_staged_apply()
+        # v0.1.142：传入实际 staging 目录（可能是带时间戳的唯一目录）
+        sched = schedule_staged_apply(update_result.get("staging") or "")
         if not sched.get("ok"):
             return {
                 "ok": False,
@@ -925,8 +1037,9 @@ def restore_backup(backup_name: str) -> Dict:
             for f in files:
                 src_file = os.path.join(root, f)
                 dst_file = os.path.join(target_dir, f)
-                shutil.copy2(src_file, dst_file)
-                restored_count += 1
+                err = _safe_copy(src_file, dst_file)
+                if not err:
+                    restored_count += 1
         
         return {
             "ok": True,
