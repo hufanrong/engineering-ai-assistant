@@ -134,13 +134,20 @@ def upload_template(file_path: str, template_name: str = "",
     if not os.path.isfile(file_path):
         return {"ok": False, "error": f"文件不存在：{file_path}"}
     
-    if not file_path.endswith(".docx"):
-        return {"ok": False, "error": "仅支持 .docx 格式的Word模板"}
+    if not (file_path.endswith(".docx") or file_path.endswith(".xlsx")):
+        return {"ok": False, "error": "仅支持 .docx / .xlsx 格式模板"}
     
     _ensure_templates_dir()
     
-    # 生成模板ID
-    template_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S") + "_" + str(os.getpid())
+    # 生成模板ID（毫秒级+pid+序号，避免同一秒注册多个模板时 ID 冲突）
+    template_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3] + "_" + str(os.getpid())
+    index0 = _load_template_index()
+    existing_ids = {t.get("id") for t in index0.get("templates", [])}
+    seq = 0
+    base_id = template_id
+    while template_id in existing_ids:
+        seq += 1
+        template_id = base_id + f"_{seq}"
     
     # 拷贝模板到模板库
     ext = os.path.splitext(file_path)[1]
@@ -193,19 +200,46 @@ def parse_template(file_path: str) -> Dict:
     Returns:
         解析结果
     """
-    if not HAS_DOCX:
+    if not (HAS_DOCX or file_path.endswith(".xlsx")):
         return {"ok": False, "error": "python-docx 未安装"}
+    
+    placeholders = set()
+    placeholder_pattern = re.compile(r'\{\{([^}]+)\}\}')
+    paragraph_count = 0
+    table_count = 0
+    repeat_sections = set()
+    
+    if file_path.endswith(".xlsx"):
+        # Excel 模板：扫描所有单元格占位符
+        try:
+            import openpyxl
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "error": "openpyxl 未安装，无法解析xlsx模板"}
+        wb = openpyxl.load_workbook(file_path)
+        for ws in wb.worksheets:
+            for row in ws.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and "{{" in str(cell.value):
+                        matches = placeholder_pattern.findall(str(cell.value))
+                        for m in matches:
+                            placeholders.add(m.strip())
+        return {
+            "ok": True,
+            "placeholders": sorted(list(placeholders)),
+            "placeholder_count": len(placeholders),
+            "has_tables": True,
+            "table_count": len(wb.worksheets),
+            "paragraph_count": 0,
+            "repeat_sections": [],
+            "supported_fields": list(PLACEHOLDER_FIELDS.keys()),
+        }
     
     try:
         doc = Document(file_path)
     except Exception as e:
         return {"ok": False, "error": f"解析模板失败：{str(e)}"}
     
-    placeholders = set()
-    placeholder_pattern = re.compile(r'\{\{([^}]+)\}\}')
-    
     # 解析段落
-    paragraph_count = 0
     for para in doc.paragraphs:
         paragraph_count += 1
         matches = placeholder_pattern.findall(para.text)
@@ -224,17 +258,10 @@ def parse_template(file_path: str) -> Dict:
     
     # 检查重复行标记
     repeat_pattern = re.compile(r'\{\{#([^}]+)\}\}')
-    repeat_sections = set()
     for para in doc.paragraphs:
         matches = repeat_pattern.findall(para.text)
         for m in matches:
             repeat_sections.add(m.strip())
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                matches = repeat_pattern.findall(cell.text)
-                for m in matches:
-                    repeat_sections.add(m.strip())
     
     return {
         "ok": True,

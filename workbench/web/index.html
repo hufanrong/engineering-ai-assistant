@@ -452,6 +452,57 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     <button class="btn btn-success" onclick="batchGenerate()">📦 批量生成选中设备的文件</button>
   </div>
 
+  <!-- v0.1.145：监理确认表生成（内置模板库） -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📋</span>监理确认表生成 <span style="font-size:11px;color:#999;font-weight:400;margin-left:8px">内置监理确认过的表格模板，按设备自动套用填充</span></div>
+    <div style="background:#f0f7ff;border:1px solid #d0e3ff;border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px;color:#1E5AA8">
+      💡 项目常量（施工单位/项目经理/监理单位等）自动带出；设备数据（位号/型号/厂家）从解析库按位号匹配；缺失字段生成后列出，可补充后重新生成。验收标准按国标已固化在模板中。
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label class="label">表类型</label>
+        <select class="select" id="supCat" onchange="loadSupTemplates()">
+          <option value="">选择表类型...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="label">选择设备</label>
+        <select class="select" id="supEquipment" onchange="supEquipmentChanged()">
+          <option value="">选择设备...</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="genSupSingle()">📄 生成单个</button>
+      <button class="btn btn-success" onclick="genSupAllDevices()">📦 生成全部设备</button>
+      <button class="btn" onclick="toggleSupConfig()" style="border:1px solid #ccc">⚙️ 项目常量配置</button>
+    </div>
+
+    <!-- 项目常量配置 -->
+    <div id="supConfigPanel" style="display:none;margin-top:14px;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:#333">项目常量（生成时自动带出）</div>
+      <div class="row">
+        <div class="form-group"><label class="label">施工单位</label><input class="input" id="supCfgContractor" placeholder="施工总包单位"></div>
+        <div class="form-group"><label class="label">项目经理</label><input class="input" id="supCfgManager" placeholder="项目经理姓名"></div>
+      </div>
+      <div class="row">
+        <div class="form-group"><label class="label">技术负责人</label><input class="input" id="supCfgTech" placeholder="技术负责人姓名"></div>
+        <div class="form-group"><label class="label">质量负责人</label><input class="input" id="supCfgQuality" placeholder="质量负责人姓名"></div>
+      </div>
+      <div class="row">
+        <div class="form-group"><label class="label">监理单位</label><input class="input" id="supCfgSupervisor" placeholder="监理单位全称"></div>
+        <div class="form-group"><label class="label">单位工程</label><input class="input" id="supCfgUnit" placeholder="如：选矿厂"></div>
+      </div>
+      <div class="row">
+        <div class="form-group"><label class="label">分部工程</label><input class="input" id="supCfgSub" placeholder="如：工业设备安装"></div>
+        <div class="form-group"><label class="label">车间</label><input class="input" id="supCfgWorkshop" placeholder="如：辊磨筛分车间"></div>
+      </div>
+      <button class="btn btn-primary" onclick="saveSupConfig()">💾 保存项目常量</button>
+    </div>
+
+    <div id="supResult" style="margin-top:14px"></div>
+  </div>
+
   <!-- 生成历史 -->
   <div class="card">
     <div class="card-title"><span class="icon">📜</span>生成历史</div>
@@ -685,7 +736,7 @@ function switchModule(moduleName) {
     
     // 模块加载时刷新数据（无项目时也能访问，显示空状态）
     if (moduleName === 'resource') { try { loadResourceData(); loadStorageLocations(); } catch(e) {} }
-    if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); } catch(e) {} }
+    if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); loadSupCategories(); loadSupEquipment(); loadSupConfig(); } catch(e) {} }
     if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); onEnterArchiveModule(); } catch(e) {} }
     if (moduleName === 'ai') { try { loadOperationLogs(); } catch(e) {} }
     if (moduleName === 'update') { try { loadUpdateInfo(); } catch(e) {} }
@@ -1653,6 +1704,175 @@ function generateDocWithMissing() {
     .catch(function() {
         if (btn) btn.disabled = false;
         alert('生成请求失败，请检查工作台是否运行');
+    });
+}
+
+// ===== v0.1.145：监理确认表生成 =====
+function loadSupCategories() {
+    fetch('/api/supervision-templates')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var sel = document.getElementById('supCat');
+            sel.innerHTML = '<option value="">选择表类型...</option>';
+            var cats = data.categories || {};
+            Object.keys(cats).sort().forEach(function(cat) {
+                var opt = document.createElement('option');
+                opt.value = cat;
+                opt.textContent = cat + '（' + cats[cat].length + '个模板）';
+                sel.appendChild(opt);
+            });
+        })
+        .catch(function() {});
+}
+
+function loadSupEquipment() {
+    fetch('/api/supervision-templates/equipment')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var sel = document.getElementById('supEquipment');
+            sel.innerHTML = '<option value="">选择设备...</option>';
+            var eqs = data.equipment || [];
+            var seen = {};
+            eqs.forEach(function(e) {
+                var label = (e.name || '') + (e.tag ? '（' + e.tag + '）' : '');
+                if (!label || seen[label]) return;
+                seen[label] = true;
+                var opt = document.createElement('option');
+                opt.value = e.name || e.tag;
+                opt.textContent = label + (e.workshop ? ' - ' + e.workshop : '');
+                sel.appendChild(opt);
+            });
+        })
+        .catch(function() {});
+}
+
+function loadSupConfig() {
+    // 尝试从当前项目配置读取（如已有保存值则回填）
+    fetch('/api/projects/current')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var p = data.project || {};
+            var m = {
+                'supCfgContractor': p.contractor, 'supCfgManager': p.project_manager,
+                'supCfgTech': p.tech_leader, 'supCfgQuality': p.quality_leader,
+                'supCfgSupervisor': p.supervisor, 'supCfgUnit': p.unit_works,
+                'supCfgSub': p.sub_works, 'supCfgWorkshop': p.default_workshop
+            };
+            Object.keys(m).forEach(function(id) {
+                if (m[id]) document.getElementById(id).value = m[id];
+            });
+        })
+        .catch(function() {});
+}
+
+function toggleSupConfig() {
+    var panel = document.getElementById('supConfigPanel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+function saveSupConfig() {
+    var config = {
+        '施工单位': document.getElementById('supCfgContractor').value.trim(),
+        '项目经理': document.getElementById('supCfgManager').value.trim(),
+        '技术负责人': document.getElementById('supCfgTech').value.trim(),
+        '质量负责人': document.getElementById('supCfgQuality').value.trim(),
+        '监理单位': document.getElementById('supCfgSupervisor').value.trim(),
+        '单位工程': document.getElementById('supCfgUnit').value.trim(),
+        '分部工程': document.getElementById('supCfgSub').value.trim(),
+        '车间': document.getElementById('supCfgWorkshop').value.trim()
+    };
+    fetch('/api/supervision-templates/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({config: config})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        alert(data.message || (data.ok ? '配置已保存' : '保存失败：' + (data.error || '')));
+        loadSupConfig();
+    })
+    .catch(function() { alert('保存失败，请检查工作台是否运行'); });
+}
+
+function supEquipmentChanged() {
+    // 预留：可按设备联动（暂不处理）
+}
+
+function supResultHtml(data, title) {
+    var html = '<div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-top:8px;border:1px solid #eee">';
+    html += '<div style="font-weight:600;margin-bottom:8px">' + title + '</div>';
+    var results = data.results || [data];
+    results.forEach(function(item) {
+        var ok = item.ok;
+        var status = ok ? '<span style="color:#52C41A">✅ 成功</span>' : '<span style="color:#EA6668">❌ 失败</span>';
+        html += '<div style="padding:8px;background:#fff;border-radius:6px;margin-bottom:8px;border-left:3px solid ' + (ok ? '#52C41A' : '#EA6668') + '">';
+        html += '<div>' + status + ' <strong>' + (item.equipment || '') + '</strong></div>';
+        if (ok) {
+            if (item.output_file) html += '<div style="color:#555;font-size:12px">文件：' + item.output_file + '</div>';
+            if (item.output_path) html += '<div style="color:#555;font-size:12px">位置：' + item.output_path + '</div>';
+        }
+        if (item.unfilled_fields && item.unfilled_fields.length > 0) {
+            html += '<div style="color:#FAAD14;font-size:12px">缺失字段：' + item.unfilled_fields.join('、') + '（可在项目常量/设备台账补充后重新生成）</div>';
+        }
+        if (item.error) html += '<div style="color:#EA6668;font-size:12px">' + item.error + '</div>';
+        html += '</div>';
+    });
+    html += '</div>';
+    return html;
+}
+
+function genSupSingle() {
+    var cat = document.getElementById('supCat').value;
+    var eq = document.getElementById('supEquipment').value;
+    if (!cat) { alert('请选择表类型'); return; }
+    if (!eq) { alert('请选择设备'); return; }
+    var btn = document.querySelector('[onclick="genSupSingle()"]');
+    if (btn) btn.disabled = true;
+    var container = document.getElementById('supResult');
+    container.innerHTML = '<div style="color:#666">正在生成...</div>';
+    fetch('/api/supervision-templates/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({category: cat, equipment: eq})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (btn) btn.disabled = false;
+        container.innerHTML = supResultHtml(data, '生成结果');
+    })
+    .catch(function() {
+        if (btn) btn.disabled = false;
+        container.innerHTML = '<div style="color:#EA6668">生成请求失败</div>';
+    });
+}
+
+function genSupAllDevices() {
+    var cat = document.getElementById('supCat').value;
+    if (!cat) { alert('请选择表类型'); return; }
+    var sel = document.getElementById('supEquipment');
+    var devices = [];
+    for (var i = 0; i < sel.options.length; i++) {
+        var v = sel.options[i].value;
+        if (v) devices.push(v);
+    }
+    if (devices.length === 0) { alert('当前没有可用的设备列表，请先上传设备台账资料'); return; }
+    var btn = document.querySelector('[onclick="genSupAllDevices()"]');
+    if (btn) btn.disabled = true;
+    var container = document.getElementById('supResult');
+    container.innerHTML = '<div style="color:#666">正在批量生成 ' + devices.length + ' 个设备...</div>';
+    fetch('/api/supervision-templates/generate-batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({category: cat, equipment_list: devices})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (btn) btn.disabled = false;
+        container.innerHTML = supResultHtml(data, '批量生成结果（成功 ' + (data.success || 0) + '/' + (data.total || 0) + '）');
+    })
+    .catch(function() {
+        if (btn) btn.disabled = false;
+        container.innerHTML = '<div style="color:#EA6668">批量生成请求失败</div>';
     });
 }
 

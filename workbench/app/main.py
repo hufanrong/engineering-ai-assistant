@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.144")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.145")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -3817,6 +3817,50 @@ def delete_template(data: dict):
     """删除模板。"""
     from . import template_engine as _te
     return _te.delete_template(data.get("template_id", ""))
+
+@app.get("/api/supervision-templates")
+def list_supervision_templates():
+    """v0.1.145：按表类型分组返回监理确认模板。"""
+    from . import supervision_templates as _st
+    return _st.list_by_category()
+
+@app.post("/api/supervision-templates/config")
+def save_supervision_config(data: dict):
+    """保存项目配置（施工单位/项目经理/监理单位等），供监理模板生成自动带出。"""
+    from . import supervision_templates as _st
+    return _st.save_project_config(data.get("project_id"), data.get("config"))
+
+@app.post("/api/supervision-templates/generate")
+def render_supervision_template(data: dict):
+    """
+    按表类型+设备生成监理确认表。
+    输入：{"category": "设备开箱检查记录", "equipment": "渣浆泵", "tag": "X605", "extra_data": {...}}
+    """
+    from . import supervision_templates as _st
+    return _st.render_supervision_doc(
+        category=data.get("category", ""),
+        equipment=data.get("equipment", ""),
+        tag=data.get("tag", ""),
+        project_id=data.get("project_id"),
+        extra_data=data.get("extra_data"),
+    )
+
+@app.post("/api/supervision-templates/generate-batch")
+def generate_supervision_batch(data: dict):
+    """批量生成：同一表类型对多个设备逐个生成。"""
+    from . import supervision_templates as _st
+    return _st.generate_batch(
+        category=data.get("category", ""),
+        project_id=data.get("project_id"),
+        equipment_list=data.get("equipment_list", []),
+        extra_data=data.get("extra_data"),
+    )
+
+@app.get("/api/supervision-templates/equipment")
+def list_supervision_equipment():
+    """获取当前项目设备列表（选设备用）。"""
+    from . import supervision_templates as _st
+    return {"ok": True, "equipment": _st._get_equipment_list()}
 
 @app.post("/api/smart-doc/generate")
 def generate_smart_doc(data: dict):
