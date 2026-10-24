@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.145")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.146")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -3833,34 +3833,40 @@ def save_supervision_config(data: dict):
 @app.post("/api/supervision-templates/generate")
 def render_supervision_template(data: dict):
     """
-    按表类型+设备生成监理确认表。
-    输入：{"category": "设备开箱检查记录", "equipment": "渣浆泵", "tag": "X605", "extra_data": {...}}
+    v0.1.146：按表类型+车间生成监理确认表（车间级整合，一份文件含该车间全部设备）。
+    输入：{"category": "设备开箱检查记录", "workshop": "辊磨筛分车间", "extra_data": {...}}
     """
     from . import supervision_templates as _st
     return _st.render_supervision_doc(
         category=data.get("category", ""),
-        equipment=data.get("equipment", ""),
-        tag=data.get("tag", ""),
+        workshop=data.get("workshop", ""),
         project_id=data.get("project_id"),
         extra_data=data.get("extra_data"),
     )
 
 @app.post("/api/supervision-templates/generate-batch")
 def generate_supervision_batch(data: dict):
-    """批量生成：同一表类型对多个设备逐个生成。"""
+    """批量生成：按车间生成整合文件。"""
     from . import supervision_templates as _st
     return _st.generate_batch(
         category=data.get("category", ""),
+        workshop=data.get("workshop", ""),
         project_id=data.get("project_id"),
-        equipment_list=data.get("equipment_list", []),
         extra_data=data.get("extra_data"),
     )
 
 @app.get("/api/supervision-templates/equipment")
 def list_supervision_equipment():
-    """获取当前项目设备列表（选设备用）。"""
+    """获取当前项目设备列表（按车间分组，选设备/看清单用）。"""
     from . import supervision_templates as _st
-    return {"ok": True, "equipment": _st._get_equipment_list()}
+    devices, grouped = _st.get_equipment_list()
+    return {"ok": True, "equipment": devices, "workshops": grouped}
+
+@app.get("/api/supervision-templates/workshops")
+def list_supervision_workshops():
+    """获取项目车间列表（选车间用）。"""
+    from . import supervision_templates as _st
+    return {"ok": True, "workshops": _st.get_workshop_list()}
 
 @app.post("/api/smart-doc/generate")
 def generate_smart_doc(data: dict):

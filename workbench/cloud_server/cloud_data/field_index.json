@@ -1,0 +1,26 @@
+{
+ "txt-20260906180631703118": {
+  "project": "测试项目",
+  "uploader": "张三",
+  "kind": "text",
+  "note": "P-101开箱验收",
+  "file": "/sandboxdata/workspace/file/fangong-workbench/cloud_server/cloud_data/field_data/文字记录/文字_20260906180631.txt",
+  "file_name": "文字_20260906180631.txt",
+  "ts": "2026-09-06T18:06:31.703138",
+  "record_analyze_sources": [
+   "node-A",
+   "node-B"
+  ],
+  "record_type": "开箱验收记录",
+  "record_confidence": 0.9,
+  "record_data": {
+   "位号": "P-101",
+   "箱单号": "BX-001"
+  },
+  "record_missing": [
+   "日期",
+   "验收人"
+  ],
+  "record_analyzed_at": "2026-09-06T18:06:31.788603"
+ }
+}
