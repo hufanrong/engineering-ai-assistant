@@ -57,15 +57,22 @@ def apply_replacements(text, cfg):
 def _is_date_text(t, cfg):
     """判断是否为日期类文本。
 
-    带日期标签（如"日期：2026.03"）→ 先剥离标签再整条匹配；
+    2026-10-25 整改：date_labels 前缀**循环剥离**——"出图日期：2025.4.14"
+    需先剥"日期"再剥"出图"（或反序），直到无变化再匹配日期格式。
     不带标签 → 要求整条文本完全匹配日期格式（避免误删图号等含数字串的文本）。
     """
     dk = cfg["delete_keywords"]
     date_labels = dk.get("date_labels", ["日期", "时间", "出图"])
     if any(k in t for k in date_labels):
         rest = t
-        for k in date_labels:
-            rest = rest.replace(k, "")
+        for _ in range(3):  # 循环剥离，处理"出图日期："等多标签叠加
+            changed = False
+            for k in date_labels:
+                if k in rest:
+                    rest = rest.replace(k, "")
+                    changed = True
+            if not changed:
+                break
         rest = rest.strip(" ：:.")
         for re_ in cfg["_date_re"]:
             m = re_.match(rest)
@@ -85,6 +92,29 @@ def _is_protected(t, cfg):
 
 def _is_institution(t, cfg):
     return any(k in t for k in cfg["delete_keywords"].get("institution", []))
+
+
+def judge_whitelist_text(text, cfg):
+    """标题栏区域白名单判定（2026-10-25 整改，重点方案）：
+
+    凡位于标题栏区域内的文字，不命中 protect_keywords（工程名称/图纸名称/图号/
+    比例等）的一律删除——可真正删掉"旁边的人名"、任意格式的公司名、日期、
+    证书编号等黑名单规则覆盖不到的信息。
+
+    返回 (action, reason, new_text)，与 judge_text 同构。
+    """
+    t = (text or "").strip()
+    if not t:
+        return "keep", "empty", None
+    mode = cfg["drawing_type_mode"]
+    replaced = apply_replacements(t, cfg) if mode == "replace" else t
+    if _is_protected(t, cfg):
+        if replaced != t:
+            return "replace", "replaced_in_protected", replaced
+        return "keep", "protected", None
+    if replaced != t:
+        return "replace", "replaced", replaced
+    return "delete", "whitelist_non_protected", None
 
 
 def judge_text(text, cfg):

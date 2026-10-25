@@ -28,7 +28,34 @@ def _open_browser():
     webbrowser.open(f"http://{host}:{config.PORT}")
 
 
+def _startup_selfcheck():
+    """v0.1.154：启动自检——自动更新后若代码不完整（ImportError），
+    启动即崩且无提示。先子进程冒烟 import，失败则提示回滚并退出。"""
+    import subprocess
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", "from app.main import run; print('OK')"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True, text=True, timeout=120)
+    except Exception:
+        return True  # 自检进程异常不阻塞启动（交给主流程报错）
+    if r.returncode == 0:
+        return True
+    # 冒烟失败：提示用户回滚
+    print("=" * 60)
+    print("启动自检失败：程序代码可能不完整（自动更新后常见）。")
+    err = (r.stderr or r.stdout or "").strip().splitlines()
+    print("错误：", err[-1] if err else "未知")
+    print("处理建议：")
+    print("  1) 若刚执行过自动更新，请重启一次（回滚到上一版本目录）；")
+    print("  2) 或从 GitHub 重新下载安装包覆盖安装（data 目录不受影响）。")
+    print("=" * 60)
+    return False
+
+
 if __name__ == "__main__":
+    if not _startup_selfcheck():
+        sys.exit(1)
     threading.Thread(target=_open_browser, daemon=True).start()
     from app.main import run
     run()

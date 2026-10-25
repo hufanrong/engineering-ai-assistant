@@ -287,11 +287,71 @@ def list_project_drawings(project_id: Optional[str] = None) -> List[Dict]:
     return drawings
 
 
+def _project_cleaner_config_path(project_id: Optional[str] = None) -> str:
+    """项目级清稿配置路径：data/projects/<pid>/cleaner_config.json（2026-10-25 新增）。
+    不同设计院标题栏格式差异大，规则（关键字/protect 列表）做成项目级配置。"""
+    try:
+        from . import project_manager as _pm
+        if project_id:
+            pdir = _pm._get_project_dir(project_id)
+        else:
+            pdir = _pm._get_project_dir(_pm.get_current_project().get("project_id", ""))
+        return os.path.join(pdir, "cleaner_config.json")
+    except Exception:
+        return ""
+
+
+def get_project_cleaner_config(project_id: Optional[str] = None) -> Dict:
+    """读取项目级清稿配置；无项目级配置时返回包内默认 config.json。"""
+    import json as _json
+    cfg_path = _project_cleaner_config_path(project_id)
+    if cfg_path and os.path.isfile(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                return {"ok": True, "project_level": True, "config": _json.load(f),
+                        "path": cfg_path}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    try:
+        from dwg_cleaner import rules
+        cfg = rules.load_config(DEFAULT_CONFIG)
+        return {"ok": True, "project_level": False, "config": cfg, "path": DEFAULT_CONFIG}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def save_project_cleaner_config(project_id: Optional[str], config_dict: Dict) -> Dict:
+    """保存项目级清稿配置（前端可编辑）。"""
+    import json as _json
+    cfg_path = _project_cleaner_config_path(project_id)
+    if not cfg_path:
+        return {"ok": False, "error": "无法定位项目目录"}
+    try:
+        os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            _json.dump(config_dict, f, ensure_ascii=False, indent=2)
+        return {"ok": True, "path": cfg_path, "message": "项目级清稿配置已保存"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _load_effective_config(project_id: Optional[str] = None) -> Dict:
+    """加载生效配置：项目级优先，无则包内默认。"""
+    from dwg_cleaner import rules
+    r = get_project_cleaner_config(project_id)
+    if r.get("ok") and r.get("config"):
+        return rules.normalize_config(dict(r["config"]))
+    return rules.load_config(DEFAULT_CONFIG)
+
+
 def process_dwg_file(dwg_path: str, out_dir: Optional[str] = None,
                      project_id: Optional[str] = None) -> Dict:
     """处理单个 DWG：环境检查 → 调 core.process_file。
 
     out_dir 为空时输出到项目 exports/竣工图清稿/{图名}/。
+
+    2026-10-25 整改：对 RPC_E_CALL_REJECTED（AutoCAD COM 冷启动/忙碌拒绝）整体重试，
+    同时识别「返回值 error 字段」与「抛出异常」两种形态。
     """
     env = detect_environment()
     if not env["ready"]:
@@ -306,19 +366,40 @@ def process_dwg_file(dwg_path: str, out_dir: Optional[str] = None,
         return {"status": "failed", "file": dwg_path, "error": "文件不存在"}
 
     out = out_dir or _out_dir_for(project_id)
-    try:
-        from dwg_cleaner import core, rules
-        cfg = rules.load_config(DEFAULT_CONFIG)
-        result = core.process_file(dwg_path, out, cfg)
-        result["env"] = None
-        return result
-    except Exception as e:  # noqa: BLE001
-        return {
-            "status": "failed",
-            "file": dwg_path,
-            "error": f"{type(e).__name__}: {e}",
-            "hint": env["hint"],
-        }
+    last_err = None
+    for attempt in range(3):
+        try:
+            from dwg_cleaner import core
+            cfg = _load_effective_config(project_id)
+            result = core.process_file(dwg_path, out, cfg)
+            result["env"] = None
+            # 形态1：返回值 error 字段携带 RPC 拒绝
+            err = result.get("error", "") or ""
+            if "RPC_E_CALL_REJECTED" in err or "被呼叫方拒绝" in err:
+                last_err = err
+                import time
+                time.sleep(3)
+                continue
+            return result
+        except Exception as e:  # noqa: BLE001
+            # 形态2：抛出异常携带 RPC 拒绝
+            if "RPC_E_CALL_REJECTED" in str(e) or "被呼叫方拒绝" in str(e):
+                last_err = str(e)
+                import time
+                time.sleep(3)
+                continue
+            return {
+                "status": "failed",
+                "file": dwg_path,
+                "error": f"{type(e).__name__}: {e}",
+                "hint": env["hint"],
+            }
+    return {
+        "status": "failed",
+        "file": dwg_path,
+        "error": "AutoCAD 持续拒绝 COM 调用（RPC_E_CALL_REJECTED），重试3次仍失败：%s" % last_err,
+        "hint": env["hint"],
+    }
 
 
 def process_drawings(dwg_paths: List[str], out_dir: Optional[str] = None,

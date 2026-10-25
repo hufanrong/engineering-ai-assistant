@@ -564,12 +564,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
         <div style="font-size:13px;font-weight:700;color:#1E5AA8">🖨️ DWG 竣工图清稿 <span style="font-weight:400;color:#888;font-size:11px">（自动删除标题栏设计院/人名/日期/“施工图”字样→替换为“竣工图”→逐图合并PDF+清稿DWG，原文件只读）</span></div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-sm" onclick="loadCleanerStatus()">🔄 检测环境</button>
+          <button class="btn btn-sm" onclick="openCleanerConfig()">⚙️ 清稿规则</button>
           <button class="btn btn-sm btn-primary" onclick="runCleanerProcess()" id="btnCleanerRun" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">🚀 开始清稿</button>
         </div>
       </div>
       <div id="cleanerEnvBar" style="font-size:12px;margin-bottom:8px;padding:8px;border-radius:6px;background:#fff;border:1px solid #e3e8f0">检测环境中...</div>
       <div id="cleanerDrawingList" style="font-size:12px;max-height:200px;overflow:auto;margin-bottom:8px"></div>
       <div id="cleanerResult" style="font-size:12px"></div>
+      <div id="cleanerConfigPanel" style="display:none;margin-top:10px;padding:10px;background:#fff;border:1px solid #d9e2f3;border-radius:6px">
+        <div style="font-size:12px;font-weight:700;color:#1E5AA8;margin-bottom:6px">⚙️ 清稿规则（项目级配置，默认取内置规则）</div>
+        <div style="font-size:11px;color:#666;margin-bottom:6px">protect_keywords=标题栏内保留的文字（工程名称/图纸名称/图号/比例等）；白名单模式下区域内其余文字一律删除。修改后点击保存。</div>
+        <textarea id="cleanerConfigText" style="width:100%;height:260px;font-family:monospace;font-size:11px;border:1px solid #ccc;border-radius:6px;padding:6px;box-sizing:border-box" spellcheck="false"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+          <button class="btn btn-sm btn-primary" onclick="saveCleanerConfig()" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">💾 保存规则</button>
+          <button class="btn btn-sm" onclick="document.getElementById('cleanerConfigPanel').style.display='none'">关闭</button>
+          <span id="cleanerConfigMsg" style="font-size:11px;color:#666"></span>
+        </div>
+      </div>
     </div>
     <div id="archiveWorkshopList"></div>
 
@@ -1003,7 +1014,11 @@ function runCleanerProcess() {
                     html += '<div style="margin:6px 0;padding:6px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:6px">' +
                         '📄 ' + escapeHtml(r.file.split(/[\\/]/).pop()) +
                         '：删除 ' + (r.deleted_count||0) + ' 条 / 替换 ' + (r.replaced_count||0) + ' 条 / 图框 ' + (r.frame_count||0) + ' 个 / PDF ' + (r.pdf_pages||0) + ' 页<br>' +
-                        '<span style="color:#666">清稿DWG：' + escapeHtml(r.cleaned_dwg||'') + '<br>竣工PDF：' + escapeHtml(r.pdf||'') + '</span></div>';
+                        '<span style="color:#666">清稿DWG：' + escapeHtml(r.cleaned_dwg||'') + '<br>竣工PDF：' + escapeHtml(r.pdf||'') + '</span>' +
+                        ((r.notes && r.notes.length) ? '<br><span style="color:#ad6800">⚠️ ' + r.notes.map(function(n){return escapeHtml(n);}).join('；') + '</span>' : '') +
+                        ((r.previews && r.previews.length) ? '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + r.previews.map(function(p,i){
+                            return '<div style="text-align:center"><a href="' + p + '" target="_blank"><img src="' + p + '" style="max-height:120px;border:1px solid #ddd;border-radius:4px"></a><div style="font-size:10px;color:#999">第' + (i+1) + '页验收图</div></div>';
+                        }).join('') + '</div>' : '') + '</div>';
                 } else {
                     html += '<div style="margin:6px 0;padding:6px;background:#fff1f0;border:1px solid #ffa39e;border-radius:6px;color:#c62828">' +
                         '❌ ' + escapeHtml(r.file.split(/[\\/]/).pop()) + '：' + escapeHtml(r.error || '未知错误') + '</div>';
@@ -1015,6 +1030,31 @@ function runCleanerProcess() {
     })
     .catch(function(e) {
         resultBox.innerHTML = '<div style="color:#c62828">❌ 请求失败：' + escapeHtml(String(e)) + '</div>';
+    });
+}
+function openCleanerConfig() {
+    var panel = document.getElementById('cleanerConfigPanel');
+    panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+    if (panel.style.display === 'block') {
+        fetch('/api/tools/dwg-cleaner/config?project_id=' + encodeURIComponent(currentProject || ''))
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            document.getElementById('cleanerConfigText').value = JSON.stringify(d.config, null, 2);
+            document.getElementById('cleanerConfigMsg').textContent = d.project_level ? '（项目级配置）' : '（内置默认规则，保存后转为项目级）';
+        });
+    }
+}
+function saveCleanerConfig() {
+    var cfg;
+    try { cfg = JSON.parse(document.getElementById('cleanerConfigText').value); }
+    catch(e) { document.getElementById('cleanerConfigMsg').textContent = 'JSON 格式错误：' + e; return; }
+    fetch('/api/tools/dwg-cleaner/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: currentProject || '', config: cfg})
+    }).then(function(r){ return r.json(); })
+    .then(function(d){
+        document.getElementById('cleanerConfigMsg').textContent = d.ok ? '✅ 已保存（项目级配置，下次清稿生效）' : '保存失败：' + (d.error || '');
     });
 }
 // 进入竣工组卷模块时自动检测环境

@@ -11,7 +11,7 @@
     ],
     "drawing_type": ["施工图", "设计施工图", "设计图"]
   },
-  "protect_keywords": ["建设单位", "施工单位", "车间", "图号", "图名", "比例", "图纸编号", "竣工图", "图纸名称"],
+  "protect_keywords": ["建设单位", "施工单位", "车间", "图号", "图名", "比例", "图纸编号", "竣工图", "图纸名称", "工程名称", "工程名", "图别", "设计阶段", "版次"],
   "replace_rules": {
     "施工图": "竣工图",
     "设计施工图": "竣工图"
@@ -20,7 +20,8 @@
   "titleblock": {
     "default_width_ratio": 1.0,
     "default_height_ratio": 0.2,
-    "use_line_detection": true
+    "use_line_detection": true,
+    "whitelist_mode": true
   },
   "frame_detect": {
     "standard_sizes_mm": [[841, 1189], [594, 841], [420, 594], [297, 420], [210, 297]],

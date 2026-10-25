@@ -91,6 +91,60 @@ def _fresh_staging_dir() -> str:
             )
     return STAGING_DIR
 
+
+def _verify_staged_files(staging: str) -> Dict:
+    """2026-10-25 整改：staging 完整性校验（防"装出起不来的版本"）。
+
+    实测事故：main.py 升到 0.1.152 但 supervision_integration.py /
+    supervision_templates.py 两个新模块没下载到位 → 启动即崩 ImportError。
+
+    做法：静态解析 staging/app/main.py 内的相对导入
+    （`from . import X` / `from .X import ...`），逐项确认 staging/app/X.py 存在；
+    缺项判定更新失败，不进入替换。
+    """
+    import re as _re
+    missing = []
+    main_py = os.path.join(staging, "app", "main.py")
+    if not os.path.isfile(main_py):
+        return {"ok": False, "missing": ["app/main.py 缺失"]}
+    try:
+        with open(main_py, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except Exception as e:
+        return {"ok": False, "missing": ["读取 main.py 失败: %s" % e]}
+    # from . import X（多行；用 [ \\t]* 避免 \\s 吞换行导致误匹配）
+    for m in _re.finditer(r"from\s+\.\s+import\s+([A-Za-z0-9_]+(?:[ \t]*,[ \t]*[A-Za-z0-9_]+)*)", content):
+        for name in m.group(1).split(","):
+            name = name.strip()
+            if not name:
+                continue
+            if not os.path.isfile(os.path.join(staging, "app", name + ".py")):
+                missing.append("app/%s.py" % name)
+    # from .X import ...（X 是模块名）
+    for m in _re.finditer(r"from\s+\.([A-Za-z0-9_]+)\s+import\s", content):
+        mod = m.group(1)
+        if not os.path.isfile(os.path.join(staging, "app", mod + ".py")):
+            missing.append("app/%s.py" % mod)
+    # import X（顶层模块，staging 内应存在）
+    for m in _re.finditer(r"^\s*import\s+([A-Za-z0-9_]+)", content, _re.MULTILINE):
+        mod = m.group(1)
+        if mod in ("os", "sys", "json", "re", "time", "datetime", "uuid", "hashlib",
+                   "shutil", "subprocess", "threading", "math", "traceback", "ast",
+                   "signal", "socket", "platform", "copy", "collections", "functools",
+                   "itertools", "pathlib", "tempfile", "glob", "urllib", "zipfile",
+                   "io", "base64", "random", "string", "typing", "asyncio", "stat",
+                   "unicodedata", "html", "xml", "sqlite3", "numbers", "abc"):
+            continue
+        if os.path.isfile(os.path.join(staging, "app", mod + ".py")) or \
+           os.path.isfile(os.path.join(staging, "parsers", mod + ".py")):
+            continue
+    # web 前端必须存在
+    if not os.path.isfile(os.path.join(staging, "web", "index.html")):
+        missing.append("web/index.html")
+    if missing:
+        return {"ok": False, "missing": sorted(set(missing))}
+    return {"ok": True, "missing": []}
+
 # 需要保留的数据目录（更新时不覆盖）
 PRESERVE_DIRS = [
     "data",
@@ -435,6 +489,18 @@ def update_via_download() -> Dict:
                     "error": "暂存失败：以下文件无法写入（可能被其他程序占用或设为只读）：\n"
                              + "\n".join(copy_errors[:10])
                              + "\n\n请关闭杀毒软件/编辑器/OneDrive 同步后重试，或在 Windows 资源管理器中取消文件只读属性。",
+                    "suggestion": "也可手动下载安装包覆盖更新（data 目录不受影响）。",
+                }
+
+            # v0.1.154：staging 完整性校验（防装出起不来的版本——2026-10-25 实测事故）
+            verify = _verify_staged_files(staging_dir)
+            if not verify.get("ok"):
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                return {
+                    "ok": False,
+                    "method": "download",
+                    "error": "下载包不完整，已取消更新（缺失文件：%s）。\n"
+                             "请重试；若持续失败，请手动下载安装包更新。" % "、".join(verify.get("missing", [])),
                     "suggestion": "也可手动下载安装包覆盖更新（data 目录不受影响）。",
                 }
             staging_dir = staging_dir  # noqa: PLW0127  （供下方返回引用）

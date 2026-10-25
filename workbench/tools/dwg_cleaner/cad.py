@@ -39,9 +39,10 @@ def saveas_format_for_release(release: float) -> int:
         return AC_2004_DWG
     return AC_2000_DWG
 
-# PlotConfiguration 枚举
+# PlotConfiguration 枚举（2026-10-25 实测修正：acWindow=4，3 是 acView）
 PAPER_UNITS_MM = 1          # acMillimeters
-PLOT_TYPE_WINDOW = 3        # acWindow
+PLOT_TYPE_WINDOW = 4        # acWindow（窗口打印；实测 3=acView 会导致「输入无效」）
+PLOT_TYPE_EXTENTS = 1       # acExtents（范围打印，双保险回退路线）
 ROT_0 = 0                   # ac0degrees
 ROT_90 = 1                  # ac90degrees
 
@@ -62,19 +63,33 @@ class CadSession:
     def __enter__(self):
         import pythoncom
         import win32com.client
+        import time
         pythoncom.CoInitialize()
         self._com_initialized = True
+        # 2026-10-25 实测（Bug9）：AutoCAD 冷启动期任意 COM 调用可能被拒
+        # （-2147418111 被呼叫方拒绝接收呼叫），会话启动加就绪重试（5秒×6次）。
+        app = None
+        last_err = None
+        for _ in range(6):
+            try:
+                app = win32com.client.Dispatch("AutoCAD.Application")
+                break
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                time.sleep(5)
+        if app is None:
+            raise CadError("无法启动 AutoCAD（冷启动连接被拒，重试6次仍失败）：%s" % last_err)
+        self.app = app
+        # 版本容错：真实版本串可能是 "23.1s (LMS Tech)"，只取数字头
         try:
-            self.app = win32com.client.Dispatch("AutoCAD.Application")
-        except Exception as e:
-            raise CadError("无法启动 AutoCAD，请确认本机已安装 AutoCAD 并能正常打开。原始错误：%s" % e)
-        # v1.1：读取实际 AutoCAD 版本（任意版本兼容），用于选择可保存的 DWG 格式
-        try:
-            self.release = float(str(self.app.Version))
+            m = re.match(r"(\d+(?:\.\d+)?)", str(self.app.Version))
+            self.release = float(m.group(1)) if m else 0.0
         except Exception:
             self.release = 0.0
+        # 2026-10-25 实测（Bug7）：不可见模式下「打印作业进度」对话框会僵死、
+        # PlotToFile 永不返回 → 处理期间强制 Visible=True
         try:
-            self.app.Visible = bool(self.visible)
+            self.app.Visible = True
         except Exception:
             pass
         return self
@@ -105,11 +120,49 @@ class CadSession:
     # ---------- 文档 ----------
 
     def open_document(self, path, readonly=True):
-        """只读打开 DWG，返回文档对象。"""
-        try:
-            doc = self.app.Documents.Open(path, readonly)
-        except Exception as e:
-            raise CadError("打开文件失败（可能被其他程序占用或文件损坏）：%s" % path) from e
+        """只读打开 DWG，返回文档对象。
+
+        2026-10-25 实测（Bug8）：Documents.Open() 返回的对象动态绑定会损坏
+        （Open.ModelSpace / ActiveDocument AttributeError）；改用 ActiveDocument，
+        并以 FullName 精确匹配 Documents 集合兜底；大图打开后 COM 短暂失稳，
+        60 秒重试窗口内持续重试。
+        """
+        import time
+        full = os_path_abspath(path)
+        doc = None
+        last_err = None
+        for _ in range(6):
+            try:
+                self.app.Documents.Open(full, readonly)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                time.sleep(5)
+                continue
+            # 方式1：ActiveDocument（打开后自动激活）
+            try:
+                ad = self.app.ActiveDocument
+                if ad is not None:
+                    doc = ad
+            except Exception:  # noqa: BLE001
+                pass
+            # 方式2：按 FullName 精确匹配
+            if doc is None:
+                try:
+                    for j in range(self.app.Documents.Count):
+                        try:
+                            d = self.app.Documents.Item(j)
+                            if str(d.FullName).lower() == full.lower():
+                                doc = d
+                                break
+                        except Exception:  # noqa: BLE001
+                            continue
+                except Exception:  # noqa: BLE001
+                    pass
+            if doc is not None:
+                break
+            time.sleep(5)
+        if doc is None:
+            raise CadError("打开文件失败（COM 失稳，重试超时）：%s（原始错误：%s）" % (path, last_err))
         self._doc = doc
         try:
             doc.SetVariable("FILEDIA", 0)
@@ -256,7 +309,21 @@ class CadSession:
     # ---------- 打印 ----------
 
     def plot_frame(self, doc, frame, pdf_path, cfg):
-        """按图框窗口范围输出单页 PDF。"""
+        """按图框窗口范围输出单页 PDF。
+
+        2026-10-25 实测重写（修复 9 项打印链路 Bug，真机 AutoCAD 2020 验证可用）：
+        - Bug1  PlotConfigurations 是 Document 的属性（doc.Plot.PlotConfigurations 不存在）
+        - Bug2  打印设备用 ConfigName（PlotDevice 不可设）
+        - Bug3  PLOT_TYPE_WINDOW = 4（acWindow），3 是 acView
+        - Bug4  必须先 SetWindowToPlot 存窗口 → 再切 PlotType=acWindow
+        - Bug5  窗口坐标必须是 VARIANT(VT_ARRAY|VT_R8) 双精度数组
+        - Bug6  BACKGROUNDPLOT=0 强制前台（否则 PlotToFile 返回 True 但 PDF 不生成）
+        - Bug7  打印期间 app.Visible=True（不可见模式下进度框僵死）
+        双保险：窗口打印失败 → 自动回退范围打印（acExtents，整图一页）。
+        已验证不可行的路线（勿再试）：命令行 -PLOT + SendCommand 盲答序列、
+        PlotViewName 命名视图路线。
+        """
+        import pythoncom
         plot_cfg = cfg.get("plot", {})
         device = plot_cfg.get("device", "DWG To PDF.pc3")
         style_sheet = plot_cfg.get("style_sheet", "monochrome.ctb")
@@ -267,38 +334,74 @@ class CadSession:
         except Exception:
             pass
 
-        cfgs = doc.Plot.PlotConfigurations
-        name = "_TMP_CLEAN_CFG"
+        # Bug6：后台打印静默失败 → 强制前台，打完恢复原值
+        old_bg = None
         try:
-            old = cfgs.Item(name)
-            old.Delete()
+            old_bg = doc.GetVariable("BACKGROUNDPLOT")
+            doc.SetVariable("BACKGROUNDPLOT", 0)
         except Exception:
             pass
-        pc = cfgs.Add(name)
+
         try:
-            pc.PlotDevice = device
-            pc.PaperUnits = PAPER_UNITS_MM
-            pc.PlotType = PLOT_TYPE_WINDOW
-            pc.UseStandardScale = False
-            pc.SetCustomScale(1.0, 1.0)  # 1:1
-            pc.CenterPlot = True
-            pc.PlotRotation = ROT_0 if frame.width >= frame.height else ROT_90
-            if style_sheet:
-                try:
-                    pc.StyleSheet = style_sheet
-                except Exception:
-                    pass
-            self._set_paper_size(pc, frame, margin)
-            pc.SetWindowToPlot(frame.minx, frame.miny, frame.maxx, frame.maxy)
-            pc.PlotToFile(pdf_path)
-        finally:
+            cfgs = doc.PlotConfigurations  # Bug1：Document 属性
+            name = "_TMP_CLEAN_CFG"
             try:
-                pc.Delete()
+                old = cfgs.Item(name)
+                old.Delete()
             except Exception:
                 pass
+            pc = cfgs.Add(name)
+            try:
+                pc.ConfigName = device  # Bug2：ConfigName
+                pc.PaperUnits = PAPER_UNITS_MM
+                pc.UseStandardScale = False
+                pc.SetCustomScale(1.0, 1.0)  # 1:1
+                pc.CenterPlot = True
+                pc.PlotRotation = ROT_0 if frame.width >= frame.height else ROT_90
+                if style_sheet:
+                    try:
+                        pc.StyleSheet = style_sheet
+                    except Exception:
+                        pass
+                self._set_paper_size(pc, frame, margin)
+                # 双保险：窗口打印优先 → 失败回退范围打印
+                last_err = None
+                try:
+                    # Bug4：先存窗口，再切 PlotType；Bug5：坐标用双精度 VARIANT 数组
+                    lo = pythoncom.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8,
+                                           [frame.minx, frame.miny])
+                    hi = pythoncom.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8,
+                                           [frame.maxx, frame.maxy])
+                    pc.SetWindowToPlot(lo, hi)
+                    pc.PlotType = PLOT_TYPE_WINDOW  # Bug3：acWindow=4
+                    pc.PlotToFile(pdf_path)
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+                    try:
+                        # 回退：范围打印（acExtents=1）——单图框效果等同，多图框整图一页
+                        pc.PlotType = PLOT_TYPE_EXTENTS
+                        pc.PlotToFile(pdf_path)
+                    except Exception as e2:  # noqa: BLE001
+                        raise CadError("PDF 打印失败（窗口/范围双路线均失败）：%s / %s" % (last_err, e2))
+            finally:
+                try:
+                    pc.Delete()
+                except Exception:
+                    pass
+        finally:
+            if old_bg is not None:
+                try:
+                    doc.SetVariable("BACKGROUNDPLOT", old_bg)
+                except Exception:
+                    pass
 
     def _set_paper_size(self, pc, frame, margin):
-        """选择与图框尺寸匹配的纸张（含边距）。"""
+        """选择与图框尺寸匹配的纸张（含边距）。
+
+        2026-10-25 整改：匹配不到合适纸张时**不再抛异常中断**窗口打印，
+        降级为默认纸张 + UseStandardScale=True; StandardScale=0（布满），
+        窗口范围仍保证每框一页。
+        """
         need_w = frame.width + 2 * margin
         need_h = frame.height + 2 * margin
         target = (min(need_w, need_h), max(need_w, need_h))
@@ -321,7 +424,6 @@ class CadSession:
             if abs(min(w, h) - target[0]) <= 5 and abs(max(w, h) - target[1]) <= 5:
                 chosen = n
                 break
-            # 记录最接近的纸张作为回退
             diff = abs(min(w, h) - target[0]) + abs(max(w, h) - target[1])
             if best_diff is None or diff < best_diff:
                 best_diff = diff
@@ -332,7 +434,12 @@ class CadSession:
                 return
             except Exception:
                 pass
-        raise CadError("未找到与图幅匹配的 PDF 纸张（图框 %.0fx%.0fmm）" % (frame.width, frame.height))
+        # 降级：默认纸张 + 布满（不抛异常）
+        try:
+            pc.UseStandardScale = True
+            pc.StandardScale = 0
+        except Exception:
+            pass
 
     # ---------- 模型空间范围 ----------
 
@@ -352,6 +459,11 @@ class CadSession:
 def os_path_exists(p):
     import os
     return os.path.exists(p)
+
+
+def os_path_abspath(p):
+    import os
+    return os.path.abspath(p)
 
 
 def os_remove(p):

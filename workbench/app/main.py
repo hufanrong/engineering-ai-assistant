@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.153")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.154")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -5215,4 +5215,23 @@ def completion_clean_drawings():
     result = _dcb.ensure_completion_drawings()
     result["ok"] = result.get("status") in ("no_drawings", "done")
     return result
+
+
+# v0.1.154：清稿规则项目级配置（不同设计院标题栏格式差异大，规则可网页编辑）
+@app.get("/api/tools/dwg-cleaner/config")
+def dwg_cleaner_get_config(project_id: str = ""):
+    """读取生效清稿规则（项目级优先，无则包内默认）。"""
+    from . import dwg_cleaner_bridge as _dcb
+    return _dcb.get_project_cleaner_config(project_id or None)
+
+
+@app.post("/api/tools/dwg-cleaner/config")
+def dwg_cleaner_save_config(data: dict):
+    """保存项目级清稿规则。"""
+    from . import dwg_cleaner_bridge as _dcb
+    project_id = data.get("project_id") or ""
+    config_dict = data.get("config")
+    if not isinstance(config_dict, dict):
+        return {"ok": False, "error": "config 必须是 JSON 对象"}
+    return _dcb.save_project_cleaner_config(project_id or None, config_dict)
 

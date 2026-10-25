@@ -77,6 +77,8 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
         "deleted_count": 0,
         "replaced_count": 0,
         "log_file": "",
+        "previews": [],
+        "notes": [],
         "error": "",
     }
 
@@ -85,6 +87,14 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
             doc = session.open_document(dwg_path, readonly=True)
             space = doc.ModelSpace
             log("已打开（只读）：%s" % base)
+
+            # 0) 代理实体总量检测（天正等，2026-10-25 整改：明确告警而非静默漏删）
+            try:
+                proxy_total = _count_proxy_entities(session, space)
+                if proxy_total:
+                    notes.append("检测到 %d 个代理实体（天正等第三方对象），将尝试炸开解析；无法解析的部分需人工核对" % proxy_total)
+            except Exception:
+                pass
 
             # 1) 炸开"图框/标题栏"块（整框为块、多图共用同一块的情况）
             _explode_frame_blocks(session, space, cfg, log, notes)
@@ -139,6 +149,8 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
             notes.append("警告：原文件 MD5 发生变化，请检查！")
 
         log_file = _write_log(item_dir, base, deleted, replaced, frames_count, pdf_pages, md5_ok, notes)
+        # 2026-10-25 整改：清稿 PDF 每页渲染缩略图供人工验收（可视化，不再只看数字）
+        previews = _render_pdf_previews(pdf_path, item_dir)
         result.update(
             status="success",
             frame_count=frames_count,
@@ -146,6 +158,8 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
             deleted_count=len(deleted),
             replaced_count=len(replaced),
             log_file=log_file,
+            previews=previews,
+            notes=notes,
         )
         log("完成：%s（删 %d / 改 %d）" % (base, len(deleted), len(replaced)))
     except cad.CadError as e:
@@ -192,8 +206,21 @@ def process_folder(input_path, out_dir, config=None, recursive=True, on_progress
 
 # ---------- 内部实现 ----------
 
+def _count_proxy_entities(session, space):
+    """统计代理实体数量（天正等第三方对象，COM 读不出内容）。"""
+    n = 0
+    for ent in session.iter_entities(space):
+        if session.is_proxy(ent):
+            n += 1
+    return n
+
+
 def _explode_frame_blocks(session, space, cfg, log, notes):
-    """炸开图框/标题栏块引用（块名命中关键词，或外框尺寸命中标准图幅）。"""
+    """炸开图框/标题栏块引用（块名命中关键词，或外框尺寸命中标准图幅）。
+
+    2026-10-25 整改：代理实体（天正自定义对象）尝试炸开，失败则明确告警，
+    不再静默漏删。
+    """
     rounds = 3
     while rounds > 0:
         rounds -= 1
@@ -241,8 +268,16 @@ def _collect_rects(session, space, cfg):
 
 
 def _clean_titleblock(session, space, region, cfg, log):
-    """清理一个图框内的标题栏：炸开区域内块 → 按规则删/改区域内文字。"""
+    """清理一个图框内的标题栏：炸开区域内块 → 按规则删/改区域内文字。
+
+    2026-10-25 整改：
+    - 白名单模式（cfg.titleblock.whitelist_mode，默认开启）：区域内文字不命中
+      protect_keywords 一律删除——可删掉黑名单规则覆盖不到的"旁边的人名"、
+      任意格式公司名、日期、证书编号。
+    - 代理实体（天正等）尝试炸开，失败明确告警，不再静默漏删。
+    """
     deleted, replaced, notes = [], [], []
+    whitelist = bool(cfg.get("titleblock", {}).get("whitelist_mode", True))
 
     # 1) 炸开区域内所有块引用（含属性块，属性值炸开后转为 TEXT 一并处理；多图共用块则逐实例处理）
     rounds = 4
@@ -266,10 +301,12 @@ def _clean_titleblock(session, space, region, cfg, log):
                 notes.append("炸开标题栏块失败 %s: %s" % (ent.Name, e))
         log("炸开标题栏块 %d 个" % len(targets))
 
-    # 2) 收集区域内文字（先收集后处理，避免遍历中修改集合）
+    # 2) 收集区域内文字与代理实体（先收集后处理，避免遍历中修改集合）
     text_targets = []
+    proxy_targets = []
     for ent in session.iter_entities(space):
         if session.is_proxy(ent):
+            proxy_targets.append(ent)
             continue
         txt = session.get_text(ent)
         if txt is None:
@@ -281,9 +318,23 @@ def _clean_titleblock(session, space, region, cfg, log):
         if p and titleblock.in_region(p[0], p[1], region):
             text_targets.append((ent, txt, p))
 
-    # 3) 判定并执行
+    # 3) 处理代理实体：尝试炸开（天正块炸开后可能得到可读文字）
+    for ent in proxy_targets:
+        try:
+            out = session.explode_ref(ent)
+            if out:
+                notes.append("代理实体已炸开解析（天正等第三方对象）")
+            else:
+                notes.append("警告：检测到无法读取的代理实体（天正等第三方对象），其标题栏内容可能未清理，请人工核对")
+        except Exception as e:
+            notes.append("警告：代理实体处理失败（%s），其标题栏内容可能未清理，请人工核对" % e)
+
+    # 4) 判定并执行
     for ent, txt, pos in text_targets:
-        action, reason, new_text = rules.judge_text(txt, cfg)
+        if whitelist:
+            action, reason, new_text = rules.judge_whitelist_text(txt, cfg)
+        else:
+            action, reason, new_text = rules.judge_text(txt, cfg)
         pos_str = "%.1f,%.1f" % (pos[0], pos[1])
         if action == "delete":
             try:
@@ -301,3 +352,29 @@ def _clean_titleblock(session, space, region, cfg, log):
                 notes.append("替换失败 %r: %s" % (txt, e))
 
     return deleted, replaced, notes
+
+
+def _render_pdf_previews(pdf_path, out_dir, max_pages=6):
+    """清稿 PDF 每页渲染缩略图（PNG）供人工验收（2026-10-25 整改）。
+
+    依赖 PyMuPDF（fitz）；未安装时返回 []，不阻塞主流程。
+    """
+    previews = []
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return []
+    try:
+        doc = fitz.open(pdf_path)
+        prev_dir = os.path.join(out_dir, "验收缩略图")
+        os.makedirs(prev_dir, exist_ok=True)
+        for i in range(min(doc.page_count, max_pages)):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.2, 1.2))
+            p = os.path.join(prev_dir, "page_%02d.png" % (i + 1))
+            pix.save(p)
+            previews.append(p)
+        doc.close()
+    except Exception:
+        return []
+    return previews
