@@ -282,6 +282,19 @@ class CadSession:
         except Exception:
             return []
 
+    def convert_to_autocad_type(self, ent):
+        """把代理/自定义实体（天正 TArch 等）转换为 AutoCAD 基础实体（原地转换）。
+
+        AutoCAD 2010+ COM 提供 Document.ConvertToAutoCADType()，天正标题栏
+        文字/图框经此转换后变 AcDbText/AcDbLine 等可读基础实体，是解决
+        "代理实体读不到 TextString" 的正解。转换失败返回 False（走炸开兜底）。
+        """
+        try:
+            self._doc.ConvertToAutoCADType(ent)
+            return True
+        except Exception:
+            return False
+
     def is_proxy(self, ent):
         try:
             return ent.ObjectName == "AcDbProxyEntity"

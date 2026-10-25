@@ -21,7 +21,8 @@
     "default_width_ratio": 1.0,
     "default_height_ratio": 0.2,
     "use_line_detection": true,
-    "whitelist_mode": true
+    "whitelist_mode": true,
+    "region_expand_mm": 15
   },
   "frame_detect": {
     "standard_sizes_mm": [[841, 1189], [594, 841], [420, 594], [297, 420], [210, 297]],

@@ -218,17 +218,19 @@ def _count_proxy_entities(session, space):
 def _explode_frame_blocks(session, space, cfg, log, notes):
     """炸开图框/标题栏块引用（块名命中关键词，或外框尺寸命中标准图幅）。
 
-    2026-10-25 整改：代理实体（天正自定义对象）尝试炸开，失败则明确告警，
-    不再静默漏删。
+    2026-10-25 整改：代理实体（天正自定义对象）先 ConvertToAutoCADType 原地转换
+    （失败再炸开），转换后图框线/文字可被后续矩形检测与文字收集读到；无法
+    解析的明确告警，不再静默漏删。
     """
     rounds = 3
     while rounds > 0:
         rounds -= 1
         targets = []
         for ent in session.iter_entities(space):
-            if ent.ObjectName != "AcDbBlockReference":
-                continue
             if session.is_proxy(ent):
+                targets.append(("proxy", ent))
+                continue
+            if ent.ObjectName != "AcDbBlockReference":
                 continue
             try:
                 name = str(ent.Name or "").lower()
@@ -240,16 +242,27 @@ def _explode_frame_blocks(session, space, cfg, log, notes):
             if b:
                 is_size_hit = titleblock.match_standard_size(b[2] - b[0], b[3] - b[1])
             if is_name_hit or is_size_hit:
-                targets.append(ent)
+                targets.append(("block", ent))
         if not targets:
             break
-        for ent in targets:
-            try:
-                out = session.explode_ref(ent)
-                if not out:
-                    notes.append("炸开块失败或空：%s" % ent.Name)
-            except Exception as e:
-                notes.append("炸开块异常 %s: %s" % (ent.Name, e))
+        for kind, ent in targets:
+            if kind == "proxy":
+                if session.convert_to_autocad_type(ent):
+                    notes.append("代理实体已转换为 AutoCAD 基础实体（图框/标题栏可读）")
+                    continue
+                try:
+                    out = session.explode_ref(ent)
+                    if out:
+                        notes.append("代理实体（图框/标题栏）已炸开解析")
+                except Exception as e:
+                    notes.append("代理实体炸开异常 %s: %s" % (ent, e))
+            else:
+                try:
+                    out = session.explode_ref(ent)
+                    if not out:
+                        notes.append("炸开块失败或空：%s" % ent.Name)
+                except Exception as e:
+                    notes.append("炸开块异常 %s: %s" % (ent.Name, e))
         log("炸开图框/标题栏块 %d 个" % len(targets))
 
 
@@ -268,68 +281,70 @@ def _collect_rects(session, space, cfg):
 
 
 def _clean_titleblock(session, space, region, cfg, log):
-    """清理一个图框内的标题栏：炸开区域内块 → 按规则删/改区域内文字。
+    """清理一个图框内的标题栏：炸开/转换区域内块 → 按规则删/改区域内文字。
 
-    2026-10-25 整改：
-    - 白名单模式（cfg.titleblock.whitelist_mode，默认开启）：区域内文字不命中
-      protect_keywords 一律删除——可删掉黑名单规则覆盖不到的"旁边的人名"、
-      任意格式公司名、日期、证书编号。
-    - 代理实体（天正等）尝试炸开，失败明确告警，不再静默漏删。
+    2026-10-25 二次整改（修复 0.1.154 顺序 bug + 代理实体链路）：
+    - 循环处理阶段：区域内【代理实体】（天正等）先 ConvertToAutoCADType 原地转换
+      （AutoCAD 2010+ COM），失败再炸开；区域内【块引用】炸开。循环直到无可处理
+      目标——**炸出/转换出的新文字实体会进入下一轮收集，不再漏删**。
+    - 白名单模式（默认开启）：区域内文字不命中 protect_keywords 一律删除。
+    - 文字位置判定：优先 GetBoundingBox 中心（对 MTEXT/TEXT 都稳），插入点兜底。
     """
     deleted, replaced, notes = [], [], []
     whitelist = bool(cfg.get("titleblock", {}).get("whitelist_mode", True))
 
-    # 1) 炸开区域内所有块引用（含属性块，属性值炸开后转为 TEXT 一并处理；多图共用块则逐实例处理）
-    rounds = 4
+    # 1) 循环处理区域内块/代理实体（转换或炸开，直到没有可处理目标）
+    rounds = 6
     while rounds > 0:
         rounds -= 1
         targets = []
         for ent in session.iter_entities(space):
-            if ent.ObjectName != "AcDbBlockReference":
-                continue
             if session.is_proxy(ent):
+                targets.append(("proxy", ent))
+                continue
+            if ent.ObjectName != "AcDbBlockReference":
                 continue
             p = session.get_insertion(ent)
             if p and titleblock.in_region(p[0], p[1], region):
-                targets.append(ent)
+                targets.append(("block", ent))
         if not targets:
             break
-        for ent in targets:
-            try:
-                session.explode_ref(ent)
-            except Exception as e:
-                notes.append("炸开标题栏块失败 %s: %s" % (ent.Name, e))
-        log("炸开标题栏块 %d 个" % len(targets))
+        for kind, ent in targets:
+            if kind == "proxy":
+                if session.convert_to_autocad_type(ent):
+                    notes.append("代理实体已转换为 AutoCAD 基础实体（天正等第三方对象，转换后可读取文字）")
+                    continue
+                try:
+                    out = session.explode_ref(ent)
+                    if out:
+                        notes.append("代理实体已炸开解析")
+                    else:
+                        notes.append("警告：检测到无法读取的代理实体（天正等第三方对象），其标题栏内容可能未清理，请人工核对")
+                except Exception as e:
+                    notes.append("警告：代理实体处理失败（%s），其标题栏内容可能未清理，请人工核对" % e)
+            else:
+                try:
+                    session.explode_ref(ent)
+                except Exception as e:
+                    notes.append("炸开标题栏块失败 %s: %s" % (ent.Name, e))
+        log("处理区域内块/代理实体一批（剩余循环 %d）" % rounds)
 
-    # 2) 收集区域内文字与代理实体（先收集后处理，避免遍历中修改集合）
+    # 2) 收集区域内文字（炸开/转换已完成，此时全部实体可读）
     text_targets = []
-    proxy_targets = []
     for ent in session.iter_entities(space):
-        if session.is_proxy(ent):
-            proxy_targets.append(ent)
-            continue
         txt = session.get_text(ent)
         if txt is None:
             continue
-        p = session.get_insertion(ent)
+        p = None
+        b = session.get_bounds(ent)
+        if b:
+            p = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
         if p is None:
-            b = session.get_bounds(ent)
-            p = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0) if b else None
+            p = session.get_insertion(ent)
         if p and titleblock.in_region(p[0], p[1], region):
             text_targets.append((ent, txt, p))
 
-    # 3) 处理代理实体：尝试炸开（天正块炸开后可能得到可读文字）
-    for ent in proxy_targets:
-        try:
-            out = session.explode_ref(ent)
-            if out:
-                notes.append("代理实体已炸开解析（天正等第三方对象）")
-            else:
-                notes.append("警告：检测到无法读取的代理实体（天正等第三方对象），其标题栏内容可能未清理，请人工核对")
-        except Exception as e:
-            notes.append("警告：代理实体处理失败（%s），其标题栏内容可能未清理，请人工核对" % e)
-
-    # 4) 判定并执行
+    # 3) 判定并执行
     for ent, txt, pos in text_targets:
         if whitelist:
             action, reason, new_text = rules.judge_whitelist_text(txt, cfg)

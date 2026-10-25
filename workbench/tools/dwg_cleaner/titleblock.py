@@ -115,6 +115,8 @@ def titleblock_region(frame, cfg=None):
     """标题栏候选区域：图框右下角一块矩形，返回 (minx, miny, maxx, maxy)。
 
     默认取图框底部整条（宽 100%）、高度 20%；比例可在配置中调整。
+    2026-10-25 二次整改：支持 region_expand_mm 外扩（默认 15mm）——
+    设计院公司名/日期常压在图框外红线区（贴着图框右/下边），不外扩则漏删。
     """
     cfg = cfg or {}
     tb = cfg.get("titleblock", {})
@@ -122,9 +124,12 @@ def titleblock_region(frame, cfg=None):
     hr = tb.get("default_height_ratio", 0.2)
     wr = max(0.1, min(1.0, wr))
     hr = max(0.05, min(0.8, hr))
-    minx = frame.maxx - frame.width * wr
+    expand = float(tb.get("region_expand_mm", 15))
+    minx = frame.maxx - frame.width * wr - expand
+    miny = frame.miny - expand
+    maxx = frame.maxx + expand
     maxy = frame.miny + frame.height * hr
-    return (minx, frame.miny, frame.maxx, maxy)
+    return (minx, miny, maxx, maxy)
 
 
 def in_region(x, y, region):
