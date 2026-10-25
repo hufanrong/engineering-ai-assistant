@@ -179,3 +179,127 @@ def export_todo(project_id, book, workshop=''):
         with open(path, encoding='utf-8') as f:
             return f.read()
     return '（尚未整卷生成，无可导出待办）'
+
+
+# ---------- C 类文件自动归集（v0.1.152） ----------
+# C 类项关键词表：按"文件名关键词 → (册, 序号前缀, 归集名)"，匹配顺序=列表顺序
+COLLECT_KEYWORDS = [
+    # 变配电 2.x 竣工图
+    ("主接线", "变配电室/总降", "2_01", "一次主接线竣工图"),
+    ("平面布置", "变配电室/总降", "2_02", "平面布置竣工图"),
+    ("二次原理", "变配电室/总降", "2_03", "二次原理竣工图"),
+    ("端子接线", "变配电室/总降", "2_04", "二次端子接线竣工图"),
+    ("电缆走向", "变配电室/总降", "2_05", "电缆走向竣工图、电缆清册"),
+    ("电缆清册", "变配电室/总降", "2_05", "电缆走向竣工图、电缆清册"),
+    ("接地网", "变配电室/总降", "2_06", "接地网竣工图"),
+    ("直流系统", "变配电室/总降", "2_07", "直流系统竣工图"),
+    # 变配电 5.x 厂家资料
+    ("工器具", "变配电室/总降", "6_01", "高压安全工器具检测报告"),
+    ("验电器", "变配电室/总降", "6_01", "高压安全工器具检测报告"),
+    ("绝缘手套", "变配电室/总降", "6_01", "高压安全工器具检测报告"),
+    # 电气 2.x
+    ("动力系统", "车间电气", "2_01", "车间动力系统竣工图"),
+    ("动力平面", "车间电气", "2_02", "车间动力平面布置竣工图"),
+    ("照明", "车间电气", "2_03", "车间照明竣工图"),
+    ("电缆敷设", "车间电气", "2_04", "车间电缆敷设竣工图"),
+    ("电机接线", "车间电气", "2_05", "电机接线竣工图"),
+    ("等电位", "车间电气", "2_06", "等电位、防静电接地竣工图"),
+    ("防静电", "车间电气", "2_06", "等电位、防静电接地竣工图"),
+    ("防爆合格证", "车间电气", "5_02", "防爆设备防爆合格证"),
+    # 仪表 2.x
+    ("P&ID", "车间仪表", "2_01", "管道及仪表流程图P&ID"),
+    ("PID", "车间仪表", "2_01", "管道及仪表流程图P&ID"),
+    ("仪表位置", "车间仪表", "2_02", "仪表位置平面竣工图"),
+    ("仪表盘柜布置", "车间仪表", "2_03", "仪表盘、柜布置竣工图"),
+    ("回路接线", "车间仪表", "2_04", "仪表回路接线图、端子图"),
+    ("端子图", "车间仪表", "2_04", "仪表回路接线图、端子图"),
+    ("取源部件位置", "车间仪表", "2_06", "取源部件位置竣工图"),
+    ("气源", "车间仪表", "2_07", "仪表气源、导压管路竣工图"),
+    ("导压管路", "车间仪表", "2_07", "仪表气源、导压管路竣工图"),
+    ("联锁逻辑", "车间仪表", "2_08", "联锁逻辑竣工图"),
+    ("DCS", "车间仪表", "5_02", "DCS/PLC程序、画面、历史库备份"),
+    ("PLC", "车间仪表", "5_02", "DCS/PLC程序、画面、历史库备份"),
+    # 通用厂家资料
+    ("说明书", None, "厂家资料", "设备原厂说明书、操作手册"),
+    ("操作手册", None, "厂家资料", "设备原厂说明书、操作手册"),
+    ("合格证", None, "厂家资料", "设备材料出厂合格证、质保书"),
+    ("质保书", None, "厂家资料", "设备材料出厂合格证、质保书"),
+    ("3C", None, "厂家资料", "设备材料出厂合格证、质保书"),
+    ("出厂试验", None, "厂家资料", "设备材料出厂试验报告"),
+    ("出厂检测", None, "厂家资料", "设备材料出厂检测报告"),
+    ("标定证书", None, "厂家资料", "仪表标定证书"),
+    ("检测报告", None, "检测报告", "第三方检测报告"),
+    ("检验报告", None, "检测报告", "第三方检测报告"),
+]
+
+
+def _match_collect(file_name):
+    for kw, book, seq, name in COLLECT_KEYWORDS:
+        if kw in file_name:
+            return book, seq, name
+    return None
+
+
+def route_uploaded_file(project_id, file_name, sha256, uploader="", book=None, workshop=""):
+    """上传解析完成后自动归集：匹配 C 类项 → 写入归集目录 _collect.json 关联记录。
+    返回归集结果；不匹配则返回 None（不做强归集，避免误判）。"""
+    try:
+        ext = os.path.splitext(file_name)[1].lower()
+        is_drawing = ext in ('.dwg', '.dxf', '.dwt')
+        m = _match_collect(file_name)
+        if not m:
+            # 图纸类兜底：cad 图纸无关键词 → 归"图纸通用"
+            if is_drawing:
+                m = (None, '图纸通用', 'CAD图纸文件')
+            else:
+                return {"matched": False}
+        mbook, seq, name = m
+        target_book = book or (mbook if mbook else '未分册')
+        base = os.path.join(_volume_dir(project_id, target_book, workshop), f'_归集_{seq}_{name}')
+        os.makedirs(base, exist_ok=True)
+        rec_path = os.path.join(base, '_collect.json')
+        recs = []
+        if os.path.exists(rec_path):
+            with open(rec_path, encoding='utf-8') as f:
+                try:
+                    recs = json.load(f)
+                except Exception:  # noqa: BLE001
+                    recs = []
+        if not any(r.get('sha256') == sha256 for r in recs):
+            recs.append({"file_name": file_name, "sha256": sha256, "ts": __import__("datetime").datetime.now().isoformat(), "uploader": uploader})
+            with open(rec_path, 'w', encoding='utf-8') as f:
+                json.dump(recs, f, ensure_ascii=False, indent=1)
+        return {"matched": True, "book": target_book, "seq": seq, "name": name, "dir": base}
+    except Exception as e:  # noqa: BLE001
+        return {"matched": False, "error": str(e)}
+
+
+def manual_collect(project_id, sha256, book, workshop="", note=""):
+    """手动归集：把已入库文件（sha）关联到指定册×指定归集项。
+    book 支持 '册|归集项名' 或直接册名（归集到该册通用目录）。"""
+    # 从全局解析索引找文件信息（与上传/扫描共用）
+    file_name = sha256[:12] + '.bin'
+    try:
+        from . import scanner
+        ent = scanner._load_index().get(sha256) or {}
+        file_name = ent.get('file_name', sha256[:12]) or file_name
+    except Exception:  # noqa: BLE001
+        pass
+    if '|' in book:
+        mbook, mname = book.split('|', 1)
+        seq = '手'
+        name = mname
+    else:
+        mbook, seq, name = book, '手', '手动归集'
+    base = os.path.join(_volume_dir(project_id, mbook, workshop), f'_归集_{seq}_{name}')
+    os.makedirs(base, exist_ok=True)
+    rec_path = os.path.join(base, '_collect.json')
+    recs = []
+    if os.path.exists(rec_path):
+        try:
+            recs = json.load(open(rec_path, encoding='utf-8'))
+        except Exception:  # noqa: BLE001
+            recs = []
+    recs.append({"file_name": file_name, "sha256": sha256, "ts": __import__("datetime").datetime.now().isoformat(), "note": note})
+    json.dump(recs, open(rec_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    return {"ok": True, "dir": base, "recs": len(recs)}

@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.151")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.152")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -449,6 +449,17 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                                          file_path=rel_paths[fi] if fi < len(rel_paths) else "")
                 except Exception:  # noqa: BLE001
                     pass
+            # v0.1.152：上传自动归集到整编 C 类归集目录（图纸/厂家资料/检测报告等）
+            try:
+                from . import supervision_integration as _si2
+                from . import project_manager as _pm2
+                _cur2 = _pm2.get_current_project()
+                if _cur2:
+                    _si2.route_uploaded_file(_cur2.get('project_id', ''), name, res.sha256,
+                                             uploader=uploader,
+                                             workshop=_cur2.get('workshop', ''))
+            except Exception:  # noqa: BLE001
+                pass
             # 登记索引（供去重/失败管理/统计共用，v0.1.22）
             idx = scanner._load_index()
             idx[res.sha256] = {
@@ -932,6 +943,24 @@ def supervision_volume(req: VolumeReq):
 def supervision_todo(project_id: str = "", book: str = "", workshop: str = ""):
     """导出待办清单文本。"""
     return {"ok": True, "todo": si.export_todo(project_id, book, workshop)}
+
+
+class CollectReq(BaseModel):
+    project_id: str = ""
+    sha256: str = ""
+    book: str = ""
+    workshop: str = ""
+    note: str = ""
+
+
+@app.post("/api/supervision/collect")
+def supervision_collect(req: CollectReq):
+    """手动把已入库文件（sha256）归集到指定册。"""
+    try:
+        r = si.manual_collect(req.project_id, req.sha256, req.book, req.workshop, req.note)
+        return {"ok": r.get("ok", False), "dir": r.get("dir", ""), "recs": r.get("recs", 0)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"归集失败：{e}")
 
 
 

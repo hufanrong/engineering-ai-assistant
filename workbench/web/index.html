@@ -591,6 +591,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       <div id="supStatusBar" style="font-size:12px;color:#5B3EA8;padding:8px;border-radius:6px;background:#fff;border:1px solid #e8e0f5;min-height:20px">选择册与车间后点击「检查缺项」。</div>
       <div id="supMissingList" style="font-size:12px;max-height:240px;overflow:auto;margin-top:8px"></div>
       <div id="supTodoBar" style="font-size:12px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px dashed #e2d9f0;align-items:center">
+        <span style="font-size:12px;color:#5B3EA8">📌 手动归集文件：</span>
+        <input id="supCollectSha" placeholder="文件SHA256（资源管理中文件信息可复制）" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:220px">
+        <input id="supCollectNote" placeholder="备注（可选）" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:140px">
+        <button class="btn btn-sm" onclick="manualCollect()" style="border-color:#5B3EA8;color:#5B3EA8">📂 归集到当前册</button>
+        <span id="supCollectMsg" style="font-size:12px;color:#666"></span>
+      </div>
     </div>
   </div>
 
@@ -1924,6 +1931,21 @@ function runVolume() {
     var ws = document.getElementById('supWorkshopInput').value.trim();
     var btn = document.getElementById('supTodoBar');
     btn.innerHTML = '整卷生成中，请稍候（A/B 项按车间生成，C 类建归集目录）...';
+    if (typeof manualCollect === 'undefined') {
+      window.manualCollect = function () {
+        var sha = document.getElementById('supCollectSha').value.trim();
+        if (!sha) { document.getElementById('supCollectMsg').textContent = '请输入文件SHA'; return; }
+        var book = document.getElementById('supBookSel').value;
+        var ws = document.getElementById('supWorkshopInput').value.trim();
+        fetch('/api/supervision/collect', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({project_id: currentProject, sha256: sha, book: book, workshop: ws, note: document.getElementById('supCollectNote').value.trim()})
+        }).then(function(r){ return r.json(); }).then(function(d){
+          document.getElementById('supCollectMsg').textContent = d.ok ? ('已归集 → ' + d.dir) : '归集失败';
+        }).catch(function(e){ document.getElementById('supCollectMsg').textContent = '归集失败：' + e; });
+      };
+    }
     fetch('/api/supervision/volume', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
