@@ -572,6 +572,26 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       <div id="cleanerResult" style="font-size:12px"></div>
     </div>
     <div id="archiveWorkshopList"></div>
+
+    <!-- v0.1.151：整编联动（按整编要求 214 项整卷/检查/待办） -->
+    <div style="border:1px solid #e2d9f0;border-radius:8px;padding:12px;margin-top:16px;background:#faf7ff">
+      <div style="font-size:13px;font-weight:700;color:#5B3EA8;margin-bottom:10px">📑 整编联动（整编要求 214 项）</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <select id="supBookSel" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:12px">
+          <option value="变配电室/总降">变配电册</option>
+          <option value="车间电气">车间电气册</option>
+          <option value="车间仪表">车间仪表册</option>
+          <option value="设备安装">设备安装册</option>
+          <option value="工艺管道">工艺管道册</option>
+        </select>
+        <input id="supWorkshopInput" placeholder="车间名（留空=全厂）" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:160px">
+        <button class="btn btn-sm" onclick="checkSupervision()">🔍 检查缺项</button>
+        <button class="btn btn-sm btn-primary" onclick="runVolume()" style="background:#5B3EA8;border-color:#5B3EA8;color:#fff">📚 一键整卷</button>
+      </div>
+      <div id="supStatusBar" style="font-size:12px;color:#5B3EA8;padding:8px;border-radius:6px;background:#fff;border:1px solid #e8e0f5;min-height:20px">选择册与车间后点击「检查缺项」。</div>
+      <div id="supMissingList" style="font-size:12px;max-height:240px;overflow:auto;margin-top:8px"></div>
+      <div id="supTodoBar" style="font-size:12px;margin-top:8px"></div>
+    </div>
   </div>
 
   <!-- 车间竣工详情 -->
@@ -1855,6 +1875,81 @@ function saveSupConfig() {
         loadSupConfig();
     })
     .catch(function() { alert('保存失败，请检查工作台是否运行'); });
+}
+
+// ===== 整编联动（v0.1.151） =====
+function getCurrentProjectIdForSup() {
+    try {
+        var p = JSON.parse(localStorage.getItem('fanGong_currentProject') || 'null');
+        if (p && p.project_id) return p.project_id;
+        var c = document.getElementById('projectSelector');
+        if (c && c.value) return c.value;
+    } catch(e) {}
+    return '';
+}
+function checkSupervision() {
+    var pid = getCurrentProjectIdForSup();
+    if (!pid) { alert('请先在资源管理中选择项目'); return; }
+    var book = document.getElementById('supBookSel').value;
+    var ws = document.getElementById('supWorkshopInput').value.trim();
+    var bar = document.getElementById('supStatusBar');
+    bar.innerHTML = '检查中...';
+    fetch('/api/supervision/status?project_id=' + encodeURIComponent(pid) + '&book=' + encodeURIComponent(book) + '&workshop=' + encodeURIComponent(ws))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        if (!d.ok) { bar.innerHTML = '检查失败：' + (d.detail || '未知错误'); return; }
+        var s = d.status;
+        bar.innerHTML = '册：<b>' + s.book + '</b>｜总数 ' + s.total + '（A ' + s.a + ' / B ' + s.b + ' / C ' + s.c + ' / 重复跳过 ' + s.dup + '）<br>已生成 <b style="color:#2e7d32">' + s.generated.length + '</b>｜缺 <b style="color:#c62828">' + s.missing.length + '</b>｜归集 ' + s.collect.length;
+        var html = '';
+        if (s.missing.length) {
+            html += '<div style="font-weight:600;color:#c62828;margin:6px 0">缺少项（点击「一键整卷」生成）：</div><table style="width:100%;border-collapse:collapse"><tr style="background:#f3e5f5"><th style="padding:4px;border:1px solid #ddd">序号</th><th style="padding:4px;border:1px solid #ddd">资料名称</th><th style="padding:4px;border:1px solid #ddd">类型</th></tr>';
+            s.missing.forEach(function(m){
+                html += '<tr><td style="padding:4px;border:1px solid #ddd">' + m['序号'] + '</td><td style="padding:4px;border:1px solid #ddd">' + m['名称'] + '</td><td style="padding:4px;border:1px solid #ddd">' + (m['分类']==='A'?'自动':'预填待补') + '</td></tr>';
+            });
+            html += '</table>';
+        } else {
+            html = '<div style="color:#2e7d32;font-weight:600;margin:6px 0">该册 A/B 类已全部生成 ✅</div>';
+        }
+        if (s.collect.length) {
+            html += '<div style="color:#5B3EA8;font-weight:600;margin:6px 0">归集类（图纸/厂家资料等，建目录存放）：' + s.collect.length + ' 项</div>';
+        }
+        document.getElementById('supMissingList').innerHTML = html;
+    })
+    .catch(function(e){ bar.innerHTML = '检查出错：' + e; });
+}
+function runVolume() {
+    var pid = getCurrentProjectIdForSup();
+    if (!pid) { alert('请先在资源管理中选择项目'); return; }
+    var book = document.getElementById('supBookSel').value;
+    var ws = document.getElementById('supWorkshopInput').value.trim();
+    var btn = document.getElementById('supTodoBar');
+    btn.innerHTML = '整卷生成中，请稍候（A/B 项按车间生成，C 类建归集目录）...';
+    fetch('/api/supervision/volume', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: pid, book: book, workshop: ws})
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        if (!d.ok) {
+            btn.innerHTML = '整卷失败：' + (d.detail || '未知错误');
+            return;
+        }
+        var r = d.result;
+        var html = '✅ 整卷完成：生成文件 <b>' + r.generated.length + '</b> 个｜归集目录 ' + r.collect_dir.length + ' 个';
+        if (r.todo_fields.length) {
+            html += '<br>⏳ 待人工补充实测数据 <b>' + r.todo_fields.length + '</b> 组：';
+            r.todo_fields.slice(0, 10).forEach(function(t){
+                html += '<br> &nbsp;&nbsp;- ' + t['序号'] + ' ' + t['名称'] + '：' + t['待补字段'].slice(0, 8).join('、') + (t['待补字段'].length > 8 ? ' 等' : '');
+            });
+        }
+        if (r.errors.length) {
+            html += '<br>⚠️ 失败 ' + r.errors.length + ' 项：' + r.errors.map(function(e){ return e['名称']; }).join('、');
+        }
+        btn.innerHTML = html;
+        checkSupervision();
+    })
+    .catch(function(e){ btn.innerHTML = '整卷出错：' + e; });
 }
 
 // ===== 竣工组卷 =====

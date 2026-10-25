@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.146")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.151")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -899,6 +899,40 @@ def docgen_generate(req: DocGenReq):
 def datetime_now() -> str:
     import datetime
     return datetime.datetime.now().strftime("%Y%m%d_%H%M")
+
+# ---------- 整编联动（v0.1.151，按整编要求 214 项整卷/检查/待办） ----------
+from . import supervision_integration as si
+
+class VolumeReq(BaseModel):
+    project_id: str = ""
+    book: str = ""
+    workshop: str = ""
+
+
+@app.get("/api/supervision/status")
+def supervision_status(project_id: str = "", book: str = "", workshop: str = ""):
+    """某册×某车间整编完成度检查。"""
+    try:
+        return {"ok": True, "status": si.volume_status(project_id, book, workshop)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"检查失败：{e}")
+
+
+@app.post("/api/supervision/volume")
+def supervision_volume(req: VolumeReq):
+    """一键整卷：A 全自动 + B 预填待补 + C 建归集目录。"""
+    try:
+        r = si.generate_volume(req.project_id, req.book, req.workshop)
+        return {"ok": r["ok"], "result": r}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"整卷失败：{e}")
+
+
+@app.get("/api/supervision/todo")
+def supervision_todo(project_id: str = "", book: str = "", workshop: str = ""):
+    """导出待办清单文本。"""
+    return {"ok": True, "todo": si.export_todo(project_id, book, workshop)}
+
 
 
 # ---------- 库导出/合并（v0.1.9，多电脑解析合并打底） ----------
@@ -3833,7 +3867,7 @@ def save_supervision_config(data: dict):
 @app.post("/api/supervision-templates/generate")
 def render_supervision_template(data: dict):
     """
-    v0.1.146：按表类型+车间生成监理确认表（车间级整合，一份文件含该车间全部设备）。
+    v0.1.147：设备安装册 28 个新模板（GB50231-2009+SH/T3503 表式），26 类可生成。
     输入：{"category": "设备开箱检查记录", "workshop": "辊磨筛分车间", "extra_data": {...}}
     """
     from . import supervision_templates as _st
