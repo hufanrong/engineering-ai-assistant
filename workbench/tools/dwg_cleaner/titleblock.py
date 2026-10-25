@@ -1,20 +1,39 @@
 # -*- coding: utf-8 -*-
-"""图框检测、排序与标题栏区域定位。
+"""图框检测、排序、标题栏区域定位与真实边界识别。
 
 纯几何逻辑，不依赖 AutoCAD。矩形统一用 (minx, miny, maxx, maxy) 表示，
 坐标与世界坐标一致（y 轴向上）。
+
+2026-10-25 全情况整改（v0.1.156）：
+- Frame 增加 rotation（斜置图框转正后的角度，单位弧度，默认 0）
+- titleblock_region 支持四角/右侧/底部配置（corner）
+- detect_titleblock_region：在右下角候选区锁定标题栏真实小矩形（防误删/漏删）
+- is_portrait：竖版判断
+- rotate_point：坐标按旋转角变换（斜置图框文字判定用）
 """
+
+import math
 
 STANDARD_SIZES_MM = [(841, 1189), (594, 841), (420, 594), (297, 420), (210, 297)]
 
+# 标题栏位置配置取值
+CORNER_BOTTOM_RIGHT = "bottom_right"
+CORNER_BOTTOM = "bottom"
+CORNER_TOP_RIGHT = "top_right"
+CORNER_TOP_LEFT = "top_left"
+CORNER_RIGHT = "right"
+VALID_CORNERS = (CORNER_BOTTOM_RIGHT, CORNER_BOTTOM, CORNER_TOP_RIGHT,
+                 CORNER_TOP_LEFT, CORNER_RIGHT)
+
 
 class Frame:
-    """一张图纸的矩形范围。"""
+    """一张图纸的矩形范围。rotation 为斜置图框转正角度（弧度，默认 0）。"""
 
-    __slots__ = ("minx", "miny", "maxx", "maxy")
+    __slots__ = ("minx", "miny", "maxx", "maxy", "rotation")
 
-    def __init__(self, minx, miny, maxx, maxy):
+    def __init__(self, minx, miny, maxx, maxy, rotation=0.0):
         self.minx, self.miny, self.maxx, self.maxy = minx, miny, maxx, maxy
+        self.rotation = rotation
 
     @property
     def width(self):
@@ -33,7 +52,22 @@ class Frame:
         return (self.miny + self.maxy) / 2.0
 
     def __repr__(self):
-        return "Frame(%.1f,%.1f,%.1f,%.1f)" % (self.minx, self.miny, self.maxx, self.maxy)
+        return "Frame(%.1f,%.1f,%.1f,%.1f,rot=%.3f)" % (
+            self.minx, self.miny, self.maxx, self.maxy, self.rotation)
+
+
+def is_portrait(frame, ratio=1.05):
+    """竖版判断：高明显大于宽视为竖版（长边竖直）。"""
+    return frame.height > frame.width * ratio
+
+
+def rotate_point(x, y, cx, cy, angle_rad):
+    """把点绕 (cx, cy) 旋转 -angle_rad（把斜置坐标转回图框正轴系）。"""
+    if not angle_rad:
+        return (x, y)
+    cos, sin = math.cos(angle_rad), math.sin(angle_rad)
+    dx, dy = x - cx, y - cy
+    return (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
 
 
 def match_standard_size(w, h, std_sizes=STANDARD_SIZES_MM, tolerance=3.0):
@@ -63,6 +97,7 @@ def match_fallback(w, h, min_side=180, max_side=1300, ratio_min=0.4, ratio_max=2
 def detect_frames(rects, cfg=None, use_fallback=True):
     """从候选矩形列表中过滤出图框，并去除嵌套（保留外层大框）。
 
+    rects 元素：(minx, miny, maxx, maxy) 或 (minx, miny, maxx, maxy, rotation)。
     返回 Frame 列表（未排序）。
     """
     cfg = cfg or {}
@@ -70,14 +105,19 @@ def detect_frames(rects, cfg=None, use_fallback=True):
     std = fd.get("standard_sizes_mm", STANDARD_SIZES_MM)
     tol = fd.get("tolerance_mm", 3)
 
+    def _unpack(r):
+        if len(r) >= 5:
+            return r[0], r[1], r[2], r[3], float(r[4])
+        return r[0], r[1], r[2], r[3], 0.0
+
     candidates = []
     for r in rects:
-        minx, miny, maxx, maxy = r
+        minx, miny, maxx, maxy, rot = _unpack(r)
         w, h = maxx - minx, maxy - miny
         if w <= 1e-9 or h <= 1e-9:
             continue
         if match_standard_size(w, h, std, tol):
-            candidates.append(Frame(minx, miny, maxx, maxy))
+            candidates.append(Frame(minx, miny, maxx, maxy, rot))
 
     if not candidates and use_fallback:
         f_min = fd.get("fallback_min_side_mm", 180)
@@ -85,12 +125,12 @@ def detect_frames(rects, cfg=None, use_fallback=True):
         r_min = fd.get("fallback_ratio_min", 0.4)
         r_max = fd.get("fallback_ratio_max", 2.5)
         for r in rects:
-            minx, miny, maxx, maxy = r
+            minx, miny, maxx, maxy, rot = _unpack(r)
             w, h = maxx - minx, maxy - miny
             if w <= 1e-9 or h <= 1e-9:
                 continue
             if match_fallback(w, h, f_min, f_max, r_min, r_max):
-                candidates.append(Frame(minx, miny, maxx, maxy))
+                candidates.append(Frame(minx, miny, maxx, maxy, rot))
 
     # 去嵌套：面积大者优先，被已保留框完全包含的丢弃
     kept = []
@@ -112,11 +152,10 @@ def sort_frames(frames):
 
 
 def titleblock_region(frame, cfg=None):
-    """标题栏候选区域：图框右下角一块矩形，返回 (minx, miny, maxx, maxy)。
+    """标题栏候选区域，返回 (minx, miny, maxx, maxy)。
 
-    默认取图框底部整条（宽 100%）、高度 20%；比例可在配置中调整。
-    2026-10-25 二次整改：支持 region_expand_mm 外扩（默认 15mm）——
-    设计院公司名/日期常压在图框外红线区（贴着图框右/下边），不外扩则漏删。
+    2026-10-25 全情况整改：corner 支持右下角/底部/右上/左上/右侧竖条五种布局；
+    region_expand_mm 外扩覆盖图框外红线区。
     """
     cfg = cfg or {}
     tb = cfg.get("titleblock", {})
@@ -125,11 +164,73 @@ def titleblock_region(frame, cfg=None):
     wr = max(0.1, min(1.0, wr))
     hr = max(0.05, min(0.8, hr))
     expand = float(tb.get("region_expand_mm", 15))
-    minx = frame.maxx - frame.width * wr - expand
-    miny = frame.miny - expand
-    maxx = frame.maxx + expand
-    maxy = frame.miny + frame.height * hr
-    return (minx, miny, maxx, maxy)
+    corner = tb.get("corner", CORNER_BOTTOM_RIGHT)
+    if corner not in VALID_CORNERS:
+        corner = CORNER_BOTTOM_RIGHT
+
+    if corner == CORNER_BOTTOM:
+        return (frame.minx - expand, frame.miny - expand,
+                frame.maxx + expand, frame.miny + frame.height * hr)
+    if corner == CORNER_TOP_RIGHT:
+        return (frame.maxx - frame.width * wr - expand,
+                frame.maxy - frame.height * hr - expand,
+                frame.maxx + expand, frame.maxy + expand)
+    if corner == CORNER_TOP_LEFT:
+        return (frame.minx - expand,
+                frame.maxy - frame.height * hr - expand,
+                frame.minx + frame.width * wr + expand, frame.maxy + expand)
+    if corner == CORNER_RIGHT:
+        # 右侧竖条：宽度 wr * 图宽，高度整条
+        return (frame.maxx - frame.width * wr - expand, frame.miny - expand,
+                frame.maxx + expand, frame.maxy + expand)
+    # bottom_right（默认）
+    return (frame.maxx - frame.width * wr - expand, frame.miny - expand,
+            frame.maxx + expand, frame.miny + frame.height * hr)
+
+
+def detect_titleblock_region(frame, rects, cfg=None):
+    """在右下角候选区锁定标题栏**真实小矩形**（2026-10-25 全情况整改）。
+
+    替代固定 20% 高度的粗区域：从图框内的小矩形（线框聚类产物）中
+    挑"最靠下且最靠右"的一个作为标题栏边界——标题栏通常在图框底部的
+    右侧。找不到或面积不合理返回 None（调用方回退 titleblock_region）。
+
+    返回 (minx, miny, maxx, maxy)。
+    """
+    cfg = cfg or {}
+    tb = cfg.get("titleblock", {})
+    if not tb.get("use_real_region_detection", True):
+        return None
+    if not rects:
+        return None
+    fw, fh = frame.width, frame.height
+    if fw <= 0 or fh <= 0:
+        return None
+    candidates = []
+    for r in rects:
+        minx, miny, maxx, maxy = r[0], r[1], r[2], r[3]
+        w, h = maxx - minx, maxy - miny
+        if w <= 1e-6 or h <= 1e-6:
+            continue
+        # 完全在图框内（含轻微外扩容差）
+        if (minx < frame.minx - 5 or miny < frame.miny - 5
+                or maxx > frame.maxx + 5 or maxy > frame.maxy + 5):
+            continue
+        area_ratio = (w * h) / (fw * fh)
+        # 太大=整框/内容框，太小=碎线框
+        if area_ratio > 0.45 or area_ratio < 0.015:
+            continue
+        # 长宽比不能太极端（标题栏横条 0.2~5，竖条另算）
+        r_ = max(w, h) / min(w, h) if min(w, h) > 0 else 99
+        if r_ > 12:
+            continue
+        # 越靠下、越靠右得分越高（y 向上，miny 越小越靠下）
+        score = -miny * 1.0 + maxx * 0.001
+        candidates.append((score, (minx, miny, maxx, maxy)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: -c[0])
+    return candidates[0][1]
 
 
 def in_region(x, y, region):
@@ -149,11 +250,7 @@ def cluster(vals, tol):
 
 
 def build_rects_from_lines(h_lines, v_lines, tol=2.0, max_pairs=400):
-    """由水平/垂直线段组合出矩形，返回 (minx, miny, maxx, maxy) 列表。
-
-    h_lines: [(y, x1, x2), ...]
-    v_lines: [(x, y1, y2), ...]
-    """
+    """由水平/垂直线段组合出矩形，返回 (minx, miny, maxx, maxy) 列表。"""
     if not h_lines or not v_lines:
         return []
     xs = cluster([v[0] for v in v_lines], tol)
@@ -165,7 +262,6 @@ def build_rects_from_lines(h_lines, v_lines, tol=2.0, max_pairs=400):
     for i in range(len(xs)):
         for j in range(i + 1, len(xs)):
             x_lo, x_hi = min(xs[i], xs[j]), max(xs[i], xs[j])
-            # 覆盖 [x_lo, x_hi] 的水平线所在 y 值
             cover_ys = [h[0] for h in h_lines if h[1] <= x_lo + tol and h[2] >= x_hi - tol]
             if len(cover_ys) < 2:
                 continue

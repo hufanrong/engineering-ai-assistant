@@ -94,12 +94,40 @@ def _is_institution(t, cfg):
     return any(k in t for k in cfg["delete_keywords"].get("institution", []))
 
 
+def _strip_delete_segments(t, cfg):
+    """v0.1.156：在**命中保护词**的混合文本里剥离可删段（人名标签段/日期段），
+    保留保护段——解决"图号：X301 审核 王五"整块 keep 导致人名漏删的问题。
+    返回清洗后文本；无可删内容返回 None。
+    """
+    dk = cfg.get("delete_keywords", {})
+    labels = sorted(dk.get("person_labels", []), key=len, reverse=True)
+    new = t
+    for lab in labels:
+        pat = re.compile(re.escape(lab) + r"[:：\s]{0,2}[\S]{1,12}")
+        new = pat.sub("", new)
+    # 日期段剥离：兼容任意位置（含"日期：2025.4.14"标签+串）；
+    # 收紧规则防误伤图号（4 位年开头 + 前后非字母数字，如 "X2025-01" 不剥）
+    for lab in dk.get("date_labels", ["日期", "时间", "出图"]):
+        new = re.sub(re.escape(lab) + r"[:：\s]{0,2}", " ", new)
+    date_pat = re.compile(
+        r"(?<![A-Za-z0-9])\d{4}\s*[年./-]\s*\d{1,2}\s*[月./-]?\s*\d{0,2}\s*日?(?![0-9])"
+        r"|(?<![A-Za-z0-9])[〇零一二三四五六七八九]{4}\s*年\s*[一二三四五六七八九十]{1,3}\s*月(?![0-9])")
+    new = date_pat.sub("", new)
+    new = re.sub(r"[ ：:；;，,]{2,}", " ", new).strip(" ：:；;，,.-")
+    if not new:
+        return None  # 全删光了 → 保持保护词语义，不整块删
+    return new if new != t else None
+
+
 def judge_whitelist_text(text, cfg):
     """标题栏区域白名单判定（2026-10-25 整改，重点方案）：
 
     凡位于标题栏区域内的文字，不命中 protect_keywords（工程名称/图纸名称/图号/
     比例等）的一律删除——可真正删掉"旁边的人名"、任意格式的公司名、日期、
     证书编号等黑名单规则覆盖不到的信息。
+
+    v0.1.156 增强：命中保护词的混合文本（"图号：X301 审核 王五"）做局部清洗，
+    剥离人名标签段与日期段后保留保护段。
 
     返回 (action, reason, new_text)，与 judge_text 同构。
     """
@@ -109,6 +137,9 @@ def judge_whitelist_text(text, cfg):
     mode = cfg["drawing_type_mode"]
     replaced = apply_replacements(t, cfg) if mode == "replace" else t
     if _is_protected(t, cfg):
+        cleaned = _strip_delete_segments(replaced, cfg)
+        if cleaned and cleaned != t:
+            return "replace", "mixed_cleaned", cleaned
         if replaced != t:
             return "replace", "replaced_in_protected", replaced
         return "keep", "protected", None

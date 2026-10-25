@@ -22,22 +22,28 @@ AC_2010_DWG = 60   # R2010-R2012
 AC_2007_DWG = 57   # R2007-R2009
 AC_2004_DWG = 51   # R2004-R2006
 AC_2000_DWG = 49   # R2000-R2003
+# DXF 格式 = 对应 DWG 格式 + 1（ac2018_dxf=65 / ac2013_dxf=62）
 
 
-def saveas_format_for_release(release: float) -> int:
-    """按 AutoCAD 内部版本号（如 24.0=2020）选择可保存的最高通用格式，
-    保证任意版本 AutoCAD 都能另存清稿副本。"""
+def saveas_format_for_release(release: float, dxf: bool = False) -> int:
+    """按 AutoCAD 内部版本号（如 23.1=2020）选择可保存的最高通用格式，
+    保证任意版本 AutoCAD 都能另存清稿副本。dxf=True 时返回对应 DXF 格式
+    （低版本统一存 2013 DXF，兼容性最好）。"""
     if release >= 23.0:
-        return AC_2018_DWG
-    if release >= 19.1:
-        return AC_2013_DWG
-    if release >= 18.1:
-        return AC_2010_DWG
-    if release >= 17.1:
-        return AC_2007_DWG
-    if release >= 16.0:
-        return AC_2004_DWG
-    return AC_2000_DWG
+        fmt = AC_2018_DWG
+    elif release >= 19.1:
+        fmt = AC_2013_DWG
+    elif release >= 18.1:
+        fmt = AC_2010_DWG
+    elif release >= 17.1:
+        fmt = AC_2007_DWG
+    elif release >= 16.0:
+        fmt = AC_2004_DWG
+    else:
+        fmt = AC_2000_DWG
+    if dxf:
+        return fmt + 1 if fmt >= AC_2013_DWG else AC_2013_DWG + 1
+    return fmt
 
 # PlotConfiguration 枚举（2026-10-25 实测修正：acWindow=4，3 是 acView）
 PAPER_UNITS_MM = 1          # acMillimeters
@@ -162,6 +168,10 @@ class CadSession:
                 break
             time.sleep(5)
         if doc is None:
+            # 加密图纸：Open 报错含 password/口令 → 明确识别，不弹窗挂死
+            err = str(last_err or "")
+            if any(k in err.lower() for k in ("password", "口令", "密码")):
+                raise CadError("文件受密码保护（加密图纸），无法自动打开。请在 AutoCAD 中手动打开并移除密码后重试：%s" % path)
             raise CadError("打开文件失败（COM 失稳，重试超时）：%s（原始错误：%s）" % (path, last_err))
         self._doc = doc
         try:
@@ -171,11 +181,12 @@ class CadSession:
         return doc
 
     def save_as(self, doc, path):
-        """另存为清稿副本。v1.1：按当前 AutoCAD 版本选择可保存的最高通用格式
-        （2018+ 存 2018 格式；低版本存对应格式，保证其他机器可打开）。"""
+        """另存为清稿副本。v1.1：按当前 AutoCAD 版本选择可保存的最高通用格式。
+        v0.1.156：按输入扩展名匹配保存格式（.dxf 存 DXF，.dwg 存 DWG）。"""
         if os_path_exists(path):
             os_remove(path)
-        fmt = saveas_format_for_release(self.release)
+        dxf = str(path).lower().endswith(".dxf")
+        fmt = saveas_format_for_release(self.release, dxf=dxf)
         try:
             doc.SaveAs(path, fmt)
         except Exception:
@@ -201,6 +212,92 @@ class CadSession:
             yield space.Item(i)
             i += 1
 
+    # ---------- 布局空间（v0.1.156：图纸在 Layout 出图的情况） ----------
+
+    def iter_layouts(self, doc):
+        """遍历文档全部布局（含 Model）。COM 布局集合 Layouts。"""
+        try:
+            for i in range(doc.Layouts.Count):
+                yield doc.Layouts.Item(i)
+        except Exception:
+            return
+
+    def layout_space(self, layout):
+        """布局的 Block 对象（图纸空间实体集合），失败返回 None。"""
+        try:
+            return layout.Block
+        except Exception:
+            return None
+
+    def is_paperspace_layout(self, layout, model_name="Model"):
+        """是否为图纸空间布局（排除 Model）。"""
+        try:
+            return str(layout.Name or "") != model_name
+        except Exception:
+            return False
+
+    # ---------- 图层锁定（v0.1.156：锁定图层文字删不掉） ----------
+
+    def get_layer_lock(self, doc, layer_name):
+        try:
+            return bool(doc.Layers.Item(layer_name).Lock)
+        except Exception:
+            return False
+
+    def set_layer_lock(self, doc, layer_name, lock):
+        try:
+            doc.Layers.Item(layer_name).Lock = bool(lock)
+        except Exception:
+            pass
+
+    # ---------- 对象类型识别（v0.1.156） ----------
+
+    def is_table(self, ent):
+        """表格对象（AcDbTable，标题栏用表格画的情况）。"""
+        try:
+            return ent.ObjectName == "AcDbTable"
+        except Exception:
+            return False
+
+    def is_raster(self, ent):
+        """光栅图像（扫描签名/电子图章/照片）。"""
+        try:
+            return ent.ObjectName == "AcDbRasterImage"
+        except Exception:
+            return False
+
+    def is_xref(self, ent, doc):
+        """块引用是否为外部参照（Xref 承载图框/标题栏）。"""
+        try:
+            if ent.ObjectName != "AcDbBlockReference":
+                return False
+            name = str(ent.Name or "")
+            blk = doc.Blocks.Item(name)
+            return bool(blk.IsXRef) if blk is not None else False
+        except Exception:
+            return False
+
+    def table_cell_texts(self, ent, max_rows=200, max_cols=50):
+        """读取表格对象全部单元格文字（AcDbTable.CellText）。"""
+        try:
+            n_r = int(ent.Rows)
+            n_c = int(ent.Columns)
+        except Exception:
+            return []
+        texts = []
+        try:
+            for i in range(min(n_r, max_rows)):
+                for j in range(min(n_c, max_cols)):
+                    try:
+                        t = str(ent.GetCellText(i, j) or "").strip()
+                    except Exception:
+                        continue
+                    if t:
+                        texts.append(t)
+        except Exception:
+            pass
+        return texts
+
     # ---------- 实体几何 ----------
 
     def get_bounds(self, ent):
@@ -222,7 +319,15 @@ class CadSession:
             return None
 
     def get_polyline_rect(self, ent):
-        """从闭合多段线中提取矩形边界；非矩形返回 None。"""
+        """从闭合多段线中提取矩形边界；非矩形返回 None。
+
+        v0.1.156 全情况整改：
+        - 圆角容差：顶点落在角部容差带内即可（圆角图框半径 ≤15mm 常见）
+        - 斜置图框：计算主轴旋转角，把 4 顶点转正后取轴对齐矩形，
+          返回 (minx, miny, maxx, maxy, rotation)——rotation 供文字坐标逆变换
+          与打印走范围路线使用。异形（转正后仍不对齐）返回 None。
+        """
+        import math
         name = ent.ObjectName
         if name not in ("AcDbPolyline", "AcDb2dPolyline"):
             return None
@@ -243,13 +348,53 @@ class CadSession:
         ys = [p[1] for p in pts]
         minx, maxx = min(xs), max(xs)
         miny, maxy = min(ys), max(ys)
-        tol = max(maxx - minx, maxy - miny) * 0.005 + 1e-6
+        size = max(maxx - minx, maxy - miny)
+        # 圆角容差：边长 2.5% + 12mm（覆盖常见圆角半径）
+        tol = size * 0.025 + 12.0
+        ok = True
         for (x, y) in pts:
             near_x = abs(x - minx) <= tol or abs(x - maxx) <= tol
             near_y = abs(y - miny) <= tol or abs(y - maxy) <= tol
             if not (near_x and near_y):
-                return None  # 非轴对齐矩形（如斜置图框），不处理
-        return (minx, miny, maxx, maxy)
+                ok = False
+                break
+        if ok:
+            return (minx, miny, maxx, maxy, 0.0)
+
+        # 斜置图框：求主轴旋转角（与水平夹角最小的边方向），转正后重算
+        # 取一条边的方向角，多条边投票取众数
+        angles = []
+        for i in range(4):
+            j = (i + 1) % 4
+            a = math.atan2(pts[j][1] - pts[i][1], pts[j][0] - pts[i][0])
+            # 归一到 [-pi/2, pi/2]（横竖边等价）
+            while a > math.pi / 2:
+                a -= math.pi
+            while a < -math.pi / 2:
+                a += math.pi
+            angles.append(a)
+        # 聚类：若 4 边两两接近（|a| 或 |a±π/2|），则图框规则
+        ang = min(angles, key=lambda a: abs(a))
+        cx = (minx + maxx) / 2.0
+        cy = (miny + maxy) / 2.0
+        rot_pts = []
+        cos, sin = math.cos(ang), math.sin(ang)
+        for (x, y) in pts:
+            dx, dy = x - cx, y - cy
+            rot_pts.append((cx + dx * cos - dy * sin, cy + dx * sin + dy * cos))
+        rxs = [p[0] for p in rot_pts]
+        rys = [p[1] for p in rot_pts]
+        rminx, rmaxx = min(rxs), max(rxs)
+        rminy, rmaxy = min(rys), max(rys)
+        rsize = max(rmaxx - rminx, rmaxy - rminy)
+        rtol = rsize * 0.02 + 12.0
+        for (x, y) in rot_pts:
+            near_x = abs(x - rminx) <= rtol or abs(x - rmaxx) <= rtol
+            near_y = abs(y - rminy) <= rtol or abs(y - rmaxy) <= rtol
+            if not (near_x and near_y):
+                return None  # 异形（如任意四边形），不处理
+        # 转正后的矩形 + 旋转角（逆变换时用 -ang）
+        return (rminx, rminy, rmaxx, rmaxy, -ang)
 
     def collect_lines(self, space, tolerance=1e-3):
         """收集水平线与竖线，返回 (h_lines, v_lines)。"""

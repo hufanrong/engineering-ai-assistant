@@ -22,7 +22,9 @@
     "default_height_ratio": 0.2,
     "use_line_detection": true,
     "whitelist_mode": true,
-    "region_expand_mm": 15
+    "region_expand_mm": 15,
+    "use_real_region_detection": true,
+    "corner": "bottom_right"
   },
   "frame_detect": {
     "standard_sizes_mm": [[841, 1189], [594, 841], [420, 594], [297, 420], [210, 297]],
