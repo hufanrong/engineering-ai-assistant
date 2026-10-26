@@ -30,6 +30,18 @@ GITHUB_ZIP_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/archive/refs/
 # 工作台根目录（app/ 的上一级）
 WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# F-10（2026-10-26）：Windows 中文系统子进程输出是 GBK（netstat/taskkill/git 等），
+# text=True 默认按 UTF-8 解码会 UnicodeDecodeError（0xbb）导致 apply 线程崩溃→半更新。
+# 统一按平台编码、errors="replace" 兜底；pid/英文关键字（LISTENING）仍可正常解析。
+_SUBPROC_ENCODING = "gbk" if sys.platform.startswith("win") else "utf-8"
+
+
+def _subproc_kwargs(timeout=15):
+    """跨平台子进程捕获参数：Windows 用 GBK 解码、非法字节替换不抛异常。"""
+    return {"capture_output": True, "text": True,
+            "encoding": _SUBPROC_ENCODING, "errors": "replace", "timeout": timeout}
+
+
 # 备份目录
 BACKUP_DIR = os.path.join(WORKSPACE_ROOT, "updates", "backups")
 
@@ -379,6 +391,8 @@ def update_via_git() -> Dict:
             cwd=WORKSPACE_ROOT,
             capture_output=True,
             text=True,
+            encoding=_SUBPROC_ENCODING,
+            errors="replace",
             timeout=60
         )
         
@@ -610,7 +624,7 @@ def _get_pid_by_port(port: int) -> List[int]:
     if sys.platform.startswith("win"):
         try:
             result = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True, timeout=15)
+                ["netstat", "-ano"], **_subproc_kwargs(15))
             for line in result.stdout.splitlines():
                 if f":{port}" in line and ("LISTENING" in line or "LISTEN" in line):
                     parts = line.split()
@@ -623,7 +637,7 @@ def _get_pid_by_port(port: int) -> List[int]:
     else:
         try:
             result = subprocess.run(
-                ["lsof", "-ti", f":{port}"], capture_output=True, text=True, timeout=15)
+                ["lsof", "-ti", f":{port}"], **_subproc_kwargs(15))
             for line in result.stdout.splitlines():
                 line = line.strip()
                 if line.isdigit():
@@ -631,7 +645,7 @@ def _get_pid_by_port(port: int) -> List[int]:
         except Exception:
             try:
                 result = subprocess.run(
-                    ["fuser", f"{port}/tcp"], capture_output=True, text=True, timeout=15)
+                    ["fuser", f"{port}/tcp"], **_subproc_kwargs(15))
                 for line in result.stdout.splitlines():
                     for tok in line.split():
                         if tok.isdigit():
@@ -646,8 +660,7 @@ def _kill_process_tree(pid: int) -> bool:
     try:
         if sys.platform.startswith("win"):
             subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True, text=True, timeout=15)
+                ["taskkill", "/PID", str(pid), "/T", "/F"], **_subproc_kwargs(15))
         else:
             try:
                 os.killpg(os.getpgid(pid), 15)  # SIGTERM
@@ -744,6 +757,17 @@ _APPLY_SCRIPT = r"""# -*- coding: utf-8 -*-
 # 由繁工AI auto_updater 生成：停服 → 原子替换 → 回滚 → 重启
 import os, sys, json, time, shutil, subprocess, datetime
 
+# F-10（2026-10-26）：Windows 中文系统子进程输出 GBK，text=True 默认按 UTF-8 解会
+# UnicodeDecodeError(0xbb) 导致 apply 线程崩溃→app 换了 tools 没换、服务不重启的半更新。
+# ① 强制本子进程 stdout/stderr 为 UTF-8（写入 UTF-8 日志文件不崩）；
+# ② subprocess 捕获一律按平台编码 + errors="replace"，pid/英文关键字仍可解析。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+ENC = "gbk" if sys.platform.startswith("win") else "utf-8"
+
 WS = {ws!r}
 PORT = {port!r}
 PENDING = os.path.join(WS, "updates", "pending_update.json")
@@ -773,14 +797,16 @@ def pid_by_port(port):
     pids = []
     try:
         if sys.platform.startswith("win"):
-            out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=15).stdout
+            out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
+                                 encoding=ENC, errors="replace", timeout=15).stdout
             for line in out.splitlines():
                 if (":" + str(port)) in line and "LISTENING" in line:
                     parts = line.split()
                     if parts and parts[-1].isdigit():
                         pids.append(int(parts[-1]))
         else:
-            out = subprocess.run(["fuser", str(port) + "/tcp"], capture_output=True, text=True, timeout=10)
+            out = subprocess.run(["fuser", str(port) + "/tcp"], capture_output=True, text=True,
+                                 encoding=ENC, errors="replace", timeout=10)
             for tok in (out.stdout or "").split():
                 if tok.isdigit():
                     pids.append(int(tok))

@@ -348,6 +348,87 @@ def test_f06_multi_frame():
               "del=%s keep=%s other=%s" % (del_ok, keep_ok, other_ok))
 
 
+def test_f07_label_delete_protection():
+    """F-07：标签关联删除不得误删含保护词文本（图名）与坐标标注。"""
+    print("[F-07] 标签关联删除的保护优先（图名/坐标不得误删）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (270, 20, 415, 55)
+    E = _FakeEnt
+    ents = [
+        E("设计", "设计", (272, 42, 290, 48)),
+        E("设计人", "李安武", (294, 42, 320, 48)),       # 设计右侧 → 应删
+        E("审核", "审核", (350, 42, 368, 48)),
+        E("审核人", "陈伟晖", (372, 42, 398, 48)),       # 审核右侧 → 应删
+        # 图名值落在"设计"正下方（真机误删场景），含"车间" → 必须保留
+        E("图名值", "粗碎车间\\P平面布置图", (272, 30, 340, 36)),
+        # 坐标落在"审核"正下方 → 必须保留
+        E("坐标", "Y549625", (350, 30, 385, 36)),
+    ]
+    sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="real_rect")
+    emap = {e.Name: e for e in sess.ents}
+    del_ok = emap["设计人"].deleted and emap["审核人"].deleted
+    name_ok = not emap["图名值"].deleted
+    coord_ok = not emap["坐标"].deleted
+    check("F-07 人名仍删除", del_ok, "")
+    check("F-07 图名（含车间）不被标签关联误删", name_ok, "")
+    check("F-07 坐标 Y549625 不被标签关联误删", coord_ok, "")
+
+
+def test_f08_cert_number_outside_region():
+    """F-08：证书编号在标签正下方、标题栏区域外时，由全图框扩展删除。"""
+    print("[F-08] 证书编号扩展（区域外正下方）+ 图号/坐标不误删")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (270, 20, 415, 55)
+    E = _FakeEnt
+    ents = [
+        # 证书标签在区域内，证书号在其正下方且在区域外（maxy=18 < region.miny=20）
+        E("证书标签", "设计证书编号", (272, 24, 340, 30)),
+        E("证书号", "A135036965", (272, 12, 332, 18)),
+        # 区域内的图号（含连字符，不得被证书规则误删）
+        E("图号", "图号", (380, 24, 398, 30)),
+        E("图号值", "X398-301Z-02", (380, 12, 410, 18)),
+    ]
+    sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="real_rect")
+    emap = {e.Name: e for e in sess.ents}
+    check("F-08 区域外证书号 A135036965 被扩展删除", emap["证书号"].deleted, "")
+    check("F-08 图号 X398-301Z-02 不误删", not emap["图号值"].deleted, "")
+    # 纯函数层：编号识别
+    check("F-08 is_cert_number 识别 A135036965", rules.is_cert_number("A135036965"), "")
+    check("F-08 纯数字 9 位识别", rules.is_cert_number("123456789"), "")
+    check("F-08 图号不识别为证书号", not rules.is_cert_number("X398-301Z-02"), "")
+    check("F-08 坐标 X/Y 开头不识别为证书号", not rules.is_cert_number("X9193900"), "")
+    # find_cert_numbers 几何：标签下方左对齐命中
+    targets = [
+        {"key": 0, "norm": "设计证书编号", "minx": 272, "miny": 24, "maxx": 340, "maxy": 30},
+        {"key": 1, "norm": "A135036965", "minx": 272, "miny": 12, "maxx": 332, "maxy": 18},
+    ]
+    got = titleblock.find_cert_numbers(targets, set(["设计证书编号"]), frame)
+    check("F-08 find_cert_numbers 命中下方编号", got == {1}, str(got))
+
+
+def test_f09_protected_field_replace():
+    """F-09：保护字段"设计阶段"关联的值"施工图"仍须替换为"竣工图"。"""
+    print("[F-09] 保护字段值内的施工图→竣工图替换")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (270, 20, 415, 55)
+    E = _FakeEnt
+    ents = [
+        E("设计阶段", "设计阶段", (272, 42, 320, 48)),
+        E("阶段值", "施工图", (324, 42, 360, 48)),
+    ]
+    sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="real_rect")
+    emap = {e.Name: e for e in sess.ents}
+    v = emap["阶段值"]
+    check("F-09 施工图未被删除", not v.deleted, "")
+    check("F-09 施工图替换为竣工图", v.TextString == "竣工图", repr(v.TextString))
+
+
 def main():
     print("=" * 64)
     print("dwg_cleaner 纯逻辑回归测试（无 AutoCAD 依赖）")
@@ -363,6 +444,9 @@ def main():
     test_f03_mtext_codes()
     test_f01_f02_f05_titleblock()
     test_f06_multi_frame()
+    test_f07_label_delete_protection()
+    test_f08_cert_number_outside_region()
+    test_f09_protected_field_replace()
     print("=" * 64)
     print("结果：通过 %d，失败 %d" % (_PASS, _FAIL))
     print("=" * 64)

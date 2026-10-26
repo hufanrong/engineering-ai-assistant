@@ -150,6 +150,24 @@ def _is_axis_coordinate(t):
     return False
 
 
+# F-08：资质/设计证书编号值。如 A135036965（1 个字母 + 9 位连续数字），
+# 也有纯 9~15 位数字的资质编号。X/Y 开头的是坐标网格，一律排除（交给 C3）。
+_CERT_NUM_ALPHA_RE = re.compile(r"^[A-Za-z]\d{8,15}$")
+_CERT_NUM_PURE_RE = re.compile(r"^\d{9,15}$")
+
+
+def is_cert_number(t):
+    """F-08：识别设计/资质证书编号串（连续、无分隔符）。图号含连字符/多段不匹配。"""
+    s = strip_mtext_codes(t or "").strip().replace(" ", "")
+    if not s:
+        return False
+    if re.match(r"^[XYxy]", s):   # 坐标 X9193900 / Y549350 优先按坐标保护
+        return False
+    if _CERT_NUM_ALPHA_RE.match(s) or _CERT_NUM_PURE_RE.match(s):
+        return True
+    return False
+
+
 def _is_institution(t, cfg):
     s = strip_mtext_codes(t or "")
     return any(k in s for k in cfg["delete_keywords"].get("institution", []))
@@ -214,6 +232,9 @@ def judge_whitelist_text(text, cfg):
     # C3：坐标网格/测量数值即使落入标题栏区域也保留（防区域外扩误删坐标）
     if _is_axis_coordinate(t):
         return "keep", "axis_coordinate", None
+    # F-08：资质/设计证书编号（A135036965）即使在区域外被证书扩展捞到也删
+    if is_cert_number(t):
+        return "delete", "cert_number", None
     mode = cfg["drawing_type_mode"]
     raw_repl = apply_replacements(raw, cfg) if mode == "replace" else raw   # 写回（保留格式码）
     t_repl = apply_replacements(t, cfg) if mode == "replace" else t         # 判定
@@ -257,6 +278,10 @@ def judge_text(text, cfg):
     # C3：坐标网格/测量数值在任何模式下都保留（条带回退区的坐标标注不得误删）
     if _is_axis_coordinate(t):
         return "keep", "axis_coordinate", None
+
+    # F-08：资质/设计证书编号（A135036965 等）任何模式都删（已排除 X/Y 坐标）
+    if is_cert_number(t):
+        return "delete", "cert_number", None
 
     # 删除判定（基于剥离后的可见文本）
     if _is_institution(t_repl, cfg):

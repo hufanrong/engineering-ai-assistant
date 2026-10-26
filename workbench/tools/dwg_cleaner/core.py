@@ -700,13 +700,27 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
                     notes.append("炸开标题栏块失败 %s: %s" % (ent.Name, e))
         log("处理区域内块/代理实体一批（剩余循环 %d）" % rounds)
 
-    # 2) 收集区域内可处理对象
-    text_targets = []    # (ent, txt, pos, box)
+    # 2) 收集区域内可处理对象（F-08：同时收集整个图框文字，供区域外证书号扩展）
+    text_targets = []    # (ent, txt, pos, box) 标题栏区域内
+    frame_all_texts = []  # (ent, txt, pos, box) 整个图框内（含区域外）
     raster_targets = []  # (ent, pos)
     table_targets = []   # (ent, pos, cell_texts)
+
+    def in_frame(x, y):
+        return (frame.minx - 1e-6 <= x <= frame.maxx + 1e-6
+                and frame.miny - 1e-6 <= y <= frame.maxy + 1e-6)
+
     for ent in session.iter_entities(space):
         p = _entity_pos(session, ent, frame)
-        if p is None or not in_reg(p[0], p[1]):
+        if p is None or not in_frame(p[0], p[1]):
+            continue
+        txt = session.get_text(ent)
+        if txt is not None:
+            box = _entity_box(session, ent, frame)
+            if box is None:
+                box = (p[0], p[1], p[0], p[1])
+            frame_all_texts.append((ent, txt, p, box))
+        if not in_reg(p[0], p[1]):
             continue
         if session.is_raster(ent):
             raster_targets.append((ent, p))
@@ -714,11 +728,7 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         if session.is_table(ent):
             table_targets.append((ent, p, session.table_cell_texts(ent)))
             continue
-        txt = session.get_text(ent)
         if txt is not None:
-            box = _entity_box(session, ent, frame)
-            if box is None:
-                box = (p[0], p[1], p[0], p[1])
             text_targets.append((ent, txt, p, box))
 
     # 2.5) C1 标签→值【保护】 + F-01/F-02 标签→值【删除】
@@ -738,6 +748,19 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
     # 白名单模式下这些裸值本就会被规则删除，此处主要是黑名单模式的双保险（F-01/F-02）。
     delete_idx = titleblock.associate_label_values(
         assoc_targets, delete_lab, field_lab, frame, mode="delete") - protected_idx
+    # F-07（2026-10-26 真机 P0）：保护优先是绝对原则。标签关联删除只减了 C1 几何保护集，
+    # 未排除"含保护词文本"（图名 '粗碎车间\\P平面布置图' 含"车间"）与 C3 坐标标注（Y549625），
+    # 导致它们几何上落在签署标签邻域时被误删。这里逐项过滤，凡含保护词/坐标一律不删。
+    _safe_delete = set()
+    for i in delete_idx:
+        raw_txt = text_targets[i][1]
+        if rules._is_protected(raw_txt, cfg):
+            log("F-07 保护优先，跳过标签关联删除（含保护词）%r" % raw_txt)
+        elif rules._is_axis_coordinate(raw_txt):
+            log("F-07 保护优先，跳过标签关联删除（坐标标注）%r" % raw_txt)
+        else:
+            _safe_delete.add(i)
+    delete_idx = _safe_delete
     if protected_idx:
         log("C1 标签→值关联，保护 %d 个值实体（工程名/图号/图名的值）" % len(protected_idx))
     if delete_idx:
@@ -747,7 +770,17 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
     ops = []
     for i, (ent, txt, pos, _box) in enumerate(text_targets):
         if i in protected_idx:
-            # C1 保护字段值：保留（若含"施工图"字样仍允许替换，工程名/图号一般不含）
+            # F-09（2026-10-26）：保护字段值默认保留，但仍须执行"施工图→竣工图"等替换。
+            # 此前直接 continue，导致"设计阶段"标签关联到的"施工图"值永不替换（图2 漏改）。
+            if cfg.get("drawing_type_mode") == "replace":
+                new_txt = rules.apply_replacements(txt, cfg)
+                if new_txt != txt:
+                    ops.append(CleanOp(
+                        ent, "replace",
+                        "%r -> %r [%s] (%.1f,%.1f)" % (
+                            txt, new_txt, "protected_field_replace", pos[0], pos[1]),
+                        new_txt))
+                    log("替换（保护字段值内）%r -> %r" % (txt, new_txt))
             continue
         pos_str = "%.1f,%.1f" % (pos[0], pos[1])
         if i in delete_idx:
@@ -781,6 +814,27 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
             ops.append(CleanOp(ent, "delete",
                                "表格对象（标题栏表格，无保护内容）(%.1f,%.1f)" % (pos[0], pos[1])))
             log("删除表格对象 (%.1f,%.1f)" % (pos[0], pos[1]))
+
+    # F-08：证书编号扩展——标题栏区域外、"设计证书编号"标签正下方/右侧的编号串也删除。
+    # 真机证书号常被文字簇反推区域裁掉，区域内白名单/关联够不到，故在全图框内定位。
+    cert_targets = [{
+        "key": i,
+        "norm": rules._norm_spaces(rules.strip_mtext_codes(txt)),
+        "minx": box[0], "miny": box[1], "maxx": box[2], "maxy": box[3],
+    } for i, (_e, txt, _p, box) in enumerate(frame_all_texts)]
+    cert_del_idx = titleblock.find_cert_numbers(cert_targets, cert_lab, frame)
+    _handled_ent_ids = {id(op.ent) for op in ops}
+    for i, (ent, txt, pos, _box) in enumerate(frame_all_texts):
+        if i not in cert_del_idx or id(ent) in _handled_ent_ids:
+            continue
+        # 双保险：保护词/坐标绝不删
+        if rules._is_protected(txt, cfg) or rules._is_axis_coordinate(txt):
+            log("F-08 证书扩展跳过（保护/坐标）%r" % txt)
+            continue
+        ops.append(CleanOp(ent, "delete",
+                           "%r [%s] (%.1f,%.1f)" % (
+                               txt, "cert_number_extension", pos[0], pos[1])))
+        log("删除（证书编号扩展·区域外）%r" % txt)
 
     # 4) 执行：先解锁涉及的锁定图层，操作后恢复
     locked_layers = {}

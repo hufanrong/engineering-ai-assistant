@@ -13,6 +13,7 @@
 """
 
 import math
+import re
 
 STANDARD_SIZES_MM = [(841, 1189), (594, 841), (420, 594), (297, 420), (210, 297)]
 
@@ -458,7 +459,8 @@ def associate_values(targets, seed_labels, stop_labels, frame):
 
     row_tol = max(fh * 0.012, 1.0)          # 同行容差（约一行字高）
     max_gap_x = fw * 0.5                      # 标签→值水平最大跨距（工程名较长）
-    below_max_dy = fh * 0.06                  # 下方关联最大垂直距离
+    # F-08：0.06→0.10，证书号常在标签正下方、与标签隔一行，0.06 够不到
+    below_max_dy = fh * 0.10                  # 下方关联最大垂直距离
     overlap_gap = fw * 0.02                   # 允许标签与值轻微重叠/缝隙
 
     for lab in labels:
@@ -484,6 +486,7 @@ def associate_values(targets, seed_labels, stop_labels, frame):
             result.add(v["key"])
         # 下方/同列候选（标题栏上下排布时取最近一个非标签值）
         below = []
+        lab_w = lab["maxx"] - lab["minx"]
         for v in others:
             if v["key"] in result:
                 continue
@@ -491,12 +494,68 @@ def associate_values(targets, seed_labels, stop_labels, frame):
             vcy = (v["miny"] + v["maxy"]) / 2.0
             dy = lcy - vcy  # y 轴向上，值在下方则 dy>0
             if 0 < dy <= max(lh * 1.2, below_max_dy):
-                if abs(vcx - lcx) <= (lab["maxx"] - lab["minx"]) * 1.5 + fw * 0.03:
-                    if not _is_stop(v.get("norm")):
-                        below.append((dy, v))
+                # F-08：值可能比标签宽（证书号）、左对齐而非中心对齐。
+                # 三种对齐任一满足即可：中心对齐 / 左对齐 / 水平投影相交。
+                center_ok = abs(vcx - lcx) <= lab_w * 1.5 + fw * 0.03
+                left_ok = abs(v["minx"] - lab["minx"]) <= fw * 0.03
+                proj_ok = (v["minx"] <= lab["maxx"] + fw * 0.02
+                           and v["maxx"] >= lab["minx"] - fw * 0.02)
+                if (center_ok or left_ok or proj_ok) and not _is_stop(v.get("norm")):
+                    below.append((dy, v))
         if below:
             below.sort(key=lambda z: z[0])
             result.add(below[0][1]["key"])
+    return result
+
+
+def find_cert_numbers(targets, cert_labels, frame):
+    """F-08：在**整个图框**为证书标签定位其编号串（不受标题栏区域裁剪限制）。
+
+    真机问题：证书号 A135036965 印在"设计证书编号"标签正下方，间距超出普通关联阈值，
+    且落在文字簇反推的标题栏区域之外 → 区域内白名单/关联都删不到，残留。
+
+    本函数在图框全范围匹配，几何约束严格（必须在证书标签正下方/右侧）、编号格式特异
+    （字母+8~15 位连续数字，或 9~15 位纯数字；X/Y 开头按坐标排除），避免误删图号/坐标。
+    targets 结构同 associate_values（key/norm/minx/miny/maxx/maxy）。返回应删除 key 集合。
+    """
+    fw, fh = frame.width, frame.height
+    if fw <= 0 or fh <= 0 or not targets:
+        return set()
+    alpha_re = re.compile(r"^[A-Za-z]\d{8,15}$")
+    pure_re = re.compile(r"^\d{9,15}$")
+
+    def _is_num(norm):
+        if not norm or re.match(r"^[XYxy]", norm):
+            return False
+        return bool(alpha_re.match(norm) or pure_re.match(norm))
+
+    def _is_cert(norm):
+        if not norm:
+            return False
+        for lab in cert_labels:
+            if lab and (norm == lab or norm.rstrip("：:") == lab
+                        or norm.startswith(lab) and len(norm) <= len(lab) + 2):
+                return True
+        return False
+
+    labs = [t for t in targets if _is_cert(t.get("norm"))]
+    nums = [t for t in targets if _is_num(t.get("norm"))]
+    result = set()
+    for lab in labs:
+        lcx = (lab["minx"] + lab["maxx"]) / 2.0
+        lcy = (lab["miny"] + lab["maxy"]) / 2.0
+        for v in nums:
+            vcx = (v["minx"] + v["maxx"]) / 2.0
+            vcy = (v["miny"] + v["maxy"]) / 2.0
+            dy = lcy - vcy  # 正下方 dy>0
+            below = 0 < dy <= fh * 0.13
+            left_ok = abs(v["minx"] - lab["minx"]) <= fw * 0.03
+            proj_ok = (v["minx"] <= lab["maxx"] + fw * 0.02
+                       and v["maxx"] >= lab["minx"] - fw * 0.02)
+            gap = v["minx"] - lab["maxx"]
+            right = 0 <= gap <= fw * 0.35 and abs(vcy - lcy) <= max(fh * 0.012, 1.0)
+            if (below and (left_ok or proj_ok)) or right:
+                result.add(v["key"])
     return result
 
 
