@@ -502,6 +502,7 @@ def render_template(template_id: str, equipment: str = "",
     
     # 保存
     try:
+        _apply_national_style(doc)  # v0.1.164：国标样式规整（字体/页边距/表格边框）
         doc.save(output_path)
     except Exception as e:
         return {"ok": False, "error": f"保存文件失败：{str(e)}"}
@@ -611,3 +612,188 @@ def generate_from_template_by_type(doc_type: str, equipment: str = "",
         project_id=project_id,
         extra_data=extra_data,
     )
+
+
+# ================= v0.1.164：模板网页预览 + 国标样式 =================
+
+# 预览页样式（国家文件标准版式：黑体标题、宋体正文、实线表格、A4 页宽模拟）
+TEMPLATE_PREVIEW_CSS = """<style>
+.tpl-preview{font-family:'SimSun','宋体',serif;color:#000;max-width:165mm;margin:0 auto;background:#fff;padding:30px 26px 34px;line-height:1.5;font-size:12pt}
+.tpl-preview h3{font-family:'SimHei','黑体',sans-serif;font-size:16pt;font-weight:700;text-align:center;margin:10px 0 6px}
+.tpl-preview p{margin:3px 0;font-size:12pt}
+.tpl-preview p.c{text-align:center}
+.tpl-preview table{border-collapse:collapse;width:100%;margin:8px 0;font-size:10.5pt}
+.tpl-preview th,.tpl-preview td{border:1px solid #000;padding:3px 6px;vertical-align:middle;word-break:break-all}
+.tpl-preview th{font-family:'SimHei','黑体',sans-serif;font-weight:700;text-align:center;background:#f5f5f5}
+.tpl-preview .ph{color:#C0392B;background:#FFF3C4;font-weight:700;border-bottom:1px dashed #C0392B;padding:0 2px}
+.tpl-preview .empty{color:#999;text-align:center}
+</style>
+<div class="tpl-preview">
+"""
+
+
+def preview_template_html(tpl_id: str) -> Dict:
+    """v0.1.164：网页版模板预览——把模板 docx 渲染为符合国家文件标准的 HTML。
+
+    按文档顺序解析段落与表格，占位符 {{字段}} 高亮标注，标题黑体、
+    正文宋体、表格实线边框，A4 页宽模拟（GB/T 9704 版式）。
+    支持模板库（data/templates 注册模板）与 templates_builtin 内置模板。
+    """
+    if not HAS_DOCX:
+        return {"ok": False, "error": "python-docx 未安装，无法预览模板"}
+    index = _load_template_index()
+    info = None
+    for t in index.get("templates", []):
+        if t.get("id") == tpl_id or t.get("name") == tpl_id:
+            info = t
+            break
+    if not info:
+        return {"ok": False, "error": "模板不存在，请刷新列表后重试"}
+    path = info.get("file_path") or ""
+    if not path or not os.path.isfile(path):
+        alt = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "templates_builtin",
+            (info.get("name") or "") + ".docx")
+        if os.path.isfile(alt):
+            path = alt
+    if not path or not os.path.isfile(path):
+        return {"ok": False, "error": "模板文件丢失，无法预览"}
+    if not path.lower().endswith(".docx"):
+        return {"ok": False, "error": "该模板为 %s 格式，网页预览仅支持 docx" % os.path.splitext(path)[1]}
+
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
+    from docx.oxml.ns import qn
+
+    def _esc(s):
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _ph(s):
+        def rep(m):
+            return '<span class="ph">{{%s}}</span>' % _esc(m.group(1))
+        return re.sub(r"\{\{([^}]+)\}\}", rep, _esc(s))
+
+    def _para_html(p):
+        txt = "".join(r.text for r in p.runs)
+        if not txt.strip():
+            return ""
+        align = p.alignment
+        is_title = len(txt.strip()) <= 40 and (align == 1 or any(r.bold for r in p.runs if r.text.strip()))
+        if is_title:
+            return "<h3>%s</h3>" % _ph(txt.strip())
+        return '<p%s>%s</p>' % (" class='c'" if align == 1 else "", _ph(txt.strip()))
+
+    def _table_html(tbl):
+        rows = list(tbl.rows)
+        if not rows:
+            return "<table></table>"
+        parts = ["<table>"]
+        seen_prev = set()
+        for row in rows:
+            parts.append("<tr>")
+            seen = set()
+            for cell in row.cells:
+                if id(cell._tc) in seen:
+                    continue
+                seen.add(id(cell._tc))
+                txts = []
+                for p in cell.paragraphs:
+                    t = "".join(r.text for r in p.runs).strip()
+                    if t:
+                        txts.append(t)
+                ctxt = " ".join(txts)
+                tag = "th" if row is rows[0] else "td"
+                parts.append("<%s>%s</%s>" % (tag, _ph(ctxt or "&nbsp;"), tag))
+            parts.append("</tr>")
+        parts.append("</table>")
+        return "".join(parts)
+
+    try:
+        doc = Document(path)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "打开模板失败：%s" % str(e)}
+
+    parts = []
+    for child in doc.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            parts.append(_para_html(Paragraph(child, doc)))
+        elif child.tag == qn("w:tbl"):
+            parts.append(_table_html(Table(child, doc)))
+
+    body = "\n".join(parts) or "<p class='empty'>（空模板，无内容可预览）</p>"
+    fields = sorted(set(m.group(1).strip() for m in re.finditer(r"\{\{([^}]+)\}\}", body)))
+    return {
+        "ok": True,
+        "name": info.get("name", ""),
+        "doc_type": info.get("doc_type", ""),
+        "placeholder_count": len(fields),
+        "fields": fields,
+        "html": TEMPLATE_PREVIEW_CSS + body + "</div>",
+    }
+
+
+def _apply_national_style(doc) -> None:
+    """v0.1.164：国标样式规整（仅作用于生成副本，不修改源模板）。
+
+    按 GB/T 9704-2012《党政机关公文格式》及工程资料通用版式：
+    页边距 上3.7cm/下3.5cm/左2.8cm/右2.6cm；标题黑体16pt居中、
+    正文宋体12pt；表格实线边框、表头行加粗居中、表内文字五号(10.5pt)。
+    """
+    try:
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        from docx.enum.text import WD_ALIGN_PARAGRAPH as _ALIGN
+
+        for section in doc.sections:
+            section.top_margin = Cm(3.7)
+            section.bottom_margin = Cm(3.5)
+            section.left_margin = Cm(2.8)
+            section.right_margin = Cm(2.6)
+
+        def _set_font(run, ea, size, bold=None):
+            try:
+                run.font.name = ea
+                run.font.size = Pt(size)
+                if bold is not None:
+                    run.font.bold = bold
+                rPr = run._element.get_or_add_rPr()
+                rFonts = rPr.get_or_add_rFonts()
+                rFonts.set(qn("w:eastAsia"), ea)
+            except Exception:  # noqa: BLE001
+                pass
+
+        for para in doc.paragraphs:
+            txt = "".join(r.text for r in para.runs).strip()
+            if not txt:
+                continue
+            is_title = len(txt) <= 30 and any(r.bold for r in para.runs if r.text.strip())
+            for r in para.runs:
+                _set_font(r, "黑体" if is_title else "宋体", 16 if is_title else 12, None)
+            if is_title:
+                para.alignment = _ALIGN.CENTER
+
+        for table in doc.tables:
+            tbl = table._tbl
+            tblPr = tbl.tblPr
+            borders = tblPr.find(qn("w:tblBorders"))
+            if borders is None:
+                borders = OxmlElement("w:tblBorders")
+                tblPr.append(borders)
+            for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                el = borders.find(qn("w:" + edge))
+                if el is None:
+                    el = OxmlElement("w:" + edge)
+                    borders.append(el)
+                el.set(qn("w:val"), "single")
+                el.set(qn("w:sz"), "4")
+                el.set(qn("w:color"), "000000")
+            for ri, row in enumerate(table.rows):
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        for r in p.runs:
+                            _set_font(r, "宋体", 10.5, True if ri == 0 else None)
+                        if ri == 0:
+                            p.alignment = _ALIGN.CENTER
+    except Exception:  # noqa: BLE001
+        pass

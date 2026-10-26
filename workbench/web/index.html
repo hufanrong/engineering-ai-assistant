@@ -513,6 +513,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       </div>
     </div>
     <div style="font-size:12px;color:#666;margin:8px 0" id="supWorkshopInfo">选车间后显示该车间设备清单</div>
+    <div id="supTemplateList" style="font-size:12px;margin:8px 0;padding:8px;background:#f7faff;border:1px solid #d0e3ff;border-radius:8px;min-height:20px">选择表类型后，此处显示该类型模板清单，可点击预览。</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-success" onclick="genSupWorkshop()">📦 按车间生成整合文件</button>
       <button class="btn" onclick="toggleSupConfig()" style="border:1px solid #ccc">⚙️ 项目常量配置</button>
@@ -623,6 +624,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       </div>
     </div>
     <div id="archiveWorkshopList"></div>
+
+    <!-- v0.1.164：竣工资料模板库（网页版查看，国标样式） -->
+    <div style="border:1px solid #d0e3ff;border-radius:8px;padding:12px;margin-top:16px;background:#f7faff">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700;color:#1E5AA8">📖 竣工资料模板库 <span style="font-weight:400;color:#888;font-size:11px">（内置监理确认表格模板，网页预览，样式符合国家文件标准 GB/T 9704：黑体标题 / 宋体正文 / 实线表格 / A4 版式）</span></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="loadArchiveTemplates()">📖 加载模板</button>
+        </div>
+      </div>
+      <input class="input" id="archiveTplSearch" placeholder="🔍 搜索模板名称..." style="max-width:340px;margin-bottom:8px;box-sizing:border-box" oninput="filterArchiveTemplates()">
+      <div id="archiveTemplateList" style="font-size:12px;max-height:420px;overflow:auto;padding:6px;background:#fff;border:1px solid #e3e8f0;border-radius:6px">
+        <div style="color:#999;padding:14px;text-align:center">点击「加载模板」查看竣工资料模板库，点模板名可预览样式。</div>
+      </div>
+    </div>
 
     <!-- v0.1.151：整编联动（按整编要求 214 项整卷/检查/待办） -->
     <div style="border:1px solid #e2d9f0;border-radius:8px;padding:12px;margin-top:16px;background:#faf7ff">
@@ -2078,6 +2093,23 @@ function loadSupCategories() {
                 opt.textContent = cat + '（' + cats[cat].length + '个模板）';
                 sel.appendChild(opt);
             });
+            // v0.1.164：选表类型后显示该类型模板清单（可预览）
+            sel.onchange = function() {
+                var box = document.getElementById('supTemplateList');
+                if (!box) return;
+                var cat = sel.value;
+                if (!cat) { box.innerHTML = '选择表类型后，此处显示该类型模板清单，可点击预览。'; return; }
+                var items = cats[cat] || [];
+                if (!items.length) { box.innerHTML = '<span style="color:#999">该类型暂无模板</span>'; return; }
+                var h = '<span style="color:#666;margin-right:6px">该类型模板：</span>';
+                items.forEach(function(t) {
+                    h += '<span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #d0e3ff;border-radius:6px;padding:3px 8px;margin:0 6px 6px 0;font-size:12px">' +
+                        (t.name || '') +
+                        ' <a href="javascript:void(0)" style="color:#1E5AA8" onclick="openTplPreview(\'' + (t.id || '') + '\',\'' + (t.name || '').replace(/'/g, '') + '\')">👁 预览</a></span>';
+                });
+                box.innerHTML = h;
+            };
+            if (sel.options.length > 1) { sel.value = sel.options[1].value; sel.onchange(); }
         })
         .catch(function() {});
 }
@@ -2305,6 +2337,56 @@ function runVolume() {
 }
 
 // ===== 竣工组卷 =====
+// ===== v0.1.164：竣工资料模板库（加载/搜索/折叠预览） =====
+var _archiveTplData = {};
+
+function loadArchiveTemplates() {
+    var box = document.getElementById('archiveTemplateList');
+    if (!box) return;
+    box.innerHTML = '<div style="color:#666;padding:14px;text-align:center">正在加载模板库...</div>';
+    fetch('/api/supervision-templates')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            _archiveTplData = data.categories || {};
+            renderArchiveTemplates('');
+        })
+        .catch(function() {
+            box.innerHTML = '<div style="color:#EA6668;padding:14px;text-align:center">模板库加载失败，请检查工作台是否运行</div>';
+        });
+}
+
+function filterArchiveTemplates() {
+    var kw = (document.getElementById('archiveTplSearch').value || '').trim();
+    renderArchiveTemplates(kw);
+}
+
+function renderArchiveTemplates(kw) {
+    var box = document.getElementById('archiveTemplateList');
+    if (!box) return;
+    var cats = _archiveTplData;
+    var keys = Object.keys(cats).sort();
+    if (!keys.length) { box.innerHTML = '<div style="color:#999;padding:14px;text-align:center">模板库为空，请先上传或注册模板</div>'; return; }
+    var total = 0;
+    keys.forEach(function(k) { total += (cats[k] || []).length; });
+    var html = '<div style="color:#666;margin-bottom:8px">共 ' + keys.length + ' 类 / ' + total + ' 个模板，点击分类展开，点模板名预览。</div>';
+    keys.forEach(function(k) {
+        var items = (cats[k] || []).filter(function(t) {
+            return !kw || (t.name || '').indexOf(kw) !== -1;
+        });
+        if (!items.length) return;
+        html += '<details style="margin-bottom:6px;border:1px solid #e3e8f0;border-radius:6px;padding:0 8px">' +
+            '<summary style="cursor:pointer;padding:6px 2px;font-weight:600;color:#1E5AA8">' + k + '（' + items.length + '个）</summary>' +
+            '<div style="padding:2px 4px 8px 14px">';
+        items.forEach(function(t) {
+            html += '<div style="padding:3px 0;display:flex;gap:8px;align-items:center;justify-content:space-between">' +
+                '<span>' + (t.name || '') + '</span>' +
+                '<a href="javascript:void(0)" style="color:#1E5AA8;font-size:11px" onclick="openTplPreview(\'' + (t.id || '') + '\',\'' + (t.name || '').replace(/'/g, '') + '\')">👁 预览</a></div>';
+        });
+        html += '</div></details>';
+    });
+    box.innerHTML = html || '<div style="color:#999;padding:14px;text-align:center">未找到匹配模板</div>';
+}
+
 function loadArchiveData() {
     var container = document.getElementById('archiveWorkshopList');
     fetch('/api/workshops')
@@ -2656,6 +2738,7 @@ function loadTemplates() {
                     '<td>' + (t.field_count || 0) + '</td>' +
                     '<td>' + (t.upload_time || '') + '</td>' +
                     '<td><button class="btn btn-default btn-sm" onclick="previewTemplate(\'' + (t.id || '') + '\')">查看字段</button> ' +
+                    '<button class="btn btn-primary btn-sm" onclick="openTplPreview(\'' + (t.id || '') + '\',\'' + (t.name || '').replace(/'/g, '') + '\')" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">👁 预览</button> ' +
                     '<button class="btn btn-danger btn-sm" onclick="deleteTemplate(\'' + (t.id || '') + '\')">删除</button></td>';
                 body.appendChild(tr);
             });
@@ -2677,6 +2760,39 @@ function previewTemplate(id) {
             }
         })
         .catch(function() { alert('模板详情加载失败'); });
+}
+
+// ===== v0.1.164：模板预览（网页版查看模板内容，国标样式） =====
+function openTplPreview(id, name) {
+    var modal = document.getElementById('tplPreviewModal');
+    var title = document.getElementById('tplPreviewTitle');
+    var content = document.getElementById('tplPreviewContent');
+    var meta = document.getElementById('tplPreviewMeta');
+    if (!modal) { alert('预览组件未找到，请刷新页面'); return; }
+    title.textContent = name ? ('模板预览：' + name) : '模板预览';
+    content.innerHTML = '<div style="color:#666;padding:24px;text-align:center">正在加载模板内容...</div>';
+    meta.innerHTML = '';
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    fetch('/api/templates/preview/' + encodeURIComponent(id))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.ok && d.html) {
+                content.innerHTML = d.html;
+                var fields = d.fields || [];
+                meta.innerHTML = '字段数：' + (d.placeholder_count || 0) + (fields.length ? '　字段：' + fields.join('、') : '　（无占位符）');
+            } else {
+                content.innerHTML = '<div style="color:#EA6668;padding:24px;text-align:center">模板预览失败：' + (d.error || '') + '</div>';
+            }
+        })
+        .catch(function() {
+            content.innerHTML = '<div style="color:#EA6668;padding:24px;text-align:center">模板预览加载失败，请检查工作台是否运行</div>';
+        });
+}
+function closeTplPreview() {
+    var modal = document.getElementById('tplPreviewModal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
 }
 
 function deleteTemplate(id) {
@@ -3319,6 +3435,20 @@ document.addEventListener('DOMContentLoaded', function() {
       <button class="btn" onclick="closeDeleteProjectDialog()">取消</button>
       <button class="btn btn-danger" onclick="confirmDeleteProject()" style="background:#D4380D;border-color:#D4380D">确认删除</button>
     </div>
+  </div>
+</div>
+
+<!-- ===== v0.1.164：模板预览模态框（网页版查看模板，国标样式） ===== -->
+<div id="tplPreviewModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1000;overflow:auto" onclick="if(event.target===this)closeTplPreview()">
+  <div style="max-width:880px;margin:32px auto;background:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.25)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #e5e7eb">
+      <div style="font-size:15px;font-weight:600;color:#1A1B1C" id="tplPreviewTitle">模板预览</div>
+      <button class="btn btn-default btn-sm" onclick="closeTplPreview()">✕ 关闭</button>
+    </div>
+    <div id="tplPreviewBody" style="padding:14px 16px;max-height:70vh;overflow:auto;background:#eef0f2">
+      <div id="tplPreviewContent" style="background:#fff;border:1px solid #d9dee5;border-radius:6px;min-height:120px">加载中...</div>
+    </div>
+    <div id="tplPreviewMeta" style="padding:10px 18px;border-top:1px solid #e5e7eb;font-size:12px;color:#666;word-break:break-all"></div>
   </div>
 </div>
 

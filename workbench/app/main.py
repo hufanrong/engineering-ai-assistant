@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.163")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.164")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -5192,6 +5192,16 @@ def frontend_scan_project(force: bool = True):
     import threading
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True, "message": "扫描已启动", "folder": uploads_dir}
+
+
+@app.get("/api/templates/preview/{tpl_id}")
+def frontend_template_preview(tpl_id: str):
+    """v0.1.164：网页版模板预览（docx → 国家文件标准样式 HTML）。"""
+    from . import template_engine as _te
+    try:
+        return _te.preview_template_html(tpl_id)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/templates/{tpl_id}")
