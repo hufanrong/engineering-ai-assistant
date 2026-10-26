@@ -7,6 +7,9 @@
 - "keep"    : 保留（未命中删除规则，或命中保护规则）
 - "delete"  : 删除整个文字实体
 - "replace" : 修改文字内容（如"施工图"→"竣工图"）
+
+F-03（2026-10-26）：所有"判定"都基于 strip_mtext_codes() 剥离内联格式码后的
+**可见文字**；但 replace 写回时保留原始 MText 格式码（仅替换连续中文词）。
 """
 
 import json
@@ -31,6 +34,7 @@ def normalize_config(cfg):
     cfg.setdefault("drawing_type_mode", "replace")
 
     dk = cfg.setdefault("delete_keywords", {})
+    dk.setdefault("cert_labels", [])
     labels = list(dk.get("person_labels", []))
     # 长标签优先（如"专业负责人"先于"专业"），避免前缀误吞
     labels.sort(key=len, reverse=True)
@@ -54,13 +58,48 @@ def apply_replacements(text, cfg):
     return new
 
 
+def _norm_spaces(s):
+    """归一化空白：全角空格(U+3000)、制表符、普通空格全部去掉，仅用于**标签识别**。
+
+    C2 修复：标题栏格内标签常写成"图  号""工 程 名 称"（CAD 里字间距常用空格
+    撑开），精确子串匹配会漏判为非保护词而被删。归一化只用于判定，不改动原文。
+    """
+    return re.sub(r"[\s　]+", "", s or "")
+
+
+# MText 格式码：\T1.5; \Q10; \H3.5x; \f宋体; \P(换行) \L \l 等，以及包裹大括号。
+# F-03：实体原文常是 {\Q10;\T1.5;2024\Q0;年\Q10;07\Q0;月 }，格式码穿插在文字中，
+# 日期/人名/证书正则要求整条完整匹配会失效。判定前先剥成可见文字，写回仍用原文。
+_MTEXT_CODE_RE = re.compile(
+    r"\\[A-Za-z]+[0-9.]*;?"        # \T1.5; \Q10; \H3.5; 等（带分号/数字）
+    r"|\\[A-Za-z]+\b"              # \P \L \l 等无分号控制符
+    r"|[{}]"                       # 包裹大括号
+)
+
+
+def strip_mtext_codes(s):
+    """剥离 MText 内联格式码，只保留可见文字（用于判定，不用于写回）。
+
+    例：'{\\Q10;\\T1.5;2024\\Q0;年\\Q10;07\\Q0;月 }' -> '2024年07月'
+    """
+    if not s:
+        return ""
+    return _MTEXT_CODE_RE.sub("", s)
+
+
+def _visible(s):
+    """供判定使用的标准化文本：先剥 MText 格式码，再去首尾空白（C2+F-03）。"""
+    return strip_mtext_codes(s or "").strip()
+
+
 def _is_date_text(t, cfg):
-    """判断是否为日期类文本。
+    """判断是否为日期类文本（F-03：入参先剥 MText 格式码）。
 
     2026-10-25 整改：date_labels 前缀**循环剥离**——"出图日期：2025.4.14"
     需先剥"日期"再剥"出图"（或反序），直到无变化再匹配日期格式。
     不带标签 → 要求整条文本完全匹配日期格式（避免误删图号等含数字串的文本）。
     """
+    t = strip_mtext_codes(t or "")
     dk = cfg["delete_keywords"]
     date_labels = dk.get("date_labels", ["日期", "时间", "出图"])
     if any(k in t for k in date_labels):
@@ -86,18 +125,9 @@ def _is_date_text(t, cfg):
     return False
 
 
-def _norm_spaces(s):
-    """归一化空白：全角空格(U+3000)、制表符、普通空格全部去掉，仅用于**标签识别**。
-
-    C2 修复：标题栏格内标签常写成"图  号""工 程 名 称"（CAD 里字间距常用空格
-    撑开），精确子串匹配会漏判为非保护词而被删。归一化只用于判定，不改动原文。
-    """
-    return re.sub(r"[\s\u3000]+", "", s or "")
-
-
 def _is_protected(t, cfg):
-    """是否命中保护词。C2：比对前对正文与关键词都做空白归一化。"""
-    nt = _norm_spaces(t)
+    """是否命中保护词。C2：空白归一化；F-03：先剥 MText 格式码。"""
+    nt = _norm_spaces(strip_mtext_codes(t))
     return any(_norm_spaces(k) in nt for k in cfg["protect_keywords"])
 
 
@@ -109,7 +139,7 @@ _PURE_NUMBER_RE = re.compile(r"^[\d\s.,;:：．°′″'\"+\-]+$")
 
 def _is_axis_coordinate(t):
     """C3：识别坐标网格/测量数值类标注（条带区的坐标数字不得当垃圾删除）。"""
-    s = (t or "").strip()
+    s = strip_mtext_codes(t or "").strip()
     if not s:
         return False
     if _AXIS_COORD_RE.match(s):
@@ -121,7 +151,8 @@ def _is_axis_coordinate(t):
 
 
 def _is_institution(t, cfg):
-    return any(k in t for k in cfg["delete_keywords"].get("institution", []))
+    s = strip_mtext_codes(t or "")
+    return any(k in s for k in cfg["delete_keywords"].get("institution", []))
 
 
 def _strip_delete_segments(t, cfg):
@@ -166,74 +197,78 @@ def _strip_delete_segments(t, cfg):
 
 
 def judge_whitelist_text(text, cfg):
-    """标题栏区域白名单判定（2026-10-25 整改，重点方案）：
+    """标题栏区域白名单判定（真实标题栏矩形）：
 
     凡位于标题栏区域内的文字，不命中 protect_keywords（工程名称/图纸名称/图号/
     比例等）的一律删除——可真正删掉"旁边的人名"、任意格式的公司名、日期、
     证书编号等黑名单规则覆盖不到的信息。
 
-    v0.1.156 增强：命中保护词的混合文本（"图号：X301 审核 王五"）做局部清洗，
-    剥离人名标签段与日期段后保留保护段。
-
+    F-03：判定基于剥离 MText 格式码后的可见文字；"施工图→竣工图"替换写回保留
+    原文格式码（连续中文词不被格式码打断）。
     返回 (action, reason, new_text)，与 judge_text 同构。
     """
-    t = (text or "").strip()
+    raw = text or ""
+    t = _visible(raw)
     if not t:
         return "keep", "empty", None
     # C3：坐标网格/测量数值即使落入标题栏区域也保留（防区域外扩误删坐标）
     if _is_axis_coordinate(t):
         return "keep", "axis_coordinate", None
     mode = cfg["drawing_type_mode"]
-    replaced = apply_replacements(t, cfg) if mode == "replace" else t
+    raw_repl = apply_replacements(raw, cfg) if mode == "replace" else raw   # 写回（保留格式码）
+    t_repl = apply_replacements(t, cfg) if mode == "replace" else t         # 判定
     if _is_protected(t, cfg):
-        cleaned = _strip_delete_segments(replaced, cfg)
+        cleaned = _strip_delete_segments(t_repl, cfg)
         # C2：仅空白差异（如标签"图  号"被压成"图 号"）不算实质修改，保留原文
         if cleaned and _norm_spaces(cleaned) != _norm_spaces(t):
             return "replace", "mixed_cleaned", cleaned
-        if replaced != t:
-            return "replace", "replaced_in_protected", replaced
+        if raw_repl != raw:
+            return "replace", "replaced_in_protected", raw_repl
         return "keep", "protected", None
-    if replaced != t:
-        return "replace", "replaced", replaced
+    if raw_repl != raw:
+        return "replace", "replaced", raw_repl
     return "delete", "whitelist_non_protected", None
 
 
 def judge_text(text, cfg):
-    """对单条文字内容做判定，返回 (action, reason, new_text)。
+    """对单条文字内容做判定（条带/页眉黑名单模式），返回 (action, reason, new_text)。
 
+    F-03：判定基于剥离 MText 格式码后的可见文字；替换写回保留原文格式码。
     - delete: reason 为命中类别
     - replace: new_text 为替换后的完整文本
     - keep: new_text 为 None
     """
-    t = (text or "").strip()
+    raw = text or ""
+    t = _visible(raw)
     if not t:
         return "keep", "empty", None
 
     mode = cfg["drawing_type_mode"]
     # delete 模式下不做"施工图→竣工图"替换，直接按删除处理
-    replaced = apply_replacements(t, cfg) if mode == "replace" else t
+    raw_repl = apply_replacements(raw, cfg) if mode == "replace" else raw
+    t_repl = apply_replacements(t, cfg) if mode == "replace" else t
 
     # 保护字段：只允许替换，不允许删除（安全优先，命中情况写日志人工复核）
     if _is_protected(t, cfg):
-        if replaced != t:
-            return "replace", "replaced_in_protected", replaced
+        if raw_repl != raw:
+            return "replace", "replaced_in_protected", raw_repl
         return "keep", "protected", None
 
     # C3：坐标网格/测量数值在任何模式下都保留（条带回退区的坐标标注不得误删）
     if _is_axis_coordinate(t):
         return "keep", "axis_coordinate", None
 
-    # 删除判定（基于替换后的文本，施工图字样已处理）
-    if _is_institution(replaced, cfg):
+    # 删除判定（基于剥离后的可见文本）
+    if _is_institution(t_repl, cfg):
         return "delete", "institution", None
-    if cfg["_person_label_re"].match(replaced):
+    if cfg["_person_label_re"].match(t_repl):
         return "delete", "person_label", None
-    if _is_date_text(replaced, cfg):
+    if _is_date_text(t_repl, cfg):
         return "delete", "date", None
     dk = cfg["delete_keywords"]
-    if mode == "delete" and any(k in replaced for k in dk.get("drawing_type", [])):
+    if mode == "delete" and any(k in t_repl for k in dk.get("drawing_type", [])):
         return "delete", "drawing_type", None
 
-    if replaced != t:
-        return "replace", "replaced", replaced
+    if raw_repl != raw:
+        return "replace", "replaced", raw_repl
     return "keep", "no_match", None

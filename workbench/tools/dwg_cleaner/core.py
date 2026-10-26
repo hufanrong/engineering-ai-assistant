@@ -166,8 +166,8 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
             for w in getattr(session, "drain_plot_warnings", lambda: [])():
                 notes.append("打印参数：%s" % w)
 
-            # 另存清稿副本
-            session.save_as(doc, cleaned_path)
+            # 另存清稿副本（F-04：save_as 返回规整后的真实路径，纠正双扩展名）
+            cleaned_path = session.save_as(doc, cleaned_path) or cleaned_path
             doc.Close(False)
             session._doc = None
             log("已保存清稿：%s_清稿.%s" % (base, ext_out))
@@ -369,21 +369,39 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
     """确定标题栏区域与清理模式，返回 (region, mode) 或 (None, None)。
 
     区域分级（R5，2026-10-26）：
-      "real_rect"     真实小矩形（含保护词验证）→ 白名单模式（只留保护字段）
+      "real_rect"     真实标题栏（小矩形或文字簇反推，含保护词验证）→ 白名单模式
       "fallback_band" 底部回退条带（含保护词）  → 强制黑名单模式（C3：只删公司名/
                       人名/日期，坐标网格等不整删，避免误删图框底部坐标）
       "top_band"      顶部页眉条带（有公司/人名/日期特征）→ 黑名单模式（C4 目录页）
+
+    F-05（2026-10-26）：①真实小矩形改为**候选列表逐个验保护词**（不再 top1 误判即放弃）；
+    ②新增**文字簇反推**——线条表格标题栏无闭合小矩形时，由图号/工程名/设计/审核等标签
+    文字簇包围盒外扩锁定真实区域，进入白名单，从根上解决人名/日期/证书删不掉。
     """
     tb = cfg.get("titleblock", {})
     alltp = _all_text_pos(session, space, frame)
 
-    # 1) 真实小矩形 + 保护词验证 → 白名单
-    cand = titleblock.detect_titleblock_region(frame, rects, cfg)
-    if cand and _texts_have_protect(_texts_in_region(alltp, cand), cfg):
-        log("标题栏真实边界（白名单模式）：%s" % (cand,))
-        return cand, "real_rect"
+    # 1) 真实小矩形候选列表，逐个验保护词（F-05②）
+    for cand in titleblock.detect_titleblock_regions(frame, rects, cfg):
+        if _texts_have_protect(_texts_in_region(alltp, cand), cfg):
+            log("标题栏真实边界（白名单模式，小矩形）：%s" % (cand,))
+            return cand, "real_rect"
 
-    # 2) 底部回退条带 + 保护词 → 强制黑名单（C3：不再白名单整删，坐标安全）
+    # 2) 文字簇反推真实区域（F-05①，线条表格标题栏兜底）
+    text_boxes = _collect_text_boxes(session, alltp, frame)
+    field_lab, person_lab, date_lab, cert_lab = _titleblock_label_sets(cfg)
+    seed_lab = field_lab | person_lab | date_lab | cert_lab
+    infer = titleblock.infer_titleblock_region_from_texts(
+        frame, text_boxes, seed_lab, field_lab, cfg)
+    if infer:
+        region, strong, seeds = infer
+        notes.append("已由标题栏文字簇反推锁定真实区域（命中 %d 个字段标签），"
+                     "按白名单模式清理" % strong)
+        log("标题栏真实边界（白名单模式，文字簇反推，强标签%d/标签%d）：%s"
+            % (strong, seeds, region))
+        return region, "real_rect"
+
+    # 3) 底部回退条带 + 保护词 → 强制黑名单（C3：不再白名单整删，坐标安全）
     band = titleblock.titleblock_region(frame, cfg)
     if _texts_have_protect(_texts_in_region(alltp, band), cfg):
         notes.append("未锁定标题栏真实小矩形，回退到底部条带，按黑名单模式保守清理"
@@ -391,7 +409,7 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
         log("标题栏回退底部条带（黑名单模式，防误删坐标）")
         return band, "fallback_band"
 
-    # 3) C4 顶部页眉（目录页/说明页）→ 黑名单保守清理
+    # 4) C4 顶部页眉（目录页/说明页）→ 黑名单保守清理
     if tb.get("clean_top_header", True):
         top = titleblock.top_header_region(frame, cfg)
         ttexts = _texts_in_region(alltp, top)
@@ -402,6 +420,32 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
             return top, "top_band"
 
     return None, None
+
+
+def _titleblock_label_sets(cfg):
+    """标题栏标签集（归一化）：(字段保护, 人名签署, 日期, 证书)。"""
+    tb = cfg.get("titleblock", {})
+    dk = cfg.get("delete_keywords", {})
+    field_lab = set(rules._norm_spaces(x) for x in
+                    (tb.get("field_labels") or titleblock.DEFAULT_FIELD_LABELS))
+    person_lab = set(rules._norm_spaces(x) for x in dk.get("person_labels", []))
+    date_lab = set(rules._norm_spaces(x) for x in dk.get("date_labels", []))
+    cert_lab = set(rules._norm_spaces(x) for x in dk.get("cert_labels", []))
+    return field_lab, person_lab, date_lab, cert_lab
+
+
+def _collect_text_boxes(session, alltp, frame):
+    """从 (ent, txt, pos) 列表构造文字簇反推所需的包围盒结构（norm 已剥格式码）。"""
+    out = []
+    for ent, txt, _p in alltp:
+        box = _entity_box(session, ent, frame)
+        if not box:
+            continue
+        out.append({
+            "norm": rules._norm_spaces(rules.strip_mtext_codes(txt)),
+            "minx": box[0], "miny": box[1], "maxx": box[2], "maxy": box[3],
+        })
+    return out
 
 
 def _region_has_protect_text(session, space, region, frame, cfg):
@@ -663,20 +707,27 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
                 box = (p[0], p[1], p[0], p[1])
             text_targets.append((ent, txt, p, box))
 
-    # 2.5) C1：标签→值几何关联（标签命中保护词时，其右侧/下侧紧邻的值实体保留）
-    field_labels = set(rules._norm_spaces(x) for x in
-                       (tb.get("field_labels") or titleblock.DEFAULT_FIELD_LABELS))
-    dk = cfg.get("delete_keywords", {})
-    block_labels = set(rules._norm_spaces(x) for x in
-                       (list(dk.get("person_labels", [])) + list(dk.get("date_labels", []))))
+    # 2.5) C1 标签→值【保护】 + F-01/F-02 标签→值【删除】
+    # norm 同时剥 MText 格式码（F-03），使 {\T1.5;李安武} 这类值也能被几何关联。
+    field_lab, person_lab, date_lab, cert_lab = _titleblock_label_sets(cfg)
+    delete_lab = person_lab | date_lab | cert_lab
     assoc_targets = [{
-        "key": i, "norm": rules._norm_spaces(txt),
+        "key": i,
+        "norm": rules._norm_spaces(rules.strip_mtext_codes(txt)),
         "minx": box[0], "miny": box[1], "maxx": box[2], "maxy": box[3],
     } for i, (_e, txt, _p, box) in enumerate(text_targets)]
+    # 保护：字段标签（图号/工程名/图名…）右侧/下方紧邻的值 → 保留；遇人名/日期/证书标签即止
     protected_idx = titleblock.associate_label_values(
-        assoc_targets, field_labels, block_labels, frame)
+        assoc_targets, field_lab, delete_lab, frame, mode="protect")
+    # 删除：人名/日期/证书标签右侧/下方紧邻的值（人名/日期/证书号）→ 删除；
+    # 遇字段标签即止；并剔除受保护值（保护优先，C1 优先级最高）。
+    # 白名单模式下这些裸值本就会被规则删除，此处主要是黑名单模式的双保险（F-01/F-02）。
+    delete_idx = titleblock.associate_label_values(
+        assoc_targets, delete_lab, field_lab, frame, mode="delete") - protected_idx
     if protected_idx:
         log("C1 标签→值关联，保护 %d 个值实体（工程名/图号/图名的值）" % len(protected_idx))
+    if delete_idx:
+        log("F-01/F-02 标签→值关联，删除 %d 个签署值实体（人名/日期/证书号）" % len(delete_idx))
 
     # 3) 判定（R3：统一收集为 CleanOp）
     ops = []
@@ -684,11 +735,17 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         if i in protected_idx:
             # C1 保护字段值：保留（若含"施工图"字样仍允许替换，工程名/图号一般不含）
             continue
+        pos_str = "%.1f,%.1f" % (pos[0], pos[1])
+        if i in delete_idx:
+            # F-01/F-02：标签（设计/审核/审定/标图/日期/证书编号）旁的值，黑名单也删
+            ops.append(CleanOp(ent, "delete",
+                               "%r [%s] (%s)" % (txt, "label_value", pos_str)))
+            log("删除（标签关联签署值）%r" % txt)
+            continue
         if use_whitelist:
             action, reason, new_text = rules.judge_whitelist_text(txt, cfg)
         else:
             action, reason, new_text = rules.judge_text(txt, cfg)
-        pos_str = "%.1f,%.1f" % (pos[0], pos[1])
         if action == "delete":
             ops.append(CleanOp(ent, "delete",
                                "%r [%s] (%s)" % (txt, reason, pos_str)))

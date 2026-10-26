@@ -227,10 +227,12 @@ class CadSession:
 
     def save_as(self, doc, path):
         """另存为清稿副本。v1.1：按当前 AutoCAD 版本选择可保存的最高通用格式。
-        v0.1.156：按输入扩展名匹配保存格式（.dxf 存 DXF，.dwg 存 DWG）。"""
+        v0.1.156：按输入扩展名匹配保存格式（.dxf 存 DXF，.dwg 存 DWG）。
+        v0.1.159（F-04）：规整并纠正双扩展名（xxx_清稿.dwg.dxf → xxx_清稿.dxf/.dwg）。"""
+        path = _normalize_double_extension(path)
+        dxf = str(path).lower().endswith(".dxf")
         if os_path_exists(path):
             os_remove(path)
-        dxf = str(path).lower().endswith(".dxf")
         fmt = saveas_format_for_release(self.release, dxf=dxf)
         try:
             doc.SaveAs(path, fmt)
@@ -239,6 +241,10 @@ class CadSession:
                 doc.SaveAs(path)
             except Exception:
                 pass
+        # F-04：AutoCAD 偶发按保存格式自动追加扩展名（.dwg 路径 + DXF 格式 → .dwg.dxf），
+        # 保存后扫描同目录，把双后缀产物重命名回正确路径。
+        _repair_double_extension(path)
+        return path
 
     def close_document(self, doc, save=False):
         try:
@@ -750,3 +756,40 @@ def os_remove(p):
     import os
     if os.path.exists(p):
         os.remove(p)
+
+
+# F-04：双扩展名（.dwg.dxf / .dxf.dwg）规整与产物校正
+_CAD_EXTS = (".dwg", ".dxf")
+
+
+def _normalize_double_extension(path):
+    """规整路径：xxx_清稿.dwg.dxf → xxx_清稿.dxf（取最后一个真实扩展名）。
+
+    只处理 .dwg/.dxf 相互叠加的情况，其余原样返回。
+    """
+    lower = str(path).lower()
+    for e1 in _CAD_EXTS:
+        for e2 in _CAD_EXTS:
+            double = e1 + e2
+            if lower.endswith(double):
+                return path[:-len(double)] + e2
+    return path
+
+
+def _repair_double_extension(path):
+    """SaveAs 后扫描同目录：若 AutoCAD 生成了 path+'.dxf'/'.dwg' 的双后缀文件，
+    重命名回期望的 path。"""
+    import os
+    path = _normalize_double_extension(path)
+    d = os.path.dirname(path) or "."
+    base = os.path.basename(path)
+    for extra in _CAD_EXTS:
+        bad = os.path.join(d, base + extra)
+        if os.path.exists(bad):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                os.rename(bad, path)
+            except Exception:
+                pass
+    return path

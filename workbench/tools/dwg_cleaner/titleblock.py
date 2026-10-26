@@ -204,24 +204,26 @@ def top_header_region(frame, cfg=None):
             frame.maxx + expand, frame.maxy + expand)
 
 
-def detect_titleblock_region(frame, rects, cfg=None):
-    """在右下角候选区锁定标题栏**真实小矩形**（2026-10-25 全情况整改）。
+def detect_titleblock_regions(frame, rects, cfg=None, topk=8):
+    """在右下角候选区找出标题栏**真实小矩形**候选列表（F-05②，2026-10-26）。
 
-    替代固定 20% 高度的粗区域：从图框内的小矩形（线框聚类产物）中
-    挑"最靠下且最靠右"的一个作为标题栏边界——标题栏通常在图框底部的
-    右侧。找不到或面积不合理返回 None（调用方回退 titleblock_region）。
+    v0.1.156 仅返回 top1，一旦 top1 是图签表格里的一个 40×24 小格（区域内文字数 0），
+    保护词验证失败就整体放弃。本函数改为返回按"靠下、靠右"评分排序的 topk 候选，
+    由调用方逐个验保护词，救回 top1 误判。
 
-    返回 (minx, miny, maxx, maxy)。
+    返回 [(minx,miny,maxx,maxy), ...]（已按评分降序），无候选返回 []。
     """
     cfg = cfg or {}
     tb = cfg.get("titleblock", {})
     if not tb.get("use_real_region_detection", True):
-        return None
+        return []
     if not rects:
-        return None
+        return []
     fw, fh = frame.width, frame.height
     if fw <= 0 or fh <= 0:
-        return None
+        return []
+    ratio_lo = float(tb.get("region_area_ratio_min", 0.015))
+    ratio_hi = float(tb.get("region_area_ratio_max", 0.45))
     candidates = []
     for r in rects:
         minx, miny, maxx, maxy = r[0], r[1], r[2], r[3]
@@ -233,8 +235,7 @@ def detect_titleblock_region(frame, rects, cfg=None):
                 or maxx > frame.maxx + 5 or maxy > frame.maxy + 5):
             continue
         area_ratio = (w * h) / (fw * fh)
-        # 太大=整框/内容框，太小=碎线框
-        if area_ratio > 0.45 or area_ratio < 0.015:
+        if area_ratio > ratio_hi or area_ratio < ratio_lo:
             continue
         # 长宽比不能太极端（标题栏横条 0.2~5，竖条另算）
         r_ = max(w, h) / min(w, h) if min(w, h) > 0 else 99
@@ -243,10 +244,130 @@ def detect_titleblock_region(frame, rects, cfg=None):
         # 越靠下、越靠右得分越高（y 向上，miny 越小越靠下）
         score = -miny * 1.0 + maxx * 0.001
         candidates.append((score, (minx, miny, maxx, maxy)))
-    if not candidates:
-        return None
     candidates.sort(key=lambda c: -c[0])
-    return candidates[0][1]
+    return [c[1] for c in candidates[:topk]]
+
+
+def detect_titleblock_region(frame, rects, cfg=None):
+    """单候选（向后兼容）：返回评分最高的候选，无则 None。"""
+    cands = detect_titleblock_regions(frame, rects, cfg)
+    return cands[0] if cands else None
+
+
+def infer_titleblock_region_from_texts(frame, text_boxes, seed_labels, strong_labels, cfg=None):
+    """F-05①：由标题栏**文字簇**反推真实区域（线条表格标题栏兜底，首选方案）。
+
+    本项目标题栏是用直线绘制的表格，没有闭合小矩形，detect_titleblock_regions 锁不住
+    区域。但标题栏内"图号/工程名称/图名/比例/设计/审核/审定/日期/证书编号"等标签文字
+    是稳定特征：在右下角象限把这些文字按包围盒连通聚类，取"含强保护字段标签最多"的
+    簇，其包围盒外扩即为标题栏区域。
+
+    参数
+    ----
+    text_boxes : list[dict]，每项含 norm（已归一化/剥格式码）、minx/miny/maxx/maxy
+    seed_labels : set[str]，全部标题栏标签（强保护+人名+日期+证书，归一化）
+    strong_labels : set[str]，强保护字段标签（图号/工程名/图名/比例…），用于确认
+    返回
+    ----
+    (region, strong_hits, seed_hits) 或 None。region 已外扩并夹取到图框内。
+    """
+    cfg = cfg or {}
+    tb = cfg.get("titleblock", {})
+    if not tb.get("infer_region_from_texts", True):
+        return None
+    fw, fh = frame.width, frame.height
+    if fw <= 0 or fh <= 0:
+        return None
+    x_ratio = float(tb.get("infer_right_ratio", 0.10))     # 右侧 90% 起（兼容横跨底部大图签）
+    y_ratio = float(tb.get("infer_bottom_ratio", 0.45))    # 底部 45%
+    gap_x = fw * float(tb.get("infer_gap_x_ratio", 0.09))
+    gap_y = fh * float(tb.get("infer_gap_y_ratio", 0.030))
+    row_tol = max(fh * 0.014, 1.5)
+    col_tol = fw * 0.02
+    min_strong = int(tb.get("infer_min_strong", 2))
+    expand = float(tb.get("region_expand_mm", 15))
+
+    def _hit(norm, labels):
+        if not norm:
+            return False
+        for lab in labels:
+            if lab and (norm == lab or norm.rstrip("：:") == lab
+                        or norm.startswith(lab) and len(norm) <= len(lab) + 2):
+                return True
+        return False
+
+    # 1) 右下象限文字
+    cand = []
+    for t in text_boxes:
+        cx = (t["minx"] + t["maxx"]) / 2.0
+        cy = (t["miny"] + t["maxy"]) / 2.0
+        if cx < frame.minx + fw * x_ratio:
+            continue
+        if cy > frame.miny + fh * y_ratio:
+            continue
+        cand.append(t)
+    if len(cand) < 3:
+        return None
+
+    # 2) 并查集连通聚类：同行（垂直重叠）水平近邻 / 同列（水平重叠）垂直近邻
+    n = len(cand)
+    parent = list(range(n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i in range(n):
+        a = cand[i]
+        for j in range(i + 1, n):
+            b = cand[j]
+            dx = max(0.0, max(a["minx"], b["minx"]) - min(a["maxx"], b["maxx"]))
+            dy = max(0.0, max(a["miny"], b["miny"]) - min(a["maxy"], b["maxy"]))
+            v_overlap = min(a["maxy"], b["maxy"]) - max(a["miny"], b["miny"])
+            h_overlap = min(a["maxx"], b["maxx"]) - max(a["minx"], b["minx"])
+            if v_overlap >= -row_tol and dx <= gap_x:
+                union(i, j)          # 同一行
+            elif h_overlap >= -col_tol and dy <= gap_y:
+                union(i, j)          # 同一列上下相邻
+
+    clusters = {}
+    for i in range(n):
+        clusters.setdefault(find(i), []).append(i)
+
+    # 3) 选含强保护字段标签最多（≥min_strong）的簇；并列取种子多、面积大
+    best = None
+    for _root, idxs in clusters.items():
+        members = [cand[i] for i in idxs]
+        strong = sum(1 for m in members if _hit(m["norm"], strong_labels))
+        seeds = sum(1 for m in members if _hit(m["norm"], seed_labels))
+        if strong < min_strong:
+            continue
+        area = ((max(m["maxx"] for m in members) - min(m["minx"] for m in members))
+                * (max(m["maxy"] for m in members) - min(m["miny"] for m in members)))
+        key = (strong, seeds, area)
+        if best is None or key > best[0]:
+            best = (key, members)
+    if best is None:
+        return None
+    members = best[1]
+    minx = min(m["minx"] for m in members) - expand
+    miny = min(m["miny"] for m in members) - expand
+    maxx = max(m["maxx"] for m in members) + expand
+    maxy = max(m["maxy"] for m in members) + expand
+    # 夹取到图框内（外扩不得越过图框，避免吞进相邻图框/坐标）
+    minx = max(minx, frame.minx - 2)
+    miny = max(miny, frame.miny - 2)
+    maxx = min(maxx, frame.maxx + 2)
+    maxy = min(maxy, frame.maxy + 2)
+    region = (minx, miny, maxx, maxy)
+    return region, best[0][0], best[0][1]
 
 
 def in_region(x, y, region):
@@ -263,51 +384,68 @@ DEFAULT_FIELD_LABELS = (
 )
 
 
-def associate_label_values(targets, field_labels, block_labels, frame):
-    """C1：标题栏"标签→值"几何关联（纯逻辑，不依赖 AutoCAD，可单测）。
+def associate_label_values(targets, field_labels, block_labels, frame, mode="protect"):
+    """标题栏"标签→值"几何关联（纯逻辑，不依赖 AutoCAD，可单测）。
 
     背景：标题栏中"工程名称"（标签）与"刚果（金）Manono…项目"（值）是两个独立
     文字实体；白名单按单实体判定时值不含保护词会被误删。本函数依据**同行、右侧、
-    紧邻、遇下一个标签即止**的规则，把标签关联到的值标记为受保护。
+    紧邻、遇下一个标签即止**的规则，把标签关联到的值标记出来。
+
+    mode（F-01，2026-10-26）：
+      protect（默认）：field_labels=保护字段标签（图号/工程名/图名…），关联到的值
+                      标记为"保留"；block_labels=人名/日期标签，向右遇到即止。
+      delete        ：field_labels=删除标签（设计/审核/审定/标图/日期/证书编号…），
+                      关联到的值（人名/日期/证书号）标记为"删除"；block_labels 应传
+                      保护字段标签，避免误删到相邻字段值。两种模式几何完全相同，
+                      区别只在调用方传入的标签集与对结果的处理。
 
     参数
     ----
     targets : list[dict]，每项含
         key（可哈希，通常是实体索引/对象 id）、
-        norm（已去空白的文本）、
+        norm（已去空白、已剥 MText 格式码的可见文本）、
         minx/miny/maxx/maxy（包围盒世界坐标）
-    field_labels : set[str]，已去空白的字段标签集合（如 {"图号","工程名称"}）
+    field_labels : set[str]，已去空白的"种子标签"集合
     block_labels : set[str]，已去空白；命中表示"下一个字段标签"，向右关联到此为止
     frame : Frame，用于按图幅归一化距离阈值
 
     返回
     ----
-    set[key]：应作为"保护字段值"保留的实体 key 集合
+    set[key]：与种子标签关联到的值实体 key 集合
     """
-    protected = set()
+    return associate_values(targets, field_labels, block_labels, frame)
+
+
+def associate_values(targets, seed_labels, stop_labels, frame):
+    """通用"标签→值"几何关联（associate_label_values 的实现，protect/delete 共用）。
+
+    规则：对每个种子标签，取其**同行右侧紧邻**的值（水平间隙内、遇下一个标签即止），
+    并兜底取**下方/同列**最近的一个非标签值。
+    """
+    result = set()
     fw, fh = frame.width, frame.height
     if fw <= 0 or fh <= 0 or not targets:
-        return protected
+        return result
 
-    def _is_field_label(norm):
+    def _is_seed(norm):
         if not norm:
             return False
-        for lab in field_labels:
+        for lab in seed_labels:
             if lab and (norm == lab or norm.rstrip("：:") == lab
                         or norm.startswith(lab) and len(norm) <= len(lab) + 2):
                 return True
         return False
 
-    def _is_block(norm):
+    def _is_stop(norm):
         if not norm:
             return False
-        if _is_field_label(norm):
+        if _is_seed(norm):
             return True
-        return any(b and (norm == b or norm.startswith(b)) for b in block_labels)
+        return any(b and (norm == b or norm.startswith(b)) for b in stop_labels)
 
     labels, others = [], []
     for t in targets:
-        (labels if _is_field_label(t.get("norm")) else others).append(t)
+        (labels if _is_seed(t.get("norm")) else others).append(t)
 
     row_tol = max(fh * 0.012, 1.0)          # 同行容差（约一行字高）
     max_gap_x = fw * 0.5                      # 标签→值水平最大跨距（工程名较长）
@@ -321,9 +459,6 @@ def associate_label_values(targets, field_labels, block_labels, frame):
         # 右侧同行候选
         right = []
         for v in others:
-            if v["key"] in protected:
-                # 已被别的标签保护的长值，仍可纳入本行
-                pass
             vcy = (v["miny"] + v["maxy"]) / 2.0
             if abs(vcy - lcy) > max(row_tol, lh * 0.9):
                 continue
@@ -335,25 +470,25 @@ def associate_label_values(targets, field_labels, block_labels, frame):
             right.append((v["minx"], v))
         right.sort(key=lambda z: z[0])
         for _x, v in right:
-            if _is_block(v.get("norm")):
+            if _is_stop(v.get("norm")):
                 break  # 遇到下一个字段标签，关联截止
-            protected.add(v["key"])
+            result.add(v["key"])
         # 下方/同列候选（标题栏上下排布时取最近一个非标签值）
         below = []
         for v in others:
-            if v["key"] in protected:
+            if v["key"] in result:
                 continue
             vcx = (v["minx"] + v["maxx"]) / 2.0
             vcy = (v["miny"] + v["maxy"]) / 2.0
             dy = lcy - vcy  # y 轴向上，值在下方则 dy>0
             if 0 < dy <= max(lh * 1.2, below_max_dy):
                 if abs(vcx - lcx) <= (lab["maxx"] - lab["minx"]) * 1.5 + fw * 0.03:
-                    if not _is_block(v.get("norm")):
+                    if not _is_stop(v.get("norm")):
                         below.append((dy, v))
         if below:
             below.sort(key=lambda z: z[0])
-            protected.add(below[0][1]["key"])
-    return protected
+            result.add(below[0][1]["key"])
+    return result
 
 
 def cluster(vals, tol):

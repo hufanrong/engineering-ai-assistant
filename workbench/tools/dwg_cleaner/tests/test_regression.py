@@ -154,6 +154,141 @@ def test_r3_cleanop():
     check("CleanOp 统一遍历无解包异常", True)
 
 
+def test_f03_mtext_codes():
+    """F-03：MText 内联格式码（\\T1.5;\\Q10;）穿插在文字中，判定前剥离，写回保留。"""
+    print("[F-03] MText 格式码剥离后判定")
+    # 剥离函数本身
+    check("F-03 日期格式码剥成可见文本",
+          rules.strip_mtext_codes(r"{\Q10;\T1.5;2024\Q0;年\Q10;07\Q0;月 }").strip() == "2024年07月")
+    check("F-03 人名格式码剥成可见文本",
+          rules.strip_mtext_codes(r"{\T1.5;李安武}") == "李安武")
+    # 白名单：带格式码的日期/人名/证书 → 删除（真机残留的 2024年07月 / 李安武 / A135036965）
+    expect(r"{\Q10;\T1.5;2024\Q0;年\Q10;07\Q0;月 }", "delete",
+           rules.judge_whitelist_text, "F-03 白名单-带格式码日期")
+    expect(r"{\T1.5;李安武}", "delete", rules.judge_whitelist_text, "F-03 白名单-带格式码人名")
+    expect(r"{\T1.5;A135036965}", "delete", rules.judge_whitelist_text, "F-02 白名单-带格式码证书号")
+    # 黑名单：带格式码日期应判 date（旧逻辑完整匹配失效）；人名/证书裸值靠标签关联删除
+    expect(r"{\Q10;\T1.5;2024\Q0;年\Q10;07\Q0;月 }", "delete",
+           rules.judge_text, "F-03 黑名单-带格式码日期")
+    # 保护词带格式码不得误删
+    expect(r"{\T1.5;竣工图}", "keep", rules.judge_text, "F-03 保护-竣工图")
+    expect(r"{\T1.5;设计阶段}", "keep", rules.judge_text, "F-03 保护-设计阶段")
+    expect(r"{\T1.5;竣工图}", "keep", rules.judge_whitelist_text, "F-03 白名单保护-竣工图")
+
+
+class _FakeEnt:
+    def __init__(self, name, text, box, layer="0"):
+        self.ObjectName = "AcDbMText"
+        self.Name = name
+        self.TextString = text
+        self._box = box
+        self.Layer = layer
+        self.deleted = False
+
+    def GetBoundingBox(self):
+        return (self._box[:2], self._box[2:])
+
+    def Delete(self):
+        self.deleted = True
+
+
+class _FakeSession:
+    """最小 mock，满足 core._clean_titleblock 的纯逻辑路径。"""
+    def __init__(self, ents):
+        self.ents = ents
+
+    def iter_entities(self, space):
+        return list(self.ents)
+
+    def is_proxy(self, e): return False
+    def is_xref(self, e, doc): return False
+    def is_raster(self, e): return False
+    def is_table(self, e): return False
+    def get_text(self, e): return e.TextString
+    def get_bounds(self, e): return e._box
+    def get_insertion(self, e):
+        return ((e._box[0] + e._box[2]) / 2.0, (e._box[1] + e._box[3]) / 2.0, 0)
+    def get_layer_lock(self, doc, layer): return False
+    def set_layer_lock(self, doc, layer, v): pass
+    def explode_ref(self, e): return []
+    def convert_to_autocad_type(self, e): return False
+    def table_cell_texts(self, e): return []
+    def set_text(self, e, t): e.TextString = t
+    def drain_plot_warnings(self): return []
+
+
+def _x398_titleblock_ents():
+    """真机 X398 粗碎车间标题栏简化布局（A3 横 420x297，标签与值分离，无闭合矩形）。"""
+    date = r"{\Q10;\T1.5;2024\Q0;年\Q10;07\Q0;月 }"
+    E = _FakeEnt
+    return [
+        E("图号", "图号", (250, 6, 274, 12)), E("图号值", "X398·301Z-02", (278, 6, 330, 12)),
+        E("比例", "比例", (340, 6, 360, 12)), E("比例值", "1:500", (364, 6, 390, 12)),
+        E("工程名称", "工程名称", (250, 13, 292, 19)),
+        E("工程值", "刚果（金）Manono锂矿项目", (296, 13, 400, 19)),
+        E("图名", "图名", (250, 20, 274, 26)), E("图名值", "粗碎车间平面布置图", (278, 20, 380, 26)),
+        E("公司", "紫金(厦门)工程设计有限公司", (250, 27, 380, 33)),
+        E("设计", "设计", (250, 34, 268, 40)), E("设计人", "李安武", (272, 34, 298, 40)),
+        E("审核", "审核", (305, 34, 323, 40)), E("审核人", "陈伟晖", (327, 34, 353, 40)),
+        E("审定", "审定", (360, 34, 378, 40)), E("审定人", "段仪惠", (382, 34, 408, 40)),
+        E("标图", "标图", (250, 41, 268, 47)), E("标图人", "粟子翔", (272, 41, 298, 47)),
+        E("日期", "日期", (305, 41, 323, 47)), E("日期值", date, (327, 41, 368, 47)),
+        E("证书", "设计证书编号", (250, 48, 306, 54)), E("证书值", "A135036965", (310, 48, 356, 54)),
+        E("X", "X9193800", (30, 200, 70, 206)), E("Y", "Y549350", (30, 210, 65, 216)),
+    ]
+
+
+def test_f01_f02_f05_titleblock():
+    """F-01/F-02 标签→值删除 + F-05 文字簇反推（线条表格无闭合矩形）。
+
+    真机根因：标题栏是直线表格、无闭合小矩形，锁不住区域全走黑名单；
+    且"设计/审核/审定/标图"标签与"李安武/陈伟晖…"值是两个实体，黑名单只能删标签。
+    """
+    print("[F-01/F-02/F-05] 文字簇反推 + 标签→值删除（白名单 & 黑名单）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    fl, pl, dl, cl = core._titleblock_label_sets(CFG)
+    seed = fl | pl | dl | cl
+
+    # F-05①：不给任何闭合矩形（rects=[]），仅靠文字簇反推锁定真实区域
+    sess = _FakeSession(_x398_titleblock_ents())
+    alltp = core._all_text_pos(sess, "model", frame)
+    boxes = core._collect_text_boxes(sess, alltp, frame)
+    infer = titleblock.infer_titleblock_region_from_texts(frame, boxes, seed, fl, CFG)
+    check("F-05 文字簇反推到标题栏区域（无闭合矩形）", infer is not None, str(infer))
+    assert infer
+    region = infer[0]
+    check("F-05 反推区域含 4 个强字段标签", infer[1] >= 4, "strong=%d" % infer[1])
+
+    keep = ["图号值", "比例值", "工程值", "图名值", "X", "Y"]
+    delete_ = ["设计人", "审核人", "审定人", "标图人", "日期值", "证书值", "公司"]
+
+    def run(mode, reg):
+        ents = [_FakeEnt(e.Name, e.TextString, e._box) for e in _x398_titleblock_ents()]
+        s = _FakeSession(ents)
+        core._clean_titleblock(s, "doc", "model", reg, frame, CFG, lambda m: None, mode=mode)
+        return {e.Name: e for e in ents}
+
+    # 白名单 real_rect（文字簇反推）
+    emap = run("real_rect", region)
+    check("F-01 白名单 4 个人名全删", all(emap[n].deleted for n in delete_[:4]),
+          str([n for n in delete_[:4] if not emap[n].deleted]))
+    check("F-02/F-03 白名单 证书/日期/公司全删",
+          all(emap[n].deleted for n in ["证书值", "日期值", "公司"]))
+    check("白名单 图号/工程名/图名/比例值全保留",
+          all(not emap[n].deleted for n in keep[:4]))
+    check("C3 白名单 坐标 X/Y 保留", all(not emap[n].deleted for n in ["X", "Y"]))
+
+    # 黑名单 fallback_band（F-01/F-02 标签→值双保险，裸人名/证书即使不匹配规则也删）
+    band = titleblock.titleblock_region(frame, CFG)
+    emap2 = run("fallback_band", band)
+    check("F-01 黑名单 标签关联删除 4 个人名", all(emap2[n].deleted for n in delete_[:4]),
+          str([n for n in delete_[:4] if not emap2[n].deleted]))
+    check("F-02/F-03 黑名单 标签关联删除 证书/日期/公司",
+          all(emap2[n].deleted for n in ["证书值", "日期值", "公司"]))
+    check("C1 黑名单 图号/工程名/图名/比例值仍保留（保护优先）",
+          all(not emap2[n].deleted for n in keep[:4]))
+
+
 def main():
     print("=" * 64)
     print("dwg_cleaner 纯逻辑回归测试（无 AutoCAD 依赖）")
@@ -166,6 +301,8 @@ def main():
     test_c1_label_value()
     test_c1_spaced_label()
     test_r3_cleanop()
+    test_f03_mtext_codes()
+    test_f01_f02_f05_titleblock()
     print("=" * 64)
     print("结果：通过 %d，失败 %d" % (_PASS, _FAIL))
     print("=" * 64)

@@ -21,7 +21,15 @@
       "描图",
       "工艺",
       "专业负责人",
-      "项目负责人"
+      "项目负责人",
+      "标图",
+      "校核",
+      "制表",
+      "会签",
+      "审查",
+      "核定",
+      "设计总负责人",
+      "项目总工程师"
     ],
     "date_labels": [
       "日期",
@@ -38,6 +46,16 @@
       "施工图",
       "设计施工图",
       "设计图"
+    ],
+    "cert_labels": [
+      "设计证书编号",
+      "证书编号",
+      "资质证书编号",
+      "注册证书编号",
+      "执业证书",
+      "证书号",
+      "资质证书",
+      "设计证书"
     ]
   },
   "protect_keywords": [
@@ -93,7 +111,13 @@
       "规格"
     ],
     "clean_top_header": true,
-    "top_header_height_ratio": 0.14
+    "top_header_height_ratio": 0.14,
+    "infer_region_from_texts": true,
+    "infer_right_ratio": 0.1,
+    "infer_bottom_ratio": 0.45,
+    "infer_gap_x_ratio": 0.09,
+    "infer_gap_y_ratio": 0.05,
+    "infer_min_strong": 2
   },
   "frame_detect": {
     "standard_sizes_mm": [
