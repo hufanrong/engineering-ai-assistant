@@ -10,6 +10,7 @@ v0.1.112：自动更新模块
 import os
 import sys
 import json
+import time
 import zipfile
 import shutil
 import datetime
@@ -68,28 +69,50 @@ def _safe_copy(src: str, dst: str, retries: int = 3) -> str:
     return f"{dst}: {last}"
 
 
+def _unique_staging_dir():
+    """生成一个全新的、带时间戳的唯一 staging 目录名（含毫秒，避免同秒重复）。"""
+    return os.path.join(
+        os.path.dirname(STAGING_DIR),
+        "staging_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:18],
+    )
+
+
 def _fresh_staging_dir() -> str:
-    """获取可写 staging 目录。v0.1.142：默认 updates/staging 清理失败
-    （旧残留文件被占用/只读）时，改用带时间戳的唯一目录，保证全新写入，
-    避免「Permission denied: updates\\staging\\app\\xxx.py」。"""
+    """获取一个保证**为空且可写**的 staging 目录。
+
+    v0.1.160（2026-10-26 真机 500 修复）：旧实现 rmtree(ignore_errors=True) 后**不校验**
+    残留是否清干净，makedirs(exist_ok)+探针可写就返回。Windows 上残留文件被占用/只读时
+    rmtree 部分失败，于是新旧 61 个文件混杂，后续复制异常 → POST /api/update/perform 500。
+
+    现在：默认目录清理后若仍有残留，立即改用带时间戳的唯一目录（与残留彻底隔离）；
+    唯一目录是全新名，不含任何旧文件，保证写入干净。
+    """
     base = STAGING_DIR
-    for _ in range(3):
+    for _ in range(4):
         if os.path.isdir(base):
             shutil.rmtree(base, ignore_errors=True)
+        # rmtree 后校验：默认目录仍有残留（被占用/只读）→ 换唯一目录，绝不与残留混杂
+        if os.path.isdir(base) and os.listdir(base):
+            if base == STAGING_DIR:
+                base = _unique_staging_dir()
+                continue
+            # 唯一目录都清不干净（极少见），再换一个新名
+            base = _unique_staging_dir()
+            continue
         try:
             os.makedirs(base, exist_ok=True)
-            # 验证可写
             probe = os.path.join(base, ".probe")
             with open(probe, "w", encoding="utf-8") as _f:
                 _f.write("ok")
             os.remove(probe)
+            # 返回前再确认目录为空（只有刚删掉的 .probe，已移除）
+            if not os.path.exists(base) or os.listdir(base):
+                base = _unique_staging_dir()
+                continue
             return base
         except Exception:  # noqa: BLE001
-            base = os.path.join(
-                os.path.dirname(STAGING_DIR),
-                "staging_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-            )
-    return STAGING_DIR
+            base = _unique_staging_dir()
+    return base
 
 
 def _verify_staged_files(staging: str) -> Dict:
@@ -141,6 +164,11 @@ def _verify_staged_files(staging: str) -> Dict:
     # web 前端必须存在
     if not os.path.isfile(os.path.join(staging, "web", "index.html")):
         missing.append("web/index.html")
+    # v0.1.160：tools/dwg_cleaner（清稿模块）关键文件必须齐全，否则半更新导致清稿功能异常
+    for rel in ("core.py", "cad.py", "rules.py", "titleblock.py", "config.json"):
+        p = os.path.join(staging, "tools", "dwg_cleaner", rel)
+        if not os.path.isfile(p):
+            missing.append("tools/dwg_cleaner/%s" % rel)
     if missing:
         return {"ok": False, "missing": sorted(set(missing))}
     return {"ok": True, "missing": []}
@@ -194,7 +222,18 @@ def get_current_version() -> str:
 
 
 def is_git_repo() -> bool:
-    """检查是否是Git仓库。"""
+    """是否走 Git 路线更新。
+
+    v0.1.160（2026-10-26）：**部署机默认禁用 git 路线**。原因：
+    1. 安装包是 zip 解压，WORKSPACE_ROOT 是 workbench 子目录，而 .git 在上一级（或不存在），
+       本函数此前恒为 False（git 路线是死代码）；
+    2. 即使存在 .git，也是浅克隆（.git/shallow）且本地工作树有改动，`git pull` 会报
+       unrelated histories / local changes would be overwritten。
+    因此页面更新统一走下载方式（staging 原子替换 + 完整性校验 + 失败回滚）。
+    开发者确需走 git 时，设置环境变量 FANGONG_DEV_GIT=1 显式启用（失败仍会自动回退下载）。
+    """
+    if os.environ.get("FANGONG_DEV_GIT") != "1":
+        return False
     git_dir = os.path.join(WORKSPACE_ROOT, ".git")
     return os.path.isdir(git_dir)
 
@@ -415,7 +454,9 @@ def update_via_download() -> Dict:
             
             # 只同步程序文件白名单（不复制数据/环境/无关文件）
             # 同步目录（相对 workbench_root）：app、parsers、web、docs、cloud_server（不含cloud_data）
-            SYNC_DIRS = ["app", "parsers", "web", "docs", "cloud_server"]
+            # v0.1.160：加入 tools（清稿模块 dwg_cleaner 等），否则页面更新永远不会更新 tools，
+            # 清稿修复无法到达用户机器（tools 下无用户数据，可全量同步）。
+            SYNC_DIRS = ["app", "parsers", "web", "docs", "cloud_server", "tools"]
             # 同步文件（相对 workbench_root）
             SYNC_FILES = [
                 "start.py", "run_workbench.bat", "README.md", "requirements.txt",

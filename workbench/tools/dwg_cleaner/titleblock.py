@@ -296,14 +296,19 @@ def infer_titleblock_region_from_texts(frame, text_boxes, seed_labels, strong_la
                 return True
         return False
 
-    # 1) 右下象限文字
+    # 1) 右下象限文字。F-06（2026-10-26）：**严格限制在当前图框内**——多图框并排时，
+    # 相邻图框的标题栏同样位于右下角，若不加 x/y 上界会把别框文字聚进本框（跨框大簇）。
+    x_lo = frame.minx + fw * x_ratio
+    x_hi = frame.maxx + 2.0
+    y_lo = frame.miny - 2.0
+    y_hi = frame.miny + fh * y_ratio
     cand = []
     for t in text_boxes:
         cx = (t["minx"] + t["maxx"]) / 2.0
         cy = (t["miny"] + t["maxy"]) / 2.0
-        if cx < frame.minx + fw * x_ratio:
+        if not (x_lo <= cx <= x_hi):
             continue
-        if cy > frame.miny + fh * y_ratio:
+        if not (y_lo <= cy <= y_hi):
             continue
         cand.append(t)
     if len(cand) < 3:
@@ -366,6 +371,10 @@ def infer_titleblock_region_from_texts(frame, text_boxes, seed_labels, strong_la
     miny = max(miny, frame.miny - 2)
     maxx = min(maxx, frame.maxx + 2)
     maxy = min(maxy, frame.maxy + 2)
+    # F-06：夹取后必须是正向矩形；反向（如跨框簇与图框求交后 minx>maxx）说明本框无有效
+    # 标题栏，直接判失败回退条带，绝不静默输出畸形区域（否则整框删除 0 条）。
+    if not (minx < maxx and miny < maxy):
+        return None
     region = (minx, miny, maxx, maxy)
     return region, best[0][0], best[0][1]
 

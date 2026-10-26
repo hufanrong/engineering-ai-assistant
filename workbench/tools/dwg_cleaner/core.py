@@ -365,6 +365,14 @@ def _texts_have_header_signature(texts, cfg):
     return False
 
 
+def _norm_region(region):
+    """日志/记录用：规范化区域坐标（min<=max），避免打印畸形反向矩形（F-06/P2）。"""
+    if not region:
+        return region
+    minx, miny, maxx, maxy = region
+    return (min(minx, maxx), min(miny, maxy), max(minx, maxx), max(miny, maxy))
+
+
 def _resolve_region(session, space, frame, rects, cfg, log, notes):
     """确定标题栏区域与清理模式，返回 (region, mode) 或 (None, None)。
 
@@ -380,14 +388,20 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
     """
     tb = cfg.get("titleblock", {})
     alltp = _all_text_pos(session, space, frame)
+    # F-06（2026-10-26）：先把文字裁剪到**当前图框内**。多图框并排同处一个模型空间时，
+    # 若把相邻框的"设计/审核/图号"也纳入，会跨框聚成一个大簇，夹取后产生反向矩形，
+    # 导致只有最后一个图框被清理。本框内的文字/矩形才参与本框的区域检测与清理。
+    alltp = [(e, t, p) for (e, t, p) in alltp
+             if (frame.minx - 2 <= p[0] <= frame.maxx + 2
+                 and frame.miny - 2 <= p[1] <= frame.maxy + 2)]
 
     # 1) 真实小矩形候选列表，逐个验保护词（F-05②）
     for cand in titleblock.detect_titleblock_regions(frame, rects, cfg):
         if _texts_have_protect(_texts_in_region(alltp, cand), cfg):
-            log("标题栏真实边界（白名单模式，小矩形）：%s" % (cand,))
+            log("标题栏真实边界（白名单模式，小矩形）：%s" % (_norm_region(cand),))
             return cand, "real_rect"
 
-    # 2) 文字簇反推真实区域（F-05①，线条表格标题栏兜底）
+    # 2) 文字簇反推真实区域（F-05①，线条表格标题栏兜底；F-06 已限本框）
     text_boxes = _collect_text_boxes(session, alltp, frame)
     field_lab, person_lab, date_lab, cert_lab = _titleblock_label_sets(cfg)
     seed_lab = field_lab | person_lab | date_lab | cert_lab
@@ -398,7 +412,7 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
         notes.append("已由标题栏文字簇反推锁定真实区域（命中 %d 个字段标签），"
                      "按白名单模式清理" % strong)
         log("标题栏真实边界（白名单模式，文字簇反推，强标签%d/标签%d）：%s"
-            % (strong, seeds, region))
+            % (strong, seeds, _norm_region(region)))
         return region, "real_rect"
 
     # 3) 底部回退条带 + 保护词 → 强制黑名单（C3：不再白名单整删，坐标安全）

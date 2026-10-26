@@ -289,6 +289,65 @@ def test_f01_f02_f05_titleblock():
           all(not emap2[n].deleted for n in keep[:4]))
 
 
+def test_f06_multi_frame():
+    """F-06：多图框并排时，文字簇反推必须先按图框分组，各自独立锁定本框区域。
+
+    v0.1.159 真机：三框标题栏被聚成一个跨框大簇，夹取后对图1/图2产生反向矩形
+    （minx>maxx），整框删除 0 条，只有最后一个图框被清理。
+    """
+    print("[F-06] 多图框独立反推（不跨框、不反向）")
+    frames = [titleblock.Frame(0, 0, 210, 297),     # A4纵
+              titleblock.Frame(230, 0, 650, 297),   # A3横
+              titleblock.Frame(670, 0, 967, 210)]   # A4横
+
+    def titlebar(fi, f):
+        bx, by = f.maxx - 148, f.miny + 6
+
+        def mk(n, t, rx0, ry0, rx1, ry1):
+            return _FakeEnt("%d_%s" % (fi, n), t,
+                            (bx + rx0, by + ry0, bx + rx1, by + ry1))
+
+        return [
+            mk("图号", "图号", 0, 0, 22, 6), mk("图号值", "X398-%dZ-02" % fi, 26, 0, 80, 6),
+            mk("工程名称", "工程名称", 0, 8, 40, 14), mk("工程值", "Manono锂矿项目", 44, 8, 146, 14),
+            mk("图名", "图名", 0, 16, 22, 22), mk("图名值", "粗碎车间布置图", 26, 16, 120, 22),
+            mk("设计", "设计", 0, 24, 18, 30), mk("设计人", "李安武", 22, 24, 48, 30),
+            mk("审核", "审核", 55, 24, 73, 30), mk("审核人", "陈伟晖", 77, 24, 103, 30),
+            mk("日期", "日期", 0, 32, 18, 38), mk("日期值", r"{\Q10;2024\Q0;年07月}", 22, 32, 70, 38),
+        ]
+
+    ents = []
+    for i, f in enumerate(frames):
+        ents.extend(titlebar(i, f))
+
+    regs = []
+    for i, f in enumerate(frames):
+        sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+        reg, mode = core._resolve_region(sess, "model", f, [], CFG, lambda m: None, [])
+        regs.append(reg)
+        forward = reg and reg[0] < reg[2] and reg[1] < reg[3]
+        inside = (reg and reg[0] >= f.minx - 2 and reg[2] <= f.maxx + 2
+                  and reg[1] >= f.miny - 2 and reg[3] <= f.maxy + 2)
+        check("F-06 图%d 反推为正向矩形且在本框内（mode=%s）" % (i + 1, mode),
+              mode == "real_rect" and forward and inside, str(reg))
+    no_overlap = all(regs[i][2] <= regs[j][0] or regs[j][2] <= regs[i][0]
+                     for i in range(3) for j in range(i + 1, 3))
+    check("F-06 三框标题栏区域互不重叠（未跨框聚类）", no_overlap, str(regs))
+
+    for i, f in enumerate(frames):
+        es = [_FakeEnt(e.Name, e.TextString, e._box) for e in ents]
+        ss = _FakeSession(es)
+        reg, mode = core._resolve_region(ss, "model", f, [], CFG, lambda m: None, [])
+        core._clean_titleblock(ss, "doc", "model", reg, f, CFG, lambda m: None, mode=mode)
+        emap = {e.Name: e for e in es}
+        del_ok = all(emap["%d_%s" % (i, n)].deleted for n in ["设计人", "审核人", "日期值"])
+        keep_ok = all(not emap["%d_%s" % (i, n)].deleted for n in ["图号值", "工程值", "图名值"])
+        other_ok = all(not emap["%d_设计人" % j].deleted for j in range(3) if j != i)
+        check("F-06 图%d 独立清理（本框删/留正确，未动别框）" % (i + 1),
+              del_ok and keep_ok and other_ok,
+              "del=%s keep=%s other=%s" % (del_ok, keep_ok, other_ok))
+
+
 def main():
     print("=" * 64)
     print("dwg_cleaner 纯逻辑回归测试（无 AutoCAD 依赖）")
@@ -303,6 +362,7 @@ def main():
     test_r3_cleanop()
     test_f03_mtext_codes()
     test_f01_f02_f05_titleblock()
+    test_f06_multi_frame()
     print("=" * 64)
     print("结果：通过 %d，失败 %d" % (_PASS, _FAIL))
     print("=" * 64)
