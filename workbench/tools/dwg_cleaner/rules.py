@@ -86,8 +86,38 @@ def _is_date_text(t, cfg):
     return False
 
 
+def _norm_spaces(s):
+    """归一化空白：全角空格(U+3000)、制表符、普通空格全部去掉，仅用于**标签识别**。
+
+    C2 修复：标题栏格内标签常写成"图  号""工 程 名 称"（CAD 里字间距常用空格
+    撑开），精确子串匹配会漏判为非保护词而被删。归一化只用于判定，不改动原文。
+    """
+    return re.sub(r"[\s\u3000]+", "", s or "")
+
+
 def _is_protected(t, cfg):
-    return any(k in t for k in cfg["protect_keywords"])
+    """是否命中保护词。C2：比对前对正文与关键词都做空白归一化。"""
+    nt = _norm_spaces(t)
+    return any(_norm_spaces(k) in nt for k in cfg["protect_keywords"])
+
+
+# 坐标网格轴标注：X/Y 后紧跟 3 位以上数字（如 X9193900、Y549350、x:12345），
+# 或纯测量数值。条带黑名单模式下作为显式保险，绝不误删图纸坐标内容（C3）。
+_AXIS_COORD_RE = re.compile(r"^[XYxy][\s:：.．-]*\d{3,}(?:[.,;:：\s]*\d{0,4})*$")
+_PURE_NUMBER_RE = re.compile(r"^[\d\s.,;:：．°′″'\"+\-]+$")
+
+
+def _is_axis_coordinate(t):
+    """C3：识别坐标网格/测量数值类标注（条带区的坐标数字不得当垃圾删除）。"""
+    s = (t or "").strip()
+    if not s:
+        return False
+    if _AXIS_COORD_RE.match(s):
+        return True
+    # 纯数字/测量串（长度足够，排除孤立编号），如 "630"、"1234.567"
+    if len(s) >= 3 and _PURE_NUMBER_RE.match(s) and re.search(r"\d", s):
+        return True
+    return False
 
 
 def _is_institution(t, cfg):
@@ -101,10 +131,26 @@ def _strip_delete_segments(t, cfg):
     """
     dk = cfg.get("delete_keywords", {})
     labels = sorted(dk.get("person_labels", []), key=len, reverse=True)
+    prot = [k for k in (cfg.get("protect_keywords") or []) if k]
     new = t
     for lab in labels:
         pat = re.compile(re.escape(lab) + r"[:：\s]{0,2}[\S]{1,12}")
-        new = pat.sub("", new)
+
+        def _sub_guard(m, _prot=prot):
+            """2026-10-26 修复：人名标签会误伤含保护词的合法字段。
+
+            例：标签「设计」+ 保护词「设计阶段」→ 原文 '{\\T1.5;设计阶段}'
+            被剥成 '{\\T1.5'（MText 格式码残缺，标题栏内容损坏）。
+            命中保护词的匹配段一律不剥；C2：判定时同样做空白归一化，
+            使"图  号"这类带字间距的标签也能被保护。
+            """
+            seg = m.group(0)
+            nseg = _norm_spaces(seg)
+            if any(_norm_spaces(k) in nseg for k in _prot):
+                return seg
+            return ""
+
+        new = pat.sub(_sub_guard, new)
     # 日期段剥离：兼容任意位置（含"日期：2025.4.14"标签+串）；
     # 收紧规则防误伤图号（4 位年开头 + 前后非字母数字，如 "X2025-01" 不剥）
     for lab in dk.get("date_labels", ["日期", "时间", "出图"]):
@@ -134,11 +180,15 @@ def judge_whitelist_text(text, cfg):
     t = (text or "").strip()
     if not t:
         return "keep", "empty", None
+    # C3：坐标网格/测量数值即使落入标题栏区域也保留（防区域外扩误删坐标）
+    if _is_axis_coordinate(t):
+        return "keep", "axis_coordinate", None
     mode = cfg["drawing_type_mode"]
     replaced = apply_replacements(t, cfg) if mode == "replace" else t
     if _is_protected(t, cfg):
         cleaned = _strip_delete_segments(replaced, cfg)
-        if cleaned and cleaned != t:
+        # C2：仅空白差异（如标签"图  号"被压成"图 号"）不算实质修改，保留原文
+        if cleaned and _norm_spaces(cleaned) != _norm_spaces(t):
             return "replace", "mixed_cleaned", cleaned
         if replaced != t:
             return "replace", "replaced_in_protected", replaced
@@ -168,6 +218,10 @@ def judge_text(text, cfg):
         if replaced != t:
             return "replace", "replaced_in_protected", replaced
         return "keep", "protected", None
+
+    # C3：坐标网格/测量数值在任何模式下都保留（条带回退区的坐标标注不得误删）
+    if _is_axis_coordinate(t):
+        return "keep", "axis_coordinate", None
 
     # 删除判定（基于替换后的文本，施工图字样已处理）
     if _is_institution(replaced, cfg):

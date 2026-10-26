@@ -65,6 +65,14 @@ class CadSession:
         self.app = None
         self._doc = None
         self._com_initialized = False
+        # R2：打印链路中被容错跳过的属性设置（不静默，处理后透出 notes）
+        self._plot_warnings = []
+
+    def drain_plot_warnings(self):
+        """取出并清空打印阶段收集的告警（R2：禁止静默吞异常）。"""
+        ws = self._plot_warnings
+        self._plot_warnings = []
+        return ws
 
     def __enter__(self):
         import pythoncom
@@ -137,36 +145,73 @@ class CadSession:
         full = os_path_abspath(path)
         doc = None
         last_err = None
-        for _ in range(6):
+
+        def _usable(d):
+            """2026-10-26 加固：对象非空 ≠ 可用。
+
+            大图打开后 COM 动态绑定会短暂损坏，此时 Documents.Item / ActiveDocument
+            仍返回对象，但读属性报 AttributeError: <unknown>.ModelSpace 或
+            AutoCAD.Application.ActiveDocument。必须实际访问一次才算等到。
+            """
+            if d is None:
+                return False
             try:
-                self.app.Documents.Open(full, readonly)
-            except Exception as e:  # noqa: BLE001
-                last_err = e
-                time.sleep(5)
-                continue
+                _ = str(d.Name)
+            except Exception:  # noqa: BLE001
+                return False
+            try:
+                _ = d.ModelSpace.Count
+            except Exception:  # noqa: BLE001
+                return False
+            return True
+
+        def _candidates():
+            out = []
             # 方式1：ActiveDocument（打开后自动激活）
             try:
                 ad = self.app.ActiveDocument
                 if ad is not None:
-                    doc = ad
+                    out.append(ad)
             except Exception:  # noqa: BLE001
                 pass
             # 方式2：按 FullName 精确匹配
-            if doc is None:
+            try:
+                cnt = self.app.Documents.Count
+            except Exception:  # noqa: BLE001
+                cnt = 0
+            for j in range(cnt):
                 try:
-                    for j in range(self.app.Documents.Count):
-                        try:
-                            d = self.app.Documents.Item(j)
-                            if str(d.FullName).lower() == full.lower():
-                                doc = d
-                                break
-                        except Exception:  # noqa: BLE001
-                            continue
+                    d = self.app.Documents.Item(j)
                 except Exception:  # noqa: BLE001
-                    pass
-            if doc is not None:
+                    continue
+                try:
+                    if str(d.FullName).replace("/", "\\").lower() == \
+                            full.replace("/", "\\").lower():
+                        out.append(d)
+                except Exception:  # noqa: BLE001
+                    continue
+            return out
+
+        # 第一步：只打开一次（避免重复 Open 造成多份文档占用内存）
+        opened = False
+        for _ in range(6):
+            try:
+                self.app.Documents.Open(full, readonly)
+                opened = True
                 break
-            time.sleep(5)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                time.sleep(5)
+        # 第二步：轮询等待文档对象真正可用（大图可达数十秒）
+        if opened:
+            deadline = time.time() + 90
+            while time.time() < deadline and doc is None:
+                for cand in _candidates():
+                    if _usable(cand):
+                        doc = cand
+                        break
+                if doc is None:
+                    time.sleep(3)
         if doc is None:
             # 加密图纸：Open 报错含 password/口令 → 明确识别，不弹窗挂死
             err = str(last_err or "")
@@ -482,10 +527,12 @@ class CadSession:
         PlotViewName 命名视图路线。
         """
         import pythoncom
+        import win32com.client
         plot_cfg = cfg.get("plot", {})
         device = plot_cfg.get("device", "DWG To PDF.pc3")
         style_sheet = plot_cfg.get("style_sheet", "monochrome.ctb")
         margin = plot_cfg.get("margin_mm", 10)
+        self._plot_warnings = []  # R2：每次打印重新收集
 
         try:
             doc.Plot.QuietErrorMode = True
@@ -501,51 +548,91 @@ class CadSession:
             pass
 
         try:
-            cfgs = doc.PlotConfigurations  # Bug1：Document 属性
-            name = "_TMP_CLEAN_CFG"
+            # 2026-10-26 修复（本机 AutoCAD 2020 R23.1 实测）：
+            # v0.1.154+ 改用「临时 PlotConfiguration」（doc.PlotConfigurations.Add）
+            # 承载打印参数，但本机 pc.CenterPlot = True 直接抛
+            # com_error(输入无效, AutoCAD.Application)，整条打印链路中断。
+            # 改回已实测通过的 doc.ActiveLayout 路线：布局对象上的 ConfigName /
+            # SetWindowToPlot / PlotType / PlotToFile 全部可用；打印后恢复原设置。
+            layout = doc.ActiveLayout
+            saved = {}
+            for attr in ("ConfigName", "PlotType", "PaperUnits", "CenterPlot",
+                         "PlotRotation", "UseStandardScale", "CanonicalMediaName",
+                         "StandardScale"):
+                try:
+                    saved[attr] = getattr(layout, attr)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            def _try_set(obj, attr, val):
+                """容错赋值：单个属性不可设不应中断整条打印链路。
+
+                R2：失败不再静默，记录到 self._plot_warnings，处理后透出 notes。
+                """
+                try:
+                    setattr(obj, attr, val)
+                    return True
+                except Exception as _se:  # noqa: BLE001
+                    self._plot_warnings.append("布局打印属性 %s 设置失败：%s" % (attr, _se))
+                    return False
+
             try:
-                old = cfgs.Item(name)
-                old.Delete()
-            except Exception:
-                pass
-            pc = cfgs.Add(name)
-            try:
-                pc.ConfigName = device  # Bug2：ConfigName
-                pc.PaperUnits = PAPER_UNITS_MM
-                pc.UseStandardScale = False
-                pc.SetCustomScale(1.0, 1.0)  # 1:1
-                pc.CenterPlot = True
-                pc.PlotRotation = ROT_0 if frame.width >= frame.height else ROT_90
+                _try_set(layout, "ConfigName", device)  # Bug2：打印设备用 ConfigName
+                _try_set(layout, "PaperUnits", PAPER_UNITS_MM)
+                _try_set(layout, "CenterPlot", True)
+                _try_set(layout, "PlotRotation",
+                         ROT_0 if frame.width >= frame.height else ROT_90)
                 if style_sheet:
-                    try:
-                        pc.StyleSheet = style_sheet
-                    except Exception:
-                        pass
-                self._set_paper_size(pc, frame, margin)
+                    _try_set(layout, "StyleSheet", style_sheet)
+                # 2026-10-26 修复：_set_paper_size 返回是否真的匹配到合适纸张；
+                # 没匹配上时必须用"布满"，1:1 会把图框裁掉。
+                paper_ok = self._set_paper_size(layout, frame, margin)
                 # 双保险：窗口打印优先 → 失败回退范围打印
                 last_err = None
                 try:
-                    # Bug4：先存窗口，再切 PlotType；Bug5：坐标用双精度 VARIANT 数组
-                    lo = pythoncom.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8,
-                                           [frame.minx, frame.miny])
-                    hi = pythoncom.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8,
-                                           [frame.maxx, frame.maxy])
-                    pc.SetWindowToPlot(lo, hi)
-                    pc.PlotType = PLOT_TYPE_WINDOW  # Bug3：acWindow=4
-                    pc.PlotToFile(pdf_path)
+                    # Bug4：先存窗口，再切 PlotType；Bug5：坐标用 VARIANT 双精度数组
+                    # 2026-10-26 修复：VARIANT 在 win32com.client 下，
+                    # pythoncom.VARIANT 在本机 pywin32 不存在（原写法静默 AttributeError
+                    # → 窗口打印永远失败回退范围打印，多图框全部挤成一页）。
+                    lo = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8,
+                                                 [frame.minx, frame.miny])
+                    hi = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8,
+                                                 [frame.maxx, frame.maxy])
+                    layout.SetWindowToPlot(lo, hi)
+                    layout.PlotType = PLOT_TYPE_WINDOW  # Bug3：acWindow=4
+                    if paper_ok:
+                        _try_set(layout, "UseStandardScale", False)
+                        try:
+                            layout.SetCustomScale(1.0, 1.0)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    else:
+                        # 纸张没匹配上 → 布满，保证每框仍独立一页
+                        _try_set(layout, "UseStandardScale", True)
+                        _try_set(layout, "StandardScale", 0)
+                    if self._plot_to_file(doc, pdf_path):
+                        return
                 except Exception as e:  # noqa: BLE001
                     last_err = e
-                    try:
-                        # 回退：范围打印（acExtents=1）——单图框效果等同，多图框整图一页
-                        pc.PlotType = PLOT_TYPE_EXTENTS
-                        pc.PlotToFile(pdf_path)
-                    except Exception as e2:  # noqa: BLE001
-                        raise CadError("PDF 打印失败（窗口/范围双路线均失败）：%s / %s" % (last_err, e2))
-            finally:
+                # 回退：范围打印（acExtents=1）
                 try:
-                    pc.Delete()
-                except Exception:
-                    pass
+                    layout.PlotType = PLOT_TYPE_EXTENTS
+                    _try_set(layout, "UseStandardScale", True)
+                    _try_set(layout, "StandardScale", 0)
+                    if self._plot_to_file(doc, pdf_path):
+                        return
+                except Exception as e2:  # noqa: BLE001
+                    raise CadError("PDF 打印失败（窗口/范围双路线均失败）：%s / %s"
+                                   % (last_err, e2))
+                raise CadError("PDF 打印未产出文件（PlotToFile 已调用但文件不存在）：%s"
+                               % pdf_path)
+            finally:
+                # 恢复布局原设置，避免污染图纸
+                for attr, val in saved.items():
+                    try:
+                        setattr(layout, attr, val)
+                    except Exception:  # noqa: BLE001
+                        pass
         finally:
             if old_bg is not None:
                 try:
@@ -553,12 +640,46 @@ class CadSession:
                 except Exception:
                     pass
 
+    def _plot_to_file(self, doc, pdf_path, timeout=60):
+        """调用 PlotToFile 并轮询确认 PDF 真正落盘。
+
+        2026-10-25 实测（Bug6 衍生）：BACKGROUNDPLOT 为后台模式时 PlotToFile
+        立即返回成功但文件永不生成，必须靠文件存在性判定真实结果。
+        """
+        import os as _os
+        import time as _time
+        if _os.path.exists(pdf_path):
+            try:
+                _os.remove(pdf_path)
+            except Exception:  # noqa: BLE001
+                pass
+        called = False
+        for call in (lambda: doc.ActiveLayout.PlotToFile(pdf_path),
+                     lambda: doc.Plot.PlotToFile(pdf_path)):
+            try:
+                call()
+                called = True
+                break
+            except Exception:  # noqa: BLE001
+                continue
+        if not called:
+            return False
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            if _os.path.exists(pdf_path) and _os.path.getsize(pdf_path) > 0:
+                return True
+            _time.sleep(1.0)
+        return False
+
+
     def _set_paper_size(self, pc, frame, margin):
         """选择与图框尺寸匹配的纸张（含边距）。
 
         2026-10-25 整改：匹配不到合适纸张时**不再抛异常中断**窗口打印，
         降级为默认纸张 + UseStandardScale=True; StandardScale=0（布满），
         窗口范围仍保证每框一页。
+        2026-10-26：返回 bool——True=匹配到合适纸张（可 1:1），
+        False=降级布满（调用方据此决定缩放方式，1:1 会裁切）。
         """
         need_w = frame.width + 2 * margin
         need_h = frame.height + 2 * margin
@@ -589,15 +710,16 @@ class CadSession:
         if chosen:
             try:
                 pc.CanonicalMediaName = chosen
-                return
-            except Exception:
+                return True
+            except Exception:  # noqa: BLE001
                 pass
         # 降级：默认纸张 + 布满（不抛异常）
         try:
             pc.UseStandardScale = True
             pc.StandardScale = 0
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
+        return False
 
     # ---------- 模型空间范围 ----------
 

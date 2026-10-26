@@ -188,6 +188,22 @@ def titleblock_region(frame, cfg=None):
             frame.maxx + expand, frame.miny + frame.height * hr)
 
 
+def top_header_region(frame, cfg=None):
+    """C4：页面**顶部页眉**条带（图纸目录页/说明页的设计单位表通常在顶部）。
+
+    右下角标题栏缺失时的保守回退。高度比例默认 0.14（页眉通常比底部标题栏矮），
+    宽度横跨整幅，仅用于黑名单模式（只删公司名/人名/日期，不整删）。
+    返回 (minx, miny, maxx, maxy)。
+    """
+    cfg = cfg or {}
+    tb = cfg.get("titleblock", {})
+    hr = float(tb.get("top_header_height_ratio", 0.14))
+    hr = max(0.05, min(0.35, hr))
+    expand = float(tb.get("region_expand_mm", 15))
+    return (frame.minx - expand, frame.maxy - frame.height * hr,
+            frame.maxx + expand, frame.maxy + expand)
+
+
 def detect_titleblock_region(frame, rects, cfg=None):
     """在右下角候选区锁定标题栏**真实小矩形**（2026-10-25 全情况整改）。
 
@@ -235,6 +251,109 @@ def detect_titleblock_region(frame, rects, cfg=None):
 
 def in_region(x, y, region):
     return region[0] - 1e-6 <= x <= region[2] + 1e-6 and region[1] - 1e-6 <= y <= region[3] + 1e-6
+
+
+# C1：标题栏里常作为"字段标签"的保护词（标签与值常是两个分离文字实体）。
+# 命中这些标签时，其右侧/下侧紧邻的"值"实体即使本身不含保护词也必须保留。
+DEFAULT_FIELD_LABELS = (
+    "工程名称", "工程名", "项目名称", "项目名", "子项名称", "子项",
+    "图纸名称", "图名", "图号", "图纸编号", "图样代号", "图号编号",
+    "设计阶段", "比例", "图别", "版次", "阶段", "专业",
+    "设备名称", "设备型号", "规格型号", "型号", "规格",
+)
+
+
+def associate_label_values(targets, field_labels, block_labels, frame):
+    """C1：标题栏"标签→值"几何关联（纯逻辑，不依赖 AutoCAD，可单测）。
+
+    背景：标题栏中"工程名称"（标签）与"刚果（金）Manono…项目"（值）是两个独立
+    文字实体；白名单按单实体判定时值不含保护词会被误删。本函数依据**同行、右侧、
+    紧邻、遇下一个标签即止**的规则，把标签关联到的值标记为受保护。
+
+    参数
+    ----
+    targets : list[dict]，每项含
+        key（可哈希，通常是实体索引/对象 id）、
+        norm（已去空白的文本）、
+        minx/miny/maxx/maxy（包围盒世界坐标）
+    field_labels : set[str]，已去空白的字段标签集合（如 {"图号","工程名称"}）
+    block_labels : set[str]，已去空白；命中表示"下一个字段标签"，向右关联到此为止
+    frame : Frame，用于按图幅归一化距离阈值
+
+    返回
+    ----
+    set[key]：应作为"保护字段值"保留的实体 key 集合
+    """
+    protected = set()
+    fw, fh = frame.width, frame.height
+    if fw <= 0 or fh <= 0 or not targets:
+        return protected
+
+    def _is_field_label(norm):
+        if not norm:
+            return False
+        for lab in field_labels:
+            if lab and (norm == lab or norm.rstrip("：:") == lab
+                        or norm.startswith(lab) and len(norm) <= len(lab) + 2):
+                return True
+        return False
+
+    def _is_block(norm):
+        if not norm:
+            return False
+        if _is_field_label(norm):
+            return True
+        return any(b and (norm == b or norm.startswith(b)) for b in block_labels)
+
+    labels, others = [], []
+    for t in targets:
+        (labels if _is_field_label(t.get("norm")) else others).append(t)
+
+    row_tol = max(fh * 0.012, 1.0)          # 同行容差（约一行字高）
+    max_gap_x = fw * 0.5                      # 标签→值水平最大跨距（工程名较长）
+    below_max_dy = fh * 0.06                  # 下方关联最大垂直距离
+    overlap_gap = fw * 0.02                   # 允许标签与值轻微重叠/缝隙
+
+    for lab in labels:
+        lcx = (lab["minx"] + lab["maxx"]) / 2.0
+        lcy = (lab["miny"] + lab["maxy"]) / 2.0
+        lh = max(lab["maxy"] - lab["miny"], fh * 0.008)
+        # 右侧同行候选
+        right = []
+        for v in others:
+            if v["key"] in protected:
+                # 已被别的标签保护的长值，仍可纳入本行
+                pass
+            vcy = (v["miny"] + v["maxy"]) / 2.0
+            if abs(vcy - lcy) > max(row_tol, lh * 0.9):
+                continue
+            gap = v["minx"] - lab["maxx"]
+            if gap < -overlap_gap:
+                continue  # 整体在标签左边
+            if gap > max_gap_x:
+                continue
+            right.append((v["minx"], v))
+        right.sort(key=lambda z: z[0])
+        for _x, v in right:
+            if _is_block(v.get("norm")):
+                break  # 遇到下一个字段标签，关联截止
+            protected.add(v["key"])
+        # 下方/同列候选（标题栏上下排布时取最近一个非标签值）
+        below = []
+        for v in others:
+            if v["key"] in protected:
+                continue
+            vcx = (v["minx"] + v["maxx"]) / 2.0
+            vcy = (v["miny"] + v["maxy"]) / 2.0
+            dy = lcy - vcy  # y 轴向上，值在下方则 dy>0
+            if 0 < dy <= max(lh * 1.2, below_max_dy):
+                if abs(vcx - lcx) <= (lab["maxx"] - lab["minx"]) * 1.5 + fw * 0.03:
+                    if not _is_block(v.get("norm")):
+                        below.append((dy, v))
+        if below:
+            below.sort(key=lambda z: z[0])
+            protected.add(below[0][1]["key"])
+    return protected
 
 
 def cluster(vals, tol):

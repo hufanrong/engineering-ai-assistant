@@ -17,11 +17,25 @@ v0.1.156 全情况整改：
 import hashlib
 import os
 import shutil
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Optional
 
 from dwg_cleaner import cad, pdfmerge, rules, titleblock
 
 FRAME_BLOCK_NAME_KEYS = ("图框", "标题", "frame", "title", "titleblock", "tb")
+
+
+@dataclass
+class CleanOp:
+    """R3：清稿操作的强类型载体，替代跨函数传递的裸元组（根治 P-01 解包错误）。
+
+    kind="delete"  删除实体；kind="replace" 用 new_text 改写文字。
+    """
+    ent: Any
+    kind: str
+    desc: str = ""
+    new_text: Optional[str] = None
 
 
 def file_md5(path):
@@ -136,12 +150,21 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
                     _plot_model_frames(session, doc, space, cfg, temp_pdfs, item_dir,
                                        len(temp_pdfs))
 
-            # PDF 合并
-            if temp_pdfs:
-                pdf_pages = pdfmerge.merge_pdfs(temp_pdfs, pdf_path)
+            # PDF 合并（R1：合并前先做逐页产物断言，存在性 + 页数）
+            valid_pdfs, _pt = _verify_pdf_pages(
+                temp_pdfs, expected=frames_count, notes=notes, log=log)
+            if valid_pdfs:
+                pdf_pages = pdfmerge.merge_pdfs(valid_pdfs, pdf_path)
                 log("已生成 PDF：%d 页" % pdf_pages)
+                if pdf_pages <= 0:
+                    notes.append("警告：PDF 合并后页数为 0，打印链路异常，请人工核对成品目录")
             else:
-                notes.append("未生成任何 PDF 页（布局与模型空间均无可打印内容）")
+                notes.append("未生成任何有效 PDF 页（存在性/页数校验未通过，打印链路异常；"
+                             "清稿后的 DWG 已另存，可手动打印）")
+
+            # R2：打印阶段被容错跳过的属性设置透出到 notes（不静默）
+            for w in getattr(session, "drain_plot_warnings", lambda: [])():
+                notes.append("打印参数：%s" % w)
 
             # 另存清稿副本
             session.save_as(doc, cleaned_path)
@@ -174,6 +197,16 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
     except Exception as e:
         result["error"] = "%s: %s" % (type(e).__name__, e)
         log("失败：%s: %s" % (type(e).__name__, e))
+        # 2026-10-26：COM 报错（如"输入无效"）只给一句话无法定位，
+        # 支持 FANGONG_DEBUG=1 时把完整堆栈落到日志，便于反馈开发者。
+        try:
+            import os as _os
+            if _os.environ.get("FANGONG_DEBUG") == "1":
+                import traceback as _tb
+                for _ln in _tb.format_exc().splitlines():
+                    log("  [debug] %s" % _ln)
+        except Exception:  # noqa: BLE001
+            pass
     finally:
         for t in temp_pdfs:
             if os.path.exists(t):
@@ -220,16 +253,17 @@ def _process_space(session, doc, space, cfg, log, notes, layout_name=""):
 
     deleted, replaced = [], []
     for i, frame in enumerate(ordered):
-        region = _resolve_region(session, space, frame, rects, cfg, log, notes)
+        region, mode = _resolve_region(session, space, frame, rects, cfg, log, notes)
         if region is None:
             notes.append("%s图 %d：未识别到标题栏特征（无标题栏页/纯图例页），跳过清理"
                          % (tag, i + 1))
             continue
-        d, r, nt = _clean_titleblock(session, doc, space, region, frame, cfg, log)
+        d, r, nt = _clean_titleblock(session, doc, space, region, frame, cfg, log, mode=mode)
         deleted.extend(d)
         replaced.extend(r)
         notes.extend(nt)
-        log("%s图 %d/%d：删除 %d 条，替换 %d 条" % (tag, i + 1, len(ordered), len(d), len(r)))
+        log("%s图 %d/%d（区域模式 %s）：删除 %d 条，替换 %d 条"
+            % (tag, i + 1, len(ordered), mode, len(d), len(r)))
     return deleted, replaced, [], len(ordered), True
 
 
@@ -243,6 +277,9 @@ def _plot_model_frames(session, doc, space, cfg, temp_pdfs, item_dir, start_idx)
     for i, frame in enumerate(titleblock.sort_frames(frames)):
         tmp = os.path.join(item_dir, "_tmp_p%d.pdf" % (start_idx + i))
         session.plot_frame(doc, frame, tmp, cfg)
+        # 2026-10-26 修复（v0.1.156 回归 Bug）：原实现打印后未登记到 temp_pdfs，
+        # 导致合并步骤拿不到页、最终 PDF 不生成且临时文件残留在成品目录。
+        temp_pdfs.append(tmp)
 
 
 def _plot_layout_page(session, doc, space, pdf_path, cfg):
@@ -252,34 +289,130 @@ def _plot_layout_page(session, doc, space, pdf_path, cfg):
     session.plot_frame(doc, frame_all, pdf_path, cfg)
 
 
-def _resolve_region(session, space, frame, rects, cfg, log, notes):
-    """确定标题栏区域，返回 (minx,miny,maxx,maxy) 或 None（无标题栏页）。
+def _verify_pdf_pages(paths, expected=0, notes=None, log=None):
+    """R1：产物断言——逐页校验 PDF 真实存在、可读、页数≥1。
 
-    优先真实小矩形（detect_titleblock_region，须含保护词文字验证）；
-    回退默认区域（corner 配置 + 红线区外扩）；仍无保护词 → None。
+    "调用成功但结果错"（PlotToFile 返回 True 却没文件、整图缩一页）在本模块连续
+    重犯，故在合并前统一断言，剔除无效页并把异常透出到 notes。
+    返回 (有效路径列表, 总页数)。
     """
+    notes = notes if notes is not None else []
+    valid, total = [], 0
+    for p in paths:
+        name = os.path.basename(p)
+        if not os.path.exists(p) or os.path.getsize(p) <= 0:
+            notes.append("警告：临时打印页缺失或为空：%s" % name)
+            if log:
+                log("产物断言失败：%s 缺失/为空" % name)
+            continue
+        try:
+            n = pdfmerge.count_pages(p)
+        except Exception as e:  # noqa: BLE001
+            notes.append("警告：临时 PDF 无法读取 %s：%s" % (name, e))
+            continue
+        if n <= 0:
+            notes.append("警告：临时 PDF 页数为 0：%s" % name)
+            continue
+        valid.append(p)
+        total += n
+    if expected and total and abs(total - expected) > max(1, int(expected * 0.2)):
+        notes.append("提示：PDF 页数 %d 与检测到的图框/布局数 %d 不一致（可能整图缩页或"
+                     "多框一页），请逐页核对" % (total, expected))
+    return valid, total
+
+
+def _all_text_pos(session, space, frame):
+    """一次遍历收集空间内全部文字实体 (ent, txt, pos)，供多区域过滤复用。"""
+    out = []
+    for ent in session.iter_entities(space):
+        txt = session.get_text(ent)
+        if not txt:
+            continue
+        p = _entity_pos(session, ent, frame)
+        if p:
+            out.append((ent, txt, p))
+    return out
+
+
+def _texts_in_region(alltp, region):
+    return [(txt, p) for _e, txt, p in alltp
+            if titleblock.in_region(p[0], p[1], region)]
+
+
+def _texts_have_protect(texts, cfg):
+    """区域内文字是否命中保护词（C2：空格归一化，识别"图  号"等）。"""
+    return any(rules._is_protected(txt, cfg) for txt, _p in texts)
+
+
+def _texts_have_header_signature(texts, cfg):
+    """C4：区域内是否出现顶部页眉特征（公司名 / 人名标签 / 日期）。
+
+    目录页页眉通常有设计单位名、设计/审核/校对手写人名、日期；
+    以此作为"值得保守清理"的判据，避免对普通说明页误动。
+    """
+    dk = cfg.get("delete_keywords", {})
+    person_labels = dk.get("person_labels", [])
+    institutions = dk.get("institution", [])
+    norm = rules._norm_spaces
+    for txt, _p in texts:
+        nt = norm(txt)
+        if any(norm(k) in nt for k in institutions if k):
+            return True
+        if any(norm(lab) in nt for lab in person_labels if lab):
+            return True
+        if rules._is_date_text(txt, cfg):
+            return True
+    return False
+
+
+def _resolve_region(session, space, frame, rects, cfg, log, notes):
+    """确定标题栏区域与清理模式，返回 (region, mode) 或 (None, None)。
+
+    区域分级（R5，2026-10-26）：
+      "real_rect"     真实小矩形（含保护词验证）→ 白名单模式（只留保护字段）
+      "fallback_band" 底部回退条带（含保护词）  → 强制黑名单模式（C3：只删公司名/
+                      人名/日期，坐标网格等不整删，避免误删图框底部坐标）
+      "top_band"      顶部页眉条带（有公司/人名/日期特征）→ 黑名单模式（C4 目录页）
+    """
+    tb = cfg.get("titleblock", {})
+    alltp = _all_text_pos(session, space, frame)
+
+    # 1) 真实小矩形 + 保护词验证 → 白名单
     cand = titleblock.detect_titleblock_region(frame, rects, cfg)
-    if cand and _region_has_protect_text(session, space, cand, frame, cfg):
-        log("标题栏真实边界：%s" % (cand,))
-        return cand
-    region = titleblock.titleblock_region(frame, cfg)
-    if _region_has_protect_text(session, space, region, frame, cfg):
-        return region
-    return None
+    if cand and _texts_have_protect(_texts_in_region(alltp, cand), cfg):
+        log("标题栏真实边界（白名单模式）：%s" % (cand,))
+        return cand, "real_rect"
+
+    # 2) 底部回退条带 + 保护词 → 强制黑名单（C3：不再白名单整删，坐标安全）
+    band = titleblock.titleblock_region(frame, cfg)
+    if _texts_have_protect(_texts_in_region(alltp, band), cfg):
+        notes.append("未锁定标题栏真实小矩形，回退到底部条带，按黑名单模式保守清理"
+                     "（只删公司名/人名/日期，坐标网格标注不删）")
+        log("标题栏回退底部条带（黑名单模式，防误删坐标）")
+        return band, "fallback_band"
+
+    # 3) C4 顶部页眉（目录页/说明页）→ 黑名单保守清理
+    if tb.get("clean_top_header", True):
+        top = titleblock.top_header_region(frame, cfg)
+        ttexts = _texts_in_region(alltp, top)
+        if _texts_have_header_signature(ttexts, cfg):
+            notes.append("右下角未识别到标题栏，检测到页面顶部页眉，按黑名单模式"
+                         "保守清理（公司名/人名/日期），其余内容保留")
+            log("检测到顶部页眉（黑名单模式）")
+            return top, "top_band"
+
+    return None, None
 
 
 def _region_has_protect_text(session, space, region, frame, cfg):
-    """区域内是否出现保护词文字簇（图名/图号/比例/工程名称等任一）。
-
-    用于：①验证真实边界候选确实落在标题栏上；②识别无标题栏页（目录页/说明页）。
-    """
+    """区域内是否出现保护词文字簇（兼容旧调用；内部走 C2 归一化判定）。"""
     for ent in session.iter_entities(space):
         txt = session.get_text(ent)
         if not txt:
             continue
         p = _entity_pos(session, ent, frame)
         if p and titleblock.in_region(p[0], p[1], region):
-            if any(k in txt for k in cfg.get("protect_keywords", [])):
+            if rules._is_protected(txt, cfg):
                 return True
     return False
 
@@ -298,6 +431,31 @@ def _entity_pos(session, ent, frame):
     if frame is not None and frame.rotation:
         x, y = titleblock.rotate_point(x, y, frame.cx, frame.cy, frame.rotation)
     return (x, y)
+
+
+def _entity_box(session, ent, frame):
+    """实体转正后的包围盒 (minx,miny,maxx,maxy)；无 bbox 时以插入点兜底小框。
+
+    供 C1 标签→值几何关联使用（同行/右侧/间距判定）。
+    """
+    b = session.get_bounds(ent)
+    if b:
+        minx, miny, maxx, maxy = b[0], b[1], b[2], b[3]
+        if frame is not None and frame.rotation:
+            pts = [titleblock.rotate_point(x, y, frame.cx, frame.cy, frame.rotation)
+                   for x, y in ((minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy))]
+            minx = min(p[0] for p in pts)
+            maxx = max(p[0] for p in pts)
+            miny = min(p[1] for p in pts)
+            maxy = max(p[1] for p in pts)
+        return (minx, miny, maxx, maxy)
+    p = session.get_insertion(ent)
+    if p is None:
+        return None
+    fh = frame.height if frame else 1.0
+    fw = frame.width if frame else 1.0
+    s = max(fh * 0.01, 1.0)
+    return (p[0] - s, p[1] - s * 0.5, p[0] + s + fw * 0.02, p[1] + s * 0.5)
 
 
 def process_folder(input_path, out_dir, config=None, recursive=True, on_progress=None):
@@ -417,20 +575,27 @@ def _collect_rects(session, space, cfg):
     return rects
 
 
-def _clean_titleblock(session, doc, space, region, frame, cfg, log):
+def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_rect"):
     """清理一个图框内的标题栏：炸开/转换区域内块 → 按规则删/改区域内对象。
 
-    v0.1.156 全情况：
+    mode（R5 区域分级，2026-10-26）：
+      real_rect     真实小矩形 → 白名单模式（标题栏只留保护字段）
+      fallback_band / top_band  回退条带/顶部页眉 → 强制黑名单模式（只删公司名/
+                    人名/日期，坐标网格等不整删，避免误删图纸内容）
+    全情况：
     - 区域内代理实体（天正）Convert 优先、炸开兜底；炸出/转换出的文字重新收集
-    - 区域内文字：白名单模式（非 protect 全删）或黑名单模式；保护词混合文本局部清洗
+    - C1：标签→值几何关联，"工程名称/图号/图名"标签旁的值实体即使无保护词也保留
+    - C2：保护词匹配空白归一化（"图  号"也识别）
+    - C3/R5：条带/页眉强制黑名单，坐标网格标注保留
     - 区域内光栅图像（扫描签名/图章/照片）删除
     - 区域内表格对象（AcDbTable）：无保护词 → 删除整表；含保护词 → 保留+告警
     - 删除/替换前对锁定图层临时解锁，操作后恢复
-    - 外部参照块引用 → 炸开 + 告警
-    - 位置判定优先 GetBoundingBox 中心（斜置图框按 rotation 逆变换）
+    - R3：删除/替换统一用 CleanOp 强类型，杜绝裸元组解包
     """
     deleted, replaced, notes = [], [], []
-    whitelist = bool(cfg.get("titleblock", {}).get("whitelist_mode", True))
+    tb = cfg.get("titleblock", {})
+    # 只有真实小矩形才启用白名单整删；条带/页眉强制黑名单（C3/R5）
+    use_whitelist = bool(tb.get("whitelist_mode", True)) if mode == "real_rect" else False
 
     def in_reg(x, y):
         return titleblock.in_region(x, y, region)
@@ -478,7 +643,7 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log):
         log("处理区域内块/代理实体一批（剩余循环 %d）" % rounds)
 
     # 2) 收集区域内可处理对象
-    text_targets = []    # (ent, txt, pos)
+    text_targets = []    # (ent, txt, pos, box)
     raster_targets = []  # (ent, pos)
     table_targets = []   # (ent, pos, cell_texts)
     for ent in session.iter_entities(space):
@@ -493,43 +658,64 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log):
             continue
         txt = session.get_text(ent)
         if txt is not None:
-            text_targets.append((ent, txt, p))
+            box = _entity_box(session, ent, frame)
+            if box is None:
+                box = (p[0], p[1], p[0], p[1])
+            text_targets.append((ent, txt, p, box))
 
-    # 3) 判定
-    delete_queue = []    # (ent, desc)
-    replace_queue = []   # (ent, new_text, desc)
-    for ent, txt, pos in text_targets:
-        if whitelist:
+    # 2.5) C1：标签→值几何关联（标签命中保护词时，其右侧/下侧紧邻的值实体保留）
+    field_labels = set(rules._norm_spaces(x) for x in
+                       (tb.get("field_labels") or titleblock.DEFAULT_FIELD_LABELS))
+    dk = cfg.get("delete_keywords", {})
+    block_labels = set(rules._norm_spaces(x) for x in
+                       (list(dk.get("person_labels", [])) + list(dk.get("date_labels", []))))
+    assoc_targets = [{
+        "key": i, "norm": rules._norm_spaces(txt),
+        "minx": box[0], "miny": box[1], "maxx": box[2], "maxy": box[3],
+    } for i, (_e, txt, _p, box) in enumerate(text_targets)]
+    protected_idx = titleblock.associate_label_values(
+        assoc_targets, field_labels, block_labels, frame)
+    if protected_idx:
+        log("C1 标签→值关联，保护 %d 个值实体（工程名/图号/图名的值）" % len(protected_idx))
+
+    # 3) 判定（R3：统一收集为 CleanOp）
+    ops = []
+    for i, (ent, txt, pos, _box) in enumerate(text_targets):
+        if i in protected_idx:
+            # C1 保护字段值：保留（若含"施工图"字样仍允许替换，工程名/图号一般不含）
+            continue
+        if use_whitelist:
             action, reason, new_text = rules.judge_whitelist_text(txt, cfg)
         else:
             action, reason, new_text = rules.judge_text(txt, cfg)
         pos_str = "%.1f,%.1f" % (pos[0], pos[1])
         if action == "delete":
-            delete_queue.append((ent, "%r [%s] (%s)" % (txt, reason, pos_str)))
+            ops.append(CleanOp(ent, "delete",
+                               "%r [%s] (%s)" % (txt, reason, pos_str)))
             log("删除 (%s) %r" % (reason, txt))
         elif action == "replace":
-            replace_queue.append((ent, new_text, "%r -> %r [%s] (%s)"
-                                  % (txt, new_text, reason, pos_str)))
+            ops.append(CleanOp(ent, "replace",
+                               "%r -> %r [%s] (%s)" % (txt, new_text, reason, pos_str),
+                               new_text))
             log("替换 %r -> %r" % (txt, new_text))
     for ent, pos in raster_targets:
-        delete_queue.append((ent, "光栅图像（扫描签名/图章/照片）(%.1f,%.1f)"
-                             % (pos[0], pos[1])))
+        ops.append(CleanOp(ent, "delete",
+                           "光栅图像（扫描签名/图章/照片）(%.1f,%.1f)" % (pos[0], pos[1])))
         log("删除光栅图像 (%.1f,%.1f)" % (pos[0], pos[1]))
     for ent, pos, cells in table_targets:
-        has_protect = any(any(k in c for k in cfg.get("protect_keywords", [])) for c in cells)
+        has_protect = any(rules._is_protected(c, cfg) for c in cells)
         if has_protect:
             notes.append("区域内表格标题栏含保护内容（图名/图号等），已保留表格本体，请人工核对")
         else:
-            delete_queue.append((ent, "表格对象（标题栏表格，无保护内容）(%.1f,%.1f)"
-                                 % (pos[0], pos[1])))
+            ops.append(CleanOp(ent, "delete",
+                               "表格对象（标题栏表格，无保护内容）(%.1f,%.1f)" % (pos[0], pos[1])))
             log("删除表格对象 (%.1f,%.1f)" % (pos[0], pos[1]))
 
     # 4) 执行：先解锁涉及的锁定图层，操作后恢复
     locked_layers = {}
-    all_ops = delete_queue + [(e, "", "") for e, _n, _d in replace_queue]
-    for ent, _desc, _extra in all_ops:
+    for op in ops:
         try:
-            layer = str(ent.Layer or "")
+            layer = str(op.ent.Layer or "")
         except Exception:
             layer = ""
         if layer and layer not in locked_layers:
@@ -538,18 +724,20 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log):
         if was:
             session.set_layer_lock(doc, layer, False)
     try:
-        for ent, desc in delete_queue:
-            try:
-                ent.Delete()
-                deleted.append({"text": desc, "reason": "deleted", "pos": ""})
-            except Exception as e:
-                notes.append("删除失败 %s: %s" % (desc, e))
-        for ent, new_text, desc in replace_queue:
-            try:
-                session.set_text(ent, new_text)
-                replaced.append({"old": desc, "new": new_text, "reason": "replaced", "pos": ""})
-            except Exception as e:
-                notes.append("替换失败 %s: %s" % (desc, e))
+        for op in ops:
+            if op.kind == "delete":
+                try:
+                    op.ent.Delete()
+                    deleted.append({"text": op.desc, "reason": "deleted", "pos": ""})
+                except Exception as e:
+                    notes.append("删除失败 %s: %s" % (op.desc, e))
+            else:
+                try:
+                    session.set_text(op.ent, op.new_text)
+                    replaced.append({"old": op.desc, "new": op.new_text,
+                                     "reason": "replaced", "pos": ""})
+                except Exception as e:
+                    notes.append("替换失败 %s: %s" % (op.desc, e))
     finally:
         for layer, was in locked_layers.items():
             if was:
