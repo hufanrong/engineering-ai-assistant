@@ -749,7 +749,15 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         # 导致"紫金(厦门)工程设计有限公司""A135036965"残留。读取块属性文字并入
         # 收集（属性实体是世界坐标、可单独 Delete，不影响块定义）。
         if ent.ObjectName == "AcDbBlockReference":
-            for itxt, ibox, ient in session.collect_block_attributes(ent):
+            _blk_attrs = session.collect_block_attributes(ent)
+            _blk_nested = []
+            try:
+                _blk_nested = session.collect_block_nested_texts(ent)
+            except Exception as e:  # noqa: BLE001
+                log("N-01 嵌套文字收集异常：%s" % e)
+            log("N-01 标题栏块 %r：属性文字 %d 条、嵌套文字 %d 条"
+                % (getattr(ent, "Name", "?"), len(_blk_attrs), len(_blk_nested)))
+            for itxt, ibox, ient in _blk_attrs:
                 ipos = ((ibox[0] + ibox[2]) / 2.0, (ibox[1] + ibox[3]) / 2.0)
                 if not in_reg(ipos[0], ipos[1]):
                     continue
@@ -758,21 +766,19 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
                 log("N-01 收集块属性文字 %r (%.1f,%.1f)" % (itxt, ipos[0], ipos[1]))
             # N-01：块内**嵌套文字**（块定义中的 TEXT/MTEXT）只判定提示——
             # 直接删除会破坏块定义，须人工在 AutoCAD 炸开块后重试。
-            try:
-                for ntxt, nbox in session.collect_block_nested_texts(ent):
-                    nx = (nbox[0] + nbox[2]) / 2.0
-                    ny = (nbox[1] + nbox[3]) / 2.0
-                    if not in_reg(nx, ny):
-                        continue
-                    if rules._is_protected(ntxt, cfg) or rules._is_axis_coordinate(ntxt):
-                        continue
-                    _a, _r, _n = (rules.judge_whitelist_text(ntxt, cfg) if use_whitelist
-                                  else rules.judge_text(ntxt, cfg))
-                    if _a == "delete":
-                        nested_del.append((ntxt, nbox))
-                        log("N-01 嵌套文字命中删除（仅提示，不删块定义）%r" % ntxt)
-            except Exception as e:  # noqa: BLE001
-                log("N-01 嵌套文字收集异常：%s" % e)
+            for ntxt, nbox in _blk_nested:
+                nx = (nbox[0] + nbox[2]) / 2.0
+                ny = (nbox[1] + nbox[3]) / 2.0
+                if not in_reg(nx, ny):
+                    continue
+                if rules._is_protected(ntxt, cfg) or rules._is_axis_coordinate(ntxt) \
+                        or rules._is_drawing_no(ntxt):
+                    continue
+                _a, _r, _n = (rules.judge_whitelist_text(ntxt, cfg) if use_whitelist
+                              else rules.judge_text(ntxt, cfg))
+                if _a == "delete":
+                    nested_del.append((ntxt, nbox))
+                    log("N-01 嵌套文字命中删除（仅提示，不删块定义）%r" % ntxt)
 
     # 2.5) C1 标签→值【保护】 + F-01/F-02 标签→值【删除】
     # norm 同时剥 MText 格式码（F-03），使 {\T1.5;李安武} 这类值也能被几何关联。
@@ -808,6 +814,8 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
             log("F-07 保护优先，跳过标签关联删除（坐标标注）%r" % raw_txt)
         elif rules._is_project_name_like(raw_txt, cfg):
             log("N-04 保护优先，跳过标签关联删除（工程名称类值）%r" % raw_txt)
+        elif rules._is_drawing_no(raw_txt):
+            log("R-02 保护优先，跳过标签关联删除（图号格式）%r" % raw_txt)
         else:
             _safe_delete.add(i)
     delete_idx = _safe_delete
@@ -904,7 +912,8 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         for i in frame_del:
             raw_txt = frame_all_texts[i][1]
             if rules._is_protected(raw_txt, cfg) or rules._is_axis_coordinate(raw_txt) \
-                    or rules._is_project_name_like(raw_txt, cfg):
+                    or rules._is_project_name_like(raw_txt, cfg) \
+                    or rules._is_drawing_no(raw_txt):
                 continue
             ent2, txt2, pos2, _b2 = frame_all_texts[i]
             ops.append(CleanOp(ent2, "delete",

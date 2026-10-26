@@ -182,9 +182,23 @@ def _is_field_label(t, cfg):
 
 
 # 坐标网格轴标注：X/Y 后紧跟 3 位以上数字（如 X9193900、Y549350、x:12345），
+# 或带 "=" 前缀（图例坐标 "X=9194051.681" / "Y=549445.807"，R-01），
 # 或纯测量数值。条带黑名单模式下作为显式保险，绝不误删图纸坐标内容（C3）。
-_AXIS_COORD_RE = re.compile(r"^[XYxy][\s:：.．-]*\d{3,}(?:[.,;:：\s]*\d{0,4})*$")
+_AXIS_COORD_RE = re.compile(r"^[XYxy][\s:：.．\-=]*\d{3,}(?:[.,;:：\s]*\d{0,4})*$")
 _PURE_NUMBER_RE = re.compile(r"^[\d\s.,;:：．°′″'\"+\-]+$")
+
+
+# 图纸幅面规格值：A0~A4（可带横/纵、括号、加长），如 A2 / A2(横) / A1 加长。
+_PAPER_SIZE_RE = re.compile(
+    r"^A[0-4][\s]*[﹙(（]?\s*(横|纵|加长)?\s*[﹚)）]?$", re.I)
+
+
+def _is_paper_size(t):
+    """圈注示例：图纸规格值（A2 等）是标题栏保留字段的值，白名单不得整删。"""
+    s = strip_mtext_codes(t or "").strip()
+    if not s:
+        return False
+    return bool(_PAPER_SIZE_RE.match(s))
 
 
 def _is_axis_coordinate(t):
@@ -198,6 +212,47 @@ def _is_axis_coordinate(t):
     if len(s) >= 3 and _PURE_NUMBER_RE.match(s) and re.search(r"\d", s):
         return True
     return False
+
+
+# R-01（2026-10-26 真机 P0）：图例表格/说明文字位于标题栏反推区域边缘时
+# 被白名单整删（删除原因 whitelist_non_protected，图2 图例 10 条 + 说明全文 +
+# 图例坐标值全清空）。含图例/说明/注记特征词的文本一律不删——它们不是标题栏
+# 需要清理的设计信息，而是图纸内容的一部分。
+_LEGEND_WORDS = ("图例", "说明", "注记", "附注")
+
+
+def _is_legend_like(t):
+    """R-01：是否为图例/说明/注记类文本（不得按白名单区域整删）。"""
+    s = strip_mtext_codes(t or "").strip()
+    if not s:
+        return False
+    if any(w in s for w in _LEGEND_WORDS):
+        return True
+    # 以"注："或"注:"开头的注记行
+    if re.match(r"^注[:：]", s):
+        return True
+    return False
+
+
+# R-02（2026-10-26 真机 P1）：目录页页头图号被 N-05 签署栏关联误删。
+# 图号格式：字母前缀(0-3) + 数字段 + 分隔符/字母 + 数字段（+可选 -数字段），
+# 如 X398·301Z-01 / X398304X01-14 / X398-301Z-02。
+# 与坐标（X9193900 无分隔符/后段字母）、证书号（A135036965 无分隔符）区分。
+_DRAWING_NO_RE = re.compile(
+    r"^[A-Za-z]{0,3}\d{2,4}(?:[·.\-]\d{2,4}[A-Za-z]{0,2}|\d{2,3}[A-Za-z])(?:\d{1,3})?(?:[·\-]\d{1,3})?$"
+)
+
+
+def _is_drawing_no(t):
+    """R-02：是否为图号格式文本（须保护，不得被签署栏/标签关联删除）。"""
+    s = strip_mtext_codes(t or "").strip()
+    if not s or len(s) > 20:
+        return False
+    if _AXIS_COORD_RE.match(s):
+        return False
+    if is_cert_number(s):
+        return False
+    return bool(_DRAWING_NO_RE.match(s))
 
 
 # F-08：资质/设计证书编号值。如 A135036965（1 个字母 + 9 位连续数字），
@@ -282,6 +337,15 @@ def judge_whitelist_text(text, cfg):
     # C3：坐标网格/测量数值即使落入标题栏区域也保留（防区域外扩误删坐标）
     if _is_axis_coordinate(t):
         return "keep", "axis_coordinate", None
+    # R-01：图例/说明/注记类文本不删（标题栏反推区域边缘的图纸内容）
+    if _is_legend_like(t):
+        return "keep", "legend_note", None
+    # R-02：图号格式文本（X398·301Z-01 等）不删（目录页头图号保护）
+    if _is_drawing_no(t):
+        return "keep", "drawing_no", None
+    # 圈注示例：图纸幅面规格值（A2/A3(横) 等）是标题栏保留字段值，不删
+    if _is_paper_size(t):
+        return "keep", "paper_size", None
     # N-04：标题栏保护字段标签文字本身（工程名称/子项名称/图号…）保留，
     # 避免"子项名称"这类标签被白名单整删、只剩值（残缺标题栏）。
     if _is_field_label(t, cfg):
@@ -336,6 +400,18 @@ def judge_text(text, cfg):
     # C3：坐标网格/测量数值在任何模式下都保留（条带回退区的坐标标注不得误删）
     if _is_axis_coordinate(t):
         return "keep", "axis_coordinate", None
+
+    # R-01：图例/说明/注记类文本任何模式都保留
+    if _is_legend_like(t):
+        return "keep", "legend_note", None
+
+    # R-02：图号格式文本任何模式都保留（目录页头图号等）
+    if _is_drawing_no(t):
+        return "keep", "drawing_no", None
+
+    # 圈注示例：图纸幅面规格值（A2 等）任何模式都保留
+    if _is_paper_size(t):
+        return "keep", "paper_size", None
 
     # F-08：资质/设计证书编号（A135036965 等）任何模式都删（已排除 X/Y 坐标）
     if is_cert_number(t):

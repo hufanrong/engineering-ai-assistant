@@ -111,6 +111,8 @@ class CadSession:
         self.app = None
         self._doc = None
         self._com_initialized = False
+        # P-11：会话前已存在的 acad.exe PID 白名单（退出强杀时排除，防误杀用户实例）
+        self._baseline_acad_pids = set()
         # R2：打印链路中被容错跳过的属性设置（不静默，处理后透出 notes）
         self._plot_warnings = []
 
@@ -126,6 +128,9 @@ class CadSession:
         import time
         pythoncom.CoInitialize()
         self._com_initialized = True
+        # P-11（2026-10-26）：会话开始前已存在的 acad.exe PID 记为基线白名单——
+        # 退出时只强杀**本次启动的新实例**，绝不误杀用户手动打开的 AutoCAD。
+        self._baseline_acad_pids = self._list_acad_pids()
         # P-11（2026-10-26）：DispatchEx 启动**独立实例**——不复用用户手开的 AutoCAD，
         # 也绝不复用崩溃遗留的半死实例（其 Documents.Open 代理失效 <unknown>.Open，
         # 会导致后续所有运行全部失败）。
@@ -182,7 +187,8 @@ class CadSession:
             except Exception:
                 pass
             # P-11：Quit 不等于进程退出——轮询进程是否真正消失（≤10s），
-            # 未退出按 HWND→PID 强制结束，避免残留半死实例污染下次运行。
+            # 未退出按基线白名单 + HWND→PID 双路定位，强制结束本次启动的
+            # 实例，避免残留半死实例污染下次运行。
             self._ensure_process_exit()
             self.app = None
             if self._com_initialized:
@@ -194,26 +200,58 @@ class CadSession:
         return False
 
     def _ensure_process_exit(self, timeout=10.0):
-        """P-11：Quit 后轮询 AutoCAD 进程真正退出；未退出则 taskkill 强制结束。"""
+        """P-11：Quit 后轮询 AutoCAD 进程真正退出；未退出则 taskkill 强制结束。
+
+        v0.1.163（真机 P-11 未生效）：v0.1.162 只按 app.HWND→PID 定位，HWND
+        属性读取失败即返回 None、跳过强杀 → acad.exe 残留。本版双路兜底：
+        ① HWND→PID；② 枚举全部 acad.exe，剔除会话开始前的基线白名单，
+        剩余即本次启动的实例（进程对象不可达时也能定位）。
+        """
         import time
-        pid = self._app_pid()
-        if pid is None:
+        base = set(getattr(self, "_baseline_acad_pids", None) or [])
+        pids = set(self._list_acad_pids())
+        hwnd_pid = self._app_pid()
+        if hwnd_pid:
+            pids.add(hwnd_pid)
+        mine = pids - base
+        if not mine:
             return
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if not self._pid_alive(pid):
+            alive = [p for p in mine if self._pid_alive(p)]
+            if not alive:
                 return
             time.sleep(0.5)
         # 超时仍存活 → 强制结束（Windows taskkill /F /T；Linux kill -9）
         try:
             import subprocess
-            if sys_platform_startswith_win():
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                               capture_output=True, timeout=15)
-            else:
-                subprocess.run(["kill", "-9", str(pid)], capture_output=True, timeout=10)
+            for pid in alive:
+                if sys_platform_startswith_win():
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                                   capture_output=True, timeout=15)
+                else:
+                    subprocess.run(["kill", "-9", str(pid)], capture_output=True, timeout=10)
         except Exception:  # noqa: BLE001
             pass
+
+    def _list_acad_pids(self):
+        """枚举当前所有 acad.exe 进程 PID（Windows tasklist；其他平台返回空）。"""
+        if not sys_platform_startswith_win():
+            return set()
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq acad.exe", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, encoding="gbk", errors="replace",
+                timeout=15).stdout or ""
+            pids = set()
+            for line in out.splitlines():
+                parts = line.strip().strip('"').split('","')
+                if len(parts) >= 2 and parts[1].strip().isdigit():
+                    pids.add(int(parts[1].strip()))
+            return pids
+        except Exception:  # noqa: BLE001
+            return set()
 
     def _app_pid(self):
         """按 app.HWND 定位 AutoCAD 进程 PID（Windows）；失败返回 None。"""
@@ -634,16 +672,26 @@ class CadSession:
         实例），因此只用于**判定与提示**（调用方记 notes，提示人工在 AutoCAD
         炸开块后重试）。位置按块变换（插入点 + 旋转 + 缩放）换算到世界坐标。
 
-        返回 [(text, (minx,miny,maxx,maxy)), ...]；失败返回 []。
+        v0.1.163：**支持嵌套块递归**（块定义内再嵌 INSERT，标题栏常为二级嵌套）；
+        ObjectName 比较统一规范化。返回 [(text, (minx,miny,maxx,maxy)), ...]；
+        块名/块定义不可读时抛异常（调用方记日志，便于真机定位收集路径失败点）。
         """
         import math
+
+        def _objname(e):
+            try:
+                return str(e.ObjectName or "")
+            except Exception:
+                return ""
+
         try:
             name = str(ent.Name or "")
             if not name:
-                return []
+                raise ValueError("块引用无 Name")
             blk = self._doc.Blocks.Item(name)
-        except Exception:
-            return []
+        except Exception as e:  # noqa: BLE001
+            raise ValueError("块定义不可读（Name=%r）：%s" % (getattr(ent, "Name", "?"), e))
+
         try:
             ip = tuple(ent.InsertionPoint)
         except Exception:
@@ -668,23 +716,91 @@ class CadSession:
             x2, y2 = x * sx, y * sy
             return (ip[0] + x2 * cos - y2 * sin, ip[1] + x2 * sin + y2 * cos)
 
-        out = []
-        for sub in blk:
+        def _walk(blkdef, depth):
+            out = []
+            if depth > 4:   # 防循环块引用无限递归
+                return out
+            for sub in blkdef:
+                try:
+                    on = _objname(sub)
+                    if on == "AcDbBlockReference":
+                        # 嵌套块递归：子块文字按本块变换叠加子块变换
+                        out.extend(_walk_nested(sub, depth + 1))
+                        continue
+                    if on not in self.TEXT_NAMES:
+                        continue
+                    t = str(sub.TextString or "")
+                    if not t:
+                        continue
+                    mn, mx = sub.GetBoundingBox()
+                    pts = [_wpt(mn[0], mn[1]), _wpt(mx[0], mn[1]),
+                           _wpt(mx[0], mx[1]), _wpt(mn[0], mx[1])]
+                    box = (min(p[0] for p in pts), min(p[1] for p in pts),
+                           max(p[0] for p in pts), max(p[1] for p in pts))
+                    out.append((t, box))
+                except Exception:  # noqa: BLE001
+                    continue
+            return out
+
+        def _walk_nested(sub, depth):
+            out = []
+            if depth > 4:
+                return out
             try:
-                if str(sub.ObjectName) not in self.TEXT_NAMES:
+                sname = str(sub.Name or "")
+                if not sname:
+                    return out
+                sblk = self._doc.Blocks.Item(sname)
+            except Exception:
+                return out
+            try:
+                sip = tuple(sub.InsertionPoint)
+            except Exception:
+                sip = (0, 0, 0)
+            srot = 0.0
+            try:
+                srot = float(sub.Rotation)
+            except Exception:
+                pass
+            ssx = ssy = 1.0
+            try:
+                ssx = float(sub.XScaleFactor)
+            except Exception:
+                pass
+            try:
+                ssy = float(sub.YScaleFactor)
+            except Exception:
+                pass
+            scos, ssin = math.cos(srot), math.sin(srot)
+
+            def _swpt(x, y):
+                x2, y2 = x * ssx, y * ssy
+                return (sip[0] + x2 * scos - y2 * ssin, sip[1] + x2 * ssin + y2 * scos)
+
+            for sub2 in sblk:
+                try:
+                    on2 = _objname(sub2)
+                    if on2 == "AcDbBlockReference":
+                        out.extend(_walk_nested(sub2, depth + 1))
+                        continue
+                    if on2 not in self.TEXT_NAMES:
+                        continue
+                    t2 = str(sub2.TextString or "")
+                    if not t2:
+                        continue
+                    mn, mx = sub2.GetBoundingBox()
+                    # 子块文字：先子块变换，再乘父块变换
+                    p1, p2 = _swpt(mn[0], mn[1]), _swpt(mx[0], mx[1])
+                    pts = [_wpt(p1[0], p1[1]), _wpt(p2[0], p1[1]),
+                           _wpt(p2[0], p2[1]), _wpt(p1[0], p2[1])]
+                    box = (min(p[0] for p in pts), min(p[1] for p in pts),
+                           max(p[0] for p in pts), max(p[1] for p in pts))
+                    out.append((t2, box))
+                except Exception:  # noqa: BLE001
                     continue
-                t = str(sub.TextString or "")
-                if not t:
-                    continue
-                mn, mx = sub.GetBoundingBox()
-                pts = [_wpt(mn[0], mn[1]), _wpt(mx[0], mn[1]),
-                       _wpt(mx[0], mx[1]), _wpt(mn[0], mx[1])]
-                box = (min(p[0] for p in pts), min(p[1] for p in pts),
-                       max(p[0] for p in pts), max(p[1] for p in pts))
-                out.append((t, box))
-            except Exception:  # noqa: BLE001
-                continue
-        return out
+            return out
+
+        return _walk(blk, 0)
 
     def convert_to_autocad_type(self, ent):
         """把代理/自定义实体（天正 TArch 等）转换为 AutoCAD 基础实体（原地转换）。

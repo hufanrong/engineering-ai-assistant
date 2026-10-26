@@ -552,6 +552,107 @@ def test_n05_top_band_signature_clean():
     check("N-05 目录图号保留", not emap["目录图号"].deleted, "")
 
 
+def test_r01_legend_not_deleted():
+    """R-01（v0.1.163）：图例/说明/坐标值不被白名单整删 + 签署列扩展行带约束。"""
+    print("[R-01] 图例/说明区保护（回归：图2 图例整块被清空）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    # judge：图例条目/说明全文/图例坐标值（X=/Y= 前缀）都 keep
+    for s in ["图例", "说明", "注：本图为示意", "X=9194051.681", "Y=549445.807"]:
+        a, r, _ = rules.judge_whitelist_text(s, CFG)
+        check("R-01 白名单 keep %r (%s)" % (s, r), a == "keep", a)
+    # 白名单区域整删执行：区域含图例文字+坐标值，均应保留
+    E = _FakeEnt
+    region = (270, 20, 415, 55)
+    ents = [
+        E("图例条目", "图例 1:100", (280, 44, 330, 50)),
+        E("说明文", "说明：本图尺寸以毫米计", (280, 36, 360, 42)),
+        E("图例X", "X=9194051.681", (280, 28, 340, 34)),
+        E("图例Y", "Y=549445.807", (280, 20, 340, 26)),
+        E("人名", "李安武", (360, 44, 380, 50)),
+    ]
+    sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="real_rect")
+    emap = {e.Name: e for e in sess.ents}
+    for n in ["图例条目", "说明文", "图例X", "图例Y"]:
+        check("R-01 %s 未被删" % n, not emap[n].deleted, "")
+    check("R-01 人名仍删除", emap["人名"].deleted, "")
+
+
+def test_r01_expand_row_band():
+    """R-01：签署列扩展只纳入相邻行带——远处图例区（y 差大）不被拉入。"""
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (300, 20, 410, 48)
+    # 签署标签行带在 y 25-44；图例区在 y 120-160（x 与签署列重叠但 y 相距很远）
+    boxes = [
+        {"norm": "设计", "minx": 300, "miny": 40, "maxx": 306, "maxy": 44},
+        {"norm": "制图", "minx": 300, "miny": 25, "maxx": 306, "maxy": 29},
+        {"norm": "李安武", "minx": 310, "miny": 40, "maxx": 320, "maxy": 44},
+        {"norm": "代必虎", "minx": 310, "miny": 25, "maxx": 320, "maxy": 29},
+        {"norm": "图例条目", "minx": 300, "miny": 120, "maxx": 380, "maxy": 160},
+    ]
+    fl, pl, dl, cl = core._titleblock_label_sets(CFG)
+    exp = titleblock.expand_region_for_signature_rows(region, boxes, frame, pl, CFG)
+    check("R-01 扩展盖住签署行带（代必虎 25）", exp[1] <= 25.0, str(exp))
+    check("R-01 远处图例区（120）不被拉入", exp[3] < 120.0, str(exp))
+
+
+def test_r02_drawing_no_protected():
+    """R-02（v0.1.163）：图号格式文本不被签署栏关联/白名单删除。"""
+    print("[R-02] 图号保护（目录页页头图号回归）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    for s in ["X398·301Z-01", "X398304X01-14", "X398-301Z-02"]:
+        check("R-02 识别图号 %r" % s, rules._is_drawing_no(s), "")
+        a, r, _ = rules.judge_whitelist_text(s, CFG)
+        check("R-02 白名单 keep %r (%s)" % (s, r), a == "keep", a)
+    for s in ["X9193900", "Y549625", "A135036965", "2024年05月", "1:10", "A2"]:
+        check("R-02 不误判 %r" % s, not rules._is_drawing_no(s), "")
+    # top_band：页头图号与"制表"标签几何邻近时仍保留
+    region = (0, 250, 420, 297)
+    E = _FakeEnt
+    ents = [
+        E("页头图号", "X398·301Z-01", (300, 270, 380, 276)),
+        E("制表标签", "制表", (290, 20, 310, 26)),
+        E("制表人", "李安武", (315, 20, 335, 26)),
+    ]
+    sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="top_band")
+    emap = {e.Name: e for e in sess.ents}
+    check("R-02 页头图号保留", not emap["页头图号"].deleted, "")
+    check("R-02 制表人名删除", emap["制表人"].deleted, "")
+
+
+def test_n02_spaced_sign_label():
+    """N-02：签署标签带空格（设  计）也能匹配扩展。"""
+    print("[N-02] 空格签署标签匹配（图3 漏删人名根因）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (300, 20, 410, 48)
+    boxes = [
+        {"norm": "设  计", "minx": 300, "miny": 40, "maxx": 306, "maxy": 44},
+        {"norm": "李安武", "minx": 310, "miny": 40, "maxx": 320, "maxy": 44},
+        {"norm": "代必虎", "minx": 310, "miny": 30, "maxx": 320, "maxy": 34},
+    ]
+    fl, pl, dl, cl = core._titleblock_label_sets(CFG)
+    exp = titleblock.expand_region_for_signature_rows(region, boxes, frame, pl, CFG)
+    check("N-02 空格标签命中并扩展（盖住代必虎 30）", exp[1] <= 30.0, str(exp))
+
+
+def test_circle_annotation_rules():
+    """圈注示例规则：保留修改码/图纸规格/洗矿专业/所属图号等，删除日期/人名。"""
+    print("[圈注] 按图中圈注范围校验保留/删除清单")
+    # 保留项（圈注）
+    for s in ["修改码", "图纸规格", "A2", "洗矿专业 共 1 张", "所属图号",
+              "中碎筛分车间-中碎车间", "X398304X01-14"]:
+        a, r, _ = rules.judge_whitelist_text(s, CFG)
+        check("圈注保留 %r (%s)" % (s, r), a == "keep", a)
+    # 删除项（未圈）
+    for s in ["紫金(厦门)工程设计有限公司", "A135036965", "2024年05月",
+              "审定 张忠宝", "韩吉财"]:
+        a, r, _ = rules.judge_whitelist_text(s, CFG)
+        check("圈注删除 %r (%s)" % (s, r), a == "delete", a)
+
+
 def main():
     print("=" * 64)
     print("dwg_cleaner 纯逻辑回归测试（无 AutoCAD 依赖）")
@@ -574,6 +675,11 @@ def main():
     test_n01_block_attributes_collected()
     test_n02_region_signature_expand()
     test_n05_top_band_signature_clean()
+    test_r01_legend_not_deleted()
+    test_r01_expand_row_band()
+    test_r02_drawing_no_protected()
+    test_n02_spaced_sign_label()
+    test_circle_annotation_rules()
     print("=" * 64)
     print("结果：通过 %d，失败 %d" % (_PASS, _FAIL))
     print("=" * 64)

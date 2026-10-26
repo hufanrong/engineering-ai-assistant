@@ -385,8 +385,15 @@ def expand_region_for_signature_rows(region, text_boxes, frame, sign_labels, cfg
 
     真机：图3 模板标题栏区域上界切在人名列中间行，"代必虎/李安武"漏删（同行
     其它人已删）。标题栏"设计/审核/审定/检图/制图"标签纵向同列、其值（人名）在
-    右邻列：把区域内签署标签按 x 聚类成列，取全图框内与该列水平重叠的全部文字
-    的 y 范围，仅**向外扩展** region 的 miny/maxy（不收缩），并夹取到图框内。
+    右邻列：把区域内签署标签按 x 聚类成列，取全图框内与该列水平重叠**且与该列
+    标签行带相邻**（y 差 ≤ 图框高×0.05）的文字的 y 范围，仅**向外扩展** region 的
+    miny/maxy（不收缩），并夹取到图框内。
+
+    R-01（2026-10-26 真机 P0 回归）：v0.1.162 首版实现里 members 取"与该列 x
+    重叠的全部文字"，**不限 y 距离**——图2 图例表格/说明区与签署列 x 有重叠，
+    区域 y 上界被拉进图例区 → 白名单整删图例 10 条+说明全文+图例坐标值。
+    本版改为**行带约束**：只纳入与签署标签行相邻的连续行带内的文字，
+    远处图例/说明区不再被拉入。
 
     参数
     ----
@@ -404,13 +411,21 @@ def expand_region_for_signature_rows(region, text_boxes, frame, sign_labels, cfg
     cfg = cfg or {}
     tb = cfg.get("titleblock", {})
     col_tol = fw * float(tb.get("infer_gap_x_ratio", 0.02)) or fw * 0.02
+    # R-01：行带约束——与签署标签行的 y 差不得超过图框高×0.05
+    row_band = max(fh * 0.05, 6.0)
+
+    def _norm(s):
+        return "".join((s or "").split())
 
     def _is_sign(norm):
         if not norm:
             return False
+        n = _norm(norm)
         for lab in sign_labels:
-            if lab and (norm == lab or norm.rstrip("：:") == lab
-                        or norm.startswith(lab) and len(norm) <= len(lab) + 2):
+            if not lab:
+                continue
+            ln = _norm(lab)
+            if n == ln or n.rstrip("：:") == ln or (n.startswith(ln) and len(n) <= len(ln) + 2):
                 return True
         return False
 
@@ -438,15 +453,22 @@ def expand_region_for_signature_rows(region, text_boxes, frame, sign_labels, cfg
                 break
         if not placed:
             cols.append([s["minx"], s["maxx"]])
-    # 每列（标签列+右邻值列）内的全部文字 y 范围 → 仅扩展不收缩
+    # 每列：取与该列 x 重叠、且 y 与**该列任一签署标签**相邻（≤ row_band）的
+    # 全部文字（标签行 + 右邻值行）→ 仅扩展不收缩（R-01 防图例/说明区被拉入）。
     new_miny, new_maxy = rminy, rmaxy
     for lo, hi in cols:
-        members = [t for t in text_boxes
-                   if t["maxx"] >= lo - col_tol and t["minx"] <= hi + col_tol]
-        if not members:
+        col_signs = [s for s in signs if s["minx"] >= lo - col_tol and s["maxx"] <= hi + col_tol]
+        if not col_signs:
             continue
-        new_miny = min(new_miny, min(t["miny"] for t in members))
-        new_maxy = max(new_maxy, max(t["maxy"] for t in members))
+        for s in col_signs:
+            s_cy = (s["miny"] + s["maxy"]) / 2.0
+            members = [t for t in text_boxes
+                       if t["maxx"] >= lo - col_tol and t["minx"] <= hi + col_tol
+                       and abs(((t["miny"] + t["maxy"]) / 2.0) - s_cy) <= row_band]
+            if not members:
+                continue
+            new_miny = min(new_miny, min(t["miny"] for t in members))
+            new_maxy = max(new_maxy, max(t["maxy"] for t in members))
     new_miny = max(new_miny, frame.miny - 2)
     new_maxy = min(new_maxy, frame.maxy + 2)
     if not (rminx < rmaxx and new_miny < new_maxy):
