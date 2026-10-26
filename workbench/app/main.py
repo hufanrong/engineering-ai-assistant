@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.156")
+app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.157")
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -4724,6 +4724,57 @@ def frontend_files(workshop: str = "", status: str = "", q: str = "", limit: int
         })
     items.sort(key=lambda x: x.get("upload_time") or "", reverse=True)
     return {"ok": True, "files": items[:limit], "total": len(items)}
+
+
+@app.get("/api/files/tree")
+def files_tree():
+    """v0.1.157：三级归属树（L1 项目级 / L2 车间级 / L3 设备级 / 待确认 + L0 平台规范）。
+    未归级文件会即时自动判定并落盘；返回供前端折叠树渲染。"""
+    from . import file_level as _fl, workshop_assign as _wa, device_workshop as _dw
+    raw = _frontend_index_items()
+    wa_map = {}
+    try:
+        for sha, rec in (_wa._load() or {}).items():
+            if rec.get("workshop"):
+                wa_map[sha] = rec["workshop"]
+    except Exception:  # noqa: BLE001
+        wa_map = {}
+    device_tags = []
+    try:
+        device_tags = [d.get("tag") for d in _dw.list_devices() if d.get("tag")]
+    except Exception:  # noqa: BLE001
+        device_tags = []
+    tree = _fl.build_tree(raw, workshop_map=wa_map, device_tags=device_tags)
+    # L0 平台规范库（跨项目只读引用）
+    l0 = {"count": 0, "items": []}
+    try:
+        from . import platform_store as _ps
+        p = _ps.list_items()
+        l0 = {"count": p.get("count", 0),
+              "items": [{"file_name": i.get("file_name", ""),
+                         "std_no": i.get("std_no", ""),
+                         "status": i.get("status", "")} for i in p.get("items", [])[:500]]}
+    except Exception:  # noqa: BLE001
+        pass
+    tree["L0"] = l0
+    return {"ok": True, "tree": tree}
+
+
+@app.post("/api/files/level")
+def files_set_level(payload: dict):
+    """人工修改文件归属层级。payload: {sha, level, category?, parent?}"""
+    from . import file_level as _fl
+    sha = (payload or {}).get("sha") or (payload or {}).get("file_id")
+    level = (payload or {}).get("level")
+    if not sha or level not in (_fl.L1, _fl.L2, _fl.L3):
+        raise HTTPException(400, "参数错误：需要 sha 与 level(L1/L2/L3)")
+    _fl.manual_assign_level(
+        sha, level,
+        category=(payload or {}).get("category", ""),
+        parent=(payload or {}).get("parent", ""),
+        file_name=(payload or {}).get("file_name", ""))
+    _refresh_project_stats()
+    return {"ok": True}
 
 
 @app.get("/api/parse/queue")

@@ -79,6 +79,40 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 .workshop-card .name { font-size:15px; font-weight:600; color:#1a1b1c; margin-bottom:6px; }
 .workshop-card .stats { font-size:12px; color:#666; display:flex; gap:12px; }
 
+/* v0.1.157 三级归属折叠树 */
+.level-tree { border:1px solid #eee; border-radius:10px; overflow:hidden; background:#fff; }
+.lt-group { border-bottom:1px solid #f0f0f0; }
+.lt-group:last-child { border-bottom:none; }
+.lt-group-head { display:flex; align-items:center; gap:8px; padding:11px 14px; cursor:pointer; user-select:none; font-size:14px; font-weight:600; }
+.lt-group-head:hover { background:#f7f9fc; }
+.lt-group-head .lt-arrow { display:inline-block; width:14px; transition:transform 0.15s; color:#999; font-size:10px; }
+.lt-group.open .lt-arrow { transform:rotate(90deg); }
+.lt-group-head .lt-count { font-size:11px; font-weight:500; color:#fff; border-radius:10px; padding:1px 8px; margin-left:auto; }
+.lt-group-body { display:none; padding:2px 14px 10px 30px; }
+.lt-group.open > .lt-group-body { display:block; }
+.lt-sub { border-left:1px dashed #e4e4e4; margin:2px 0 2px 6px; padding-left:10px; }
+.lt-sub-head { display:flex; align-items:center; gap:6px; padding:7px 10px; cursor:pointer; border-radius:6px; font-size:13px; user-select:none; }
+.lt-sub-head:hover { background:#f5f7fa; }
+.lt-sub-head .lt-arrow { color:#aaa; font-size:9px; width:12px; transition:transform 0.15s; }
+.lt-sub.open > .lt-sub-head .lt-arrow { transform:rotate(90deg); }
+.lt-sub-head .lt-name { font-weight:600; color:#333; }
+.lt-sub-head .lt-count { font-size:11px; color:#888; margin-left:auto; }
+.lt-sub-body { display:none; padding:2px 0 4px 18px; }
+.lt-sub.open > .lt-sub-body { display:block; }
+.lt-file { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px; font-size:12.5px; color:#444; }
+.lt-file:hover { background:#f5f7fa; }
+.lt-file .lt-fname { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lt-file .lt-act { font-size:11px; color:#1E5AA8; cursor:pointer; white-space:nowrap; }
+.lt-file mark { background:#ffe58a; padding:0 1px; border-radius:2px; }
+.lt-catbar { display:flex; gap:6px; flex-wrap:wrap; padding:6px 0 2px; }
+.lt-empty { font-size:12px; color:#aaa; padding:8px 10px; }
+/* 层级配色 */
+.lt-l0 .lt-group-head { color:#5B4E8A; } .lt-l0 .lt-count { background:#8B7FB5; }
+.lt-l1 .lt-group-head { color:#2c5282; } .lt-l1 .lt-count { background:#4F6B9A; }
+.lt-l2 .lt-group-head { color:#2F6B4F; } .lt-l2 .lt-count { background:#35705A; }
+.lt-pending .lt-group-head { color:#A14E50; } .lt-pending .lt-count { background:#A14E50; }
+.lt-l3-tag { color:#9A6A2F; font-weight:600; }
+
 /* 上传区域 */
 .upload-zone { border:2px dashed #1E5AA8; border-radius:10px; padding:32px; text-align:center; background:linear-gradient(135deg,rgba(30,90,168,0.03),rgba(255,122,0,0.02)); cursor:pointer; transition:all 0.2s; }
 .upload-zone:hover { border-color:#FF7A00; background:linear-gradient(135deg,rgba(30,90,168,0.06),rgba(255,122,0,0.04)); }
@@ -241,10 +275,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     </div>
   </div>
 
-  <!-- 车间展示 -->
+  <!-- 车间展示（v0.1.157：三级归属折叠树） -->
   <div class="card" id="workshopCard">
-    <div class="card-title"><span class="icon">🏭</span>车间文件管理 <span style="font-size:11px;color:#999;font-weight:400;margin-left:8px">点击车间查看文件</span></div>
-    <div id="workshopGrid" class="workshop-grid"></div>
+    <div class="card-title"><span class="icon">🗂️</span>项目资料库 <span style="font-size:11px;color:#999;font-weight:400;margin-left:8px">项目级 → 车间级 → 设备级，点节点折叠/展开</span></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <input id="treeSearch" class="input" style="flex:1;min-width:220px;padding:8px 12px;font-size:13px" placeholder="🔍 搜索文件 / 车间 / 设备 / 资料类型（如：开箱、球磨机、P-101、台账、吊装）" oninput="filterTree()">
+      <button class="btn btn-success btn-sm" onclick="reAutoAssign()">🔁 重新识别</button>
+      <button class="btn btn-default btn-sm" onclick="loadLevelTree()">🔄 刷新</button>
+    </div>
+    <div id="levelTree" class="level-tree"></div>
+    <div id="workshopGrid" class="workshop-grid" style="display:none"></div>
     <div id="workshopFiles" style="display:none;margin-top:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="font-weight:600;font-size:14px" id="workshopFilesTitle"></div>
@@ -1104,9 +1144,255 @@ function loadResourceData() {
         });
     // 加载车间
     loadWorkshops();
+    // v0.1.157：加载三级归属树
+    loadLevelTree();
     // 加载待确认和失败文件
     loadPendingFiles();
     loadFailedFiles();
+}
+
+// ===== v0.1.157 三级归属折叠树 =====
+var treeData = null;
+var treeExpanded = {};
+
+function loadLevelTree() {
+    fetch('/api/files/tree')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!d.ok || !d.tree) { return; }
+            treeData = d.tree;
+            renderTree(document.getElementById('treeSearch') ? document.getElementById('treeSearch').value : '');
+        })
+        .catch(function() {
+            var box = document.getElementById('levelTree');
+            if (box) box.innerHTML = '<div class="lt-empty">层级树加载失败，请检查服务</div>';
+        });
+}
+
+function toggleTree(key) {
+    treeExpanded[key] = !(treeExpanded[key] || false);
+    var inp = document.getElementById('treeSearch');
+    renderTree(inp ? inp.value : '');
+}
+
+function filterTree() {
+    var inp = document.getElementById('treeSearch');
+    renderTree(inp ? inp.value.trim() : '');
+}
+
+function _hl(s, kw) {
+    var t = escapeHtml(s || '');
+    if (kw) {
+        var re = new RegExp('(' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
+        t = t.replace(re, '<mark>$1</mark>');
+    }
+    return t;
+}
+
+function _fileRow(f, kw) {
+    var fid = String(f.sha256 || f.id || '').replace(/'/g, '');
+    var type = f.file_type ? '<span class="badge badge-info" style="white-space:nowrap">' + escapeHtml(f.file_type) + '</span>' : '';
+    var acts = '';
+    if (fid) {
+        acts += '<span class="lt-act" style="color:#9A6A2F" onclick="event.stopPropagation();openLevelMove(\'' + fid + '\',\'' +
+            String(f.file_name || '').replace(/'/g, '').replace(/\\/g, '') + '\',\'' +
+            (f.level || '') + '\',\'' + (f.category || '') + '\',\'' + (f.parent || '') + '\')">移动</span>';
+        acts += '<span class="lt-act" onclick="event.stopPropagation();previewFile(\'' + fid + '\')">查看</span>';
+    }
+    return '<div class="lt-file"><span class="lt-fname">' + _hl(f.file_name, kw) + '</span>' + type + acts + '</div>';
+}
+
+// v0.1.157 人工改层级弹窗
+var levelMoveFile = { sha: '' };
+function openLevelMove(sha, fname, level, category, parent) {
+    levelMoveFile.sha = sha;
+    document.getElementById('levelMoveFname').textContent = fname;
+    var sel = document.getElementById('levelMoveLevel');
+    sel.value = (level === 'L1' || level === 'L2' || level === 'L3') ? level : 'L2';
+    if (category) document.getElementById('levelMoveL1Cat').value =
+        ['综合台账', '采购合同', '物流到货', '全场图纸', '综合管理'].indexOf(category) >= 0 ? category : '综合台账';
+    if (level === 'L2') document.getElementById('levelMoveL2Ws').value = parent || '';
+    if (level === 'L3') {
+        document.getElementById('levelMoveL3Tag').value = parent || '';
+        document.getElementById('levelMoveL3Ws').value = '';
+    }
+    // 已知车间候选
+    var dl = document.getElementById('workshopNameList');
+    if (dl && allWorkshops) {
+        dl.innerHTML = allWorkshops.map(function(w) {
+            var nm = w.name || w;
+            return '<option value="' + escapeHtml(nm) + '">';
+        }).join('');
+    }
+    switchLevelMoveFields();
+    document.getElementById('levelMoveModal').style.display = 'flex';
+}
+function closeLevelMoveDialog() {
+    document.getElementById('levelMoveModal').style.display = 'none';
+}
+function switchLevelMoveFields() {
+    var lv = document.getElementById('levelMoveLevel').value;
+    document.getElementById('levelMoveL1Box').style.display = lv === 'L1' ? '' : 'none';
+    document.getElementById('levelMoveL2Box').style.display = lv === 'L2' ? '' : 'none';
+    document.getElementById('levelMoveL3Box').style.display = lv === 'L3' ? '' : 'none';
+}
+function confirmLevelMove() {
+    if (!levelMoveFile.sha) { closeLevelMoveDialog(); return; }
+    var lv = document.getElementById('levelMoveLevel').value;
+    var category = '', parent = '';
+    if (lv === 'L1') {
+        category = document.getElementById('levelMoveL1Cat').value;
+    } else if (lv === 'L2') {
+        parent = document.getElementById('levelMoveL2Ws').value.trim();
+        if (!parent) { alert('请填写所属车间名称'); return; }
+    } else if (lv === 'L3') {
+        parent = document.getElementById('levelMoveL3Tag').value.trim();
+        if (!parent) { alert('请填写设备位号（如 P-101）'); return; }
+        var ws = document.getElementById('levelMoveL3Ws').value.trim();
+        // 若同时填了车间，也同步车间登记（调用既有车间指派接口）
+        if (ws) {
+            fetch('/api/workshop/assign', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sha: levelMoveFile.sha, workshop: ws })
+            });
+        }
+    }
+    fetch('/api/files/level', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sha: levelMoveFile.sha, level: lv, category: category, parent: parent })
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d && d.ok) {
+                closeLevelMoveDialog();
+                showToast('已调整文件归属');
+                loadLevelTree();
+                loadResourceData();
+            } else { alert('调整失败，请重试'); }
+        })
+        .catch(function() { alert('调整失败，请检查服务'); });
+}
+
+function _fileMatches(f, kw) {
+    if (!kw) return true;
+    var hay = ((f.file_name || '') + ' ' + (f.file_type || '') + ' ' + (f.category || '') + ' ' + (f.parent || '')).toLowerCase();
+    return hay.indexOf(kw.toLowerCase()) >= 0;
+}
+
+function _subHTML(cls, key, name, count, body, openByDefault, kw, forceOpen) {
+    var isOpen = forceOpen || ((treeExpanded[key] !== undefined) ? treeExpanded[key] : openByDefault);
+    return '<div class="lt-sub ' + cls + (isOpen ? ' open' : '') + '">' +
+        '<div class="lt-sub-head" onclick="toggleTree(\'' + key + '\')">' +
+        '<span class="lt-arrow">▶</span><span class="lt-name">' + _hl(name, kw) + '</span>' +
+        '<span class="lt-count">' + count + '</span></div>' +
+        '<div class="lt-sub-body">' + body + '</div></div>';
+}
+
+function _groupHTML(cls, key, icon, title, count, body, openByDefault, kw) {
+    var isOpen = kw ? (count > 0) : ((treeExpanded[key] !== undefined) ? treeExpanded[key] : openByDefault);
+    return '<div class="lt-group ' + cls + (isOpen ? ' open' : '') + '">' +
+        '<div class="lt-group-head" onclick="toggleTree(\'' + key + '\')">' +
+        '<span class="lt-arrow">▶</span><span>' + icon + ' ' + title + '</span>' +
+        '<span class="lt-count">' + count + '</span></div>' +
+        '<div class="lt-group-body">' + body + '</div></div>';
+}
+
+function renderTree(kw) {
+    var box = document.getElementById('levelTree');
+    if (!box || !treeData) return;
+    var T = treeData;
+    var html = '';
+
+    // ---- L0 平台规范库 ----
+    var l0 = T.L0 || { items: [], count: 0 };
+    var l0rows = (l0.items || []).filter(function(f) {
+        return !kw || ((f.file_name || '') + (f.std_no || '')).toLowerCase().indexOf(kw.toLowerCase()) >= 0;
+    }).map(function(f) {
+        return '<div class="lt-file"><span class="lt-fname">' + _hl((f.std_no ? f.std_no + ' ' : '') + f.file_name, kw) + '</span>' +
+            (f.status ? '<span class="badge badge-default">' + escapeHtml(f.status) + '</span>' : '') + '</div>';
+    }).join('');
+    html += _groupHTML('lt-l0', 'g:L0', '📗', '平台规范库（跨项目 · 只读引用）', l0.count || 0,
+        l0rows || '<div class="lt-empty">暂无平台规范（国标/规范在版本更新或平台库中管理）</div>', false, kw);
+
+    // ---- L1 项目级（五子类折叠） ----
+    var l1cats = ['综合台账', '采购合同', '物流到货', '全场图纸', '综合管理'];
+    var l1icons = { '综合台账': '📊', '采购合同': '📑', '物流到货': '🚚', '全场图纸': '🗺️', '综合管理': '📋' };
+    var l1body = '';
+    var l1total = 0;
+    l1cats.forEach(function(cat) {
+        var files = (T.L1 && T.L1[cat]) || [];
+        var rows = files.filter(function(f) { return _fileMatches(f, kw); });
+        var catNameHit = !kw || cat.indexOf(kw) >= 0;
+        if (kw && !catNameHit && rows.length === 0) return;
+        l1total += files.length;
+        var body = rows.length ? rows.map(function(f) { return _fileRow(f, kw); }).join('') : '<div class="lt-empty">无文件</div>';
+        l1body += _subHTML('', 'l1:' + cat, (l1icons[cat] || '📄') + ' ' + cat, files.length, body, false, kw, !!(kw && rows.length));
+    });
+    html += _groupHTML('lt-l1', 'g:L1', '📁', '项目级（不属于任何车间）', l1total,
+        l1body || '<div class="lt-empty">无项目级文件（设备台账、物流、合同、全场图纸等）</div>', true, kw);
+
+    // ---- L2 车间级（含 L3 设备） ----
+    var l2 = T.L2 || {};
+    var wsNames = Object.keys(l2).sort();
+    var l2total = 0, l3total = 0;
+    var l2body = '';
+    wsNames.forEach(function(ws) {
+        var node = l2[ws];
+        var files = node.files || [];
+        var devices = node.devices || {};
+        var wsFiles = files.length;
+        var devCount = 0;
+        Object.keys(devices).forEach(function(t) { devCount += devices[t].length; });
+        var wsTotal = wsFiles + devCount;
+        l2total += wsFiles; l3total += devCount;
+        var wsNameHit = !kw || ws.toLowerCase().indexOf(kw.toLowerCase()) >= 0;
+        var inner = '';
+        // 车间文件（L2）
+        var matchedFiles = files.filter(function(f) { return _fileMatches(f, kw); });
+        if (wsNameHit || matchedFiles.length) {
+            if (wsNameHit) {
+                inner += files.length ? files.map(function(f) { return _fileRow(f, kw); }).join('') : '<div class="lt-empty">车间下无直接文件</div>';
+            } else {
+                inner += matchedFiles.map(function(f) { return _fileRow(f, kw); }).join('');
+            }
+        }
+        // 设备 L3（每个位号折叠）
+        var tagNames = Object.keys(devices).sort();
+        var devInner = '';
+        tagNames.forEach(function(tag) {
+            var dfiles = devices[tag];
+            var matched = dfiles.filter(function(f) { return _fileMatches(f, kw); });
+            var tagHit = !kw || tag.toLowerCase().indexOf(kw.toLowerCase()) >= 0;
+            if (!wsNameHit && !tagHit && matched.length === 0) return;
+            var body = (tagHit ? dfiles : matched).map(function(f) { return _fileRow(f, kw); }).join('');
+            devInner += _subHTML('lt-l3', 'l3:' + ws + '::' + tag, '⚙️ <span class="lt-l3-tag">' + _hl(tag, kw) + '</span>', dfiles.length,
+                body || '<div class="lt-empty">无设备资料</div>', false, kw, !!(kw && matched.length));
+        });
+        if (devInner) inner += '<div style="margin-top:6px;font-size:12px;color:#9A6A2F;font-weight:600;padding-left:10px">设备资料（L3）</div>' + devInner;
+        if (kw && !inner) return;
+        var head = inner || '<div class="lt-empty">无文件</div>';
+        var manage = ' <span class="lt-act" style="font-weight:400;margin-left:6px" onclick="event.stopPropagation();showWorkshopFiles(\'' + String(ws).replace(/'/g, '') + '\')">批量管理</span>';
+        // 车间节点（可折叠）
+        var wsKey = 'l2:' + ws;
+        var wsOpen = kw ? (!!inner && inner.indexOf('lt-file') >= 0) : ((treeExpanded[wsKey] !== undefined) ? treeExpanded[wsKey] : false);
+        l2body += '<div class="lt-sub lt-l2sub' + (wsOpen ? ' open' : '') + '">' +
+            '<div class="lt-sub-head" onclick="toggleTree(\'' + wsKey + '\')">' +
+            '<span class="lt-arrow">▶</span><span class="lt-name">🏭 ' + _hl(ws, kw) + '</span>' +
+            '<span style="margin-left:auto;font-size:11px;color:#888">📄' + wsFiles + ' · ⚙️' + devCount +
+            (ws !== '未定位车间' ? manage : '') + '</span></div>' +
+            '<div class="lt-sub-body">' + head + '</div></div>';
+    });
+    html += _groupHTML('lt-l2', 'g:L2', '🏭', '车间级（L2 车间 / L3 设备）', l2total + l3total,
+        l2body || '<div class="lt-empty">暂无车间文件（上传后自动识别车间）</div>', true, kw);
+
+    // ---- 待确认 ----
+    var pend = T.PENDING || [];
+    var pRows = pend.filter(function(f) { return _fileMatches(f, kw); });
+    var pbody = (pRows.length ? pRows.map(function(f) { return _fileRow(f, kw); }) : [])
+        .join('') + '<div class="lt-empty" style="color:#A14E50">归属不确定的文件，请在下方「待确认文件」卡片人工指派车间/层级</div>';
+    html += _groupHTML('lt-pending', 'g:PENDING', '❓', '待确认', pend.length, pbody, false, kw);
+
+    box.innerHTML = html;
 }
 
 function loadWorkshops() {
@@ -1167,6 +1453,8 @@ function reAutoAssign() {
 function showWorkshopFiles(workshopName) {
     currentWorkshop = workshopName;
     document.getElementById('workshopFilesTitle').textContent = '🏭 ' + workshopName + ' - 文件列表';
+    var tree = document.getElementById('levelTree'); if (tree) tree.style.display = 'none';
+    var search = document.getElementById('treeSearch'); if (search) search.parentElement.style.display = 'none';
     document.getElementById('workshopGrid').style.display = 'none';
     document.getElementById('workshopFiles').style.display = 'block';
     loadWorkshopFiles(workshopName);
@@ -1206,7 +1494,9 @@ function loadWorkshopFiles(workshopName) {
 
 function closeWorkshopFiles() {
     document.getElementById('workshopFiles').style.display = 'none';
-    document.getElementById('workshopGrid').style.display = 'grid';
+    document.getElementById('workshopGrid').style.display = 'none';
+    var tree = document.getElementById('levelTree'); if (tree) tree.style.display = '';
+    var search = document.getElementById('treeSearch'); if (search) search.parentElement.style.display = '';
     currentWorkshop = null;
 }
 
@@ -2975,6 +3265,41 @@ document.addEventListener('DOMContentLoaded', function() {
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
       <button class="btn" onclick="closePendingAssignDialog()">取消</button>
       <button class="btn btn-primary" onclick="confirmPendingAssign()" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- v0.1.157：人工调整文件归属层级 -->
+<div id="levelMoveModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center" onclick="if(event.target===this)closeLevelMoveDialog()">
+  <div style="background:#fff;border-radius:12px;padding:20px;width:92%;max-width:460px;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
+    <div style="font-size:16px;font-weight:700;color:#1E5AA8;margin-bottom:6px">🗂️ 调整文件归属</div>
+    <div style="font-size:12px;color:#888;margin-bottom:12px;word-break:break-all" id="levelMoveFname"></div>
+    <div style="font-size:13px;color:#555;margin-bottom:6px">归属层级</div>
+    <select class="select" id="levelMoveLevel" style="width:100%;box-sizing:border-box;margin-bottom:12px" onchange="switchLevelMoveFields()">
+      <option value="L1">L1 项目级（不属于任何车间）</option>
+      <option value="L2">L2 车间级</option>
+      <option value="L3">L3 设备级</option>
+    </select>
+    <div id="levelMoveL1Box" style="margin-bottom:12px">
+      <div style="font-size:13px;color:#555;margin-bottom:6px">项目级分类</div>
+      <select class="select" id="levelMoveL1Cat" style="width:100%;box-sizing:border-box">
+        <option>综合台账</option><option>采购合同</option><option>物流到货</option><option>全场图纸</option><option>综合管理</option>
+      </select>
+    </div>
+    <div id="levelMoveL2Box" style="margin-bottom:12px;display:none">
+      <div style="font-size:13px;color:#555;margin-bottom:6px">所属车间</div>
+      <input class="input" id="levelMoveL2Ws" list="workshopNameList" style="width:100%;box-sizing:border-box" placeholder="如：粗碎车间">
+      <datalist id="workshopNameList"></datalist>
+    </div>
+    <div id="levelMoveL3Box" style="margin-bottom:12px;display:none">
+      <div style="font-size:13px;color:#555;margin-bottom:6px">设备位号（L3）</div>
+      <input class="input" id="levelMoveL3Tag" style="width:100%;box-sizing:border-box;margin-bottom:8px" placeholder="如：P-101（球磨机）">
+      <div style="font-size:13px;color:#555;margin-bottom:6px">所属车间（选填）</div>
+      <input class="input" id="levelMoveL3Ws" list="workshopNameList" style="width:100%;box-sizing:border-box" placeholder="如：粗碎车间">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn" onclick="closeLevelMoveDialog()">取消</button>
+      <button class="btn btn-primary" onclick="confirmLevelMove()" style="background:#1E5AA8;border-color:#1E5AA8;color:#fff">确认移动</button>
     </div>
   </div>
 </div>
