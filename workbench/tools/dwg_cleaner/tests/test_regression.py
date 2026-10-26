@@ -177,8 +177,8 @@ def test_f03_mtext_codes():
 
 
 class _FakeEnt:
-    def __init__(self, name, text, box, layer="0"):
-        self.ObjectName = "AcDbMText"
+    def __init__(self, name, text, box, layer="0", oname="AcDbMText"):
+        self.ObjectName = oname
         self.Name = name
         self.TextString = text
         self._box = box
@@ -194,8 +194,10 @@ class _FakeEnt:
 
 class _FakeSession:
     """最小 mock，满足 core._clean_titleblock 的纯逻辑路径。"""
-    def __init__(self, ents):
+    def __init__(self, ents, block_attrs=None):
         self.ents = ents
+        self.block_attrs = block_attrs or {}   # id(ent) -> [(text, box, attr_ent)]
+        self.nested = {}                       # id(ent) -> [(text, box)]
 
     def iter_entities(self, space):
         return list(self.ents)
@@ -215,6 +217,10 @@ class _FakeSession:
     def table_cell_texts(self, e): return []
     def set_text(self, e, t): e.TextString = t
     def drain_plot_warnings(self): return []
+    def collect_block_attributes(self, e):
+        return list(self.block_attrs.get(id(e), []))
+    def collect_block_nested_texts(self, e):
+        return list(self.nested.get(id(e), []))
 
 
 def _x398_titleblock_ents():
@@ -429,6 +435,123 @@ def test_f09_protected_field_replace():
     check("F-09 施工图替换为竣工图", v.TextString == "竣工图", repr(v.TextString))
 
 
+def test_n04_project_name_not_deleted():
+    """N-04：工程名称类值（长文本含项目/锂矿）不被"设计证书编号"删除关联误删。"""
+    print("[N-04] 工程名称值保护（删除关联右侧 gap 收紧 + 内容规则双保险）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (270, 20, 415, 55)
+    E = _FakeEnt
+    # 真机几何：设计证书编号标签 (549662.5,9193904.5)，工程名称值在其右侧上方
+    # (549700.0,9193906.8)，dy=2.3 落在旧 row_tol 内、gap≈30 超过收紧阈值。
+    ents = [
+        E("证书标签", "设计证书编号", (272, 42, 280, 48)),
+        E("工程值", "刚果（金）Manono锂矿5Mt/年采选冶项目", (310, 48, 395, 52)),
+        E("人名", "李安武", (284, 30, 300, 36)),
+        E("人名标签", "设计", (272, 28, 280, 34)),
+    ]
+    sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="real_rect")
+    emap = {e.Name: e for e in sess.ents}
+    check("N-04 工程名称值未被删除", not emap["工程值"].deleted, "")
+    check("N-04 人名仍被删除", emap["人名"].deleted, "")
+    # 函数级：工程名称识别 / 公司名不误判为工程名
+    check("N-04 is_project_name_like 识别工程值",
+          rules._is_project_name_like("刚果（金）Manono锂矿5Mt/年采选冶项目", CFG), "")
+    check("N-04 公司名不误判为工程名",
+          not rules._is_project_name_like("紫金(厦门)工程设计有限公司", CFG), "")
+    check("N-04 短文本/坐标不误判",
+          not rules._is_project_name_like("Y549625", CFG)
+          and not rules._is_project_name_like("李安武", CFG), "")
+    # delete 模式右侧 gap 收紧：人名（gap 小）关联，工程名（gap 大）不关联
+    tg = [
+        {"key": 0, "norm": "设计证书编号", "minx": 272, "miny": 42, "maxx": 280, "maxy": 48},
+        {"key": 1, "norm": "刚果（金）Manono锂矿5Mt/年采选冶项目", "minx": 310, "miny": 48, "maxx": 395, "maxy": 52},
+        {"key": 2, "norm": "李安武", "minx": 284, "miny": 30, "maxx": 300, "maxy": 36},
+    ]
+    fl, pl, dl, cl = core._titleblock_label_sets(CFG)
+    got = titleblock.associate_label_values(
+        tg, dl | cl, fl, frame, mode="delete",
+        right_max_gap=max(frame.height * 0.05, 8.0))
+    check("N-04 delete 关联不再命中工程名称值", 1 not in got, str(got))
+    check("N-04 字段标签文字保留（子项名称）",
+          rules.judge_whitelist_text("子项名称", CFG)[0] == "keep", "")
+
+
+def test_n01_block_attributes_collected():
+    """N-01：块属性文字（公司名/证书号）被收集并删除。"""
+    print("[N-01] 块属性文字收集删除 + 嵌套文字判定提示")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (270, 20, 415, 55)
+    E = _FakeEnt
+    blk = E("标题栏块", "", (300, 20, 410, 55), oname="AcDbBlockReference")
+    attr_co = E("attr公司", "紫金(厦门)工程设计有限公司", (310, 42, 370, 48),
+                oname="AcDbAttribute")
+    attr_cert = E("attr证书", "A135036965", (310, 34, 360, 40), oname="AcDbAttribute")
+    attrs = [(attr_co.TextString, attr_co._box, attr_co),
+             (attr_cert.TextString, attr_cert._box, attr_cert)]
+    sess = _FakeSession([blk], block_attrs={id(blk): attrs})
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="real_rect")
+    check("N-01 块属性公司名被删除", attr_co.deleted, "")
+    check("N-01 块属性证书号被删除", attr_cert.deleted, "")
+    # 嵌套文字：命中删除只提示不删（块定义保护）
+    blk2 = E("块2", "", (300, 20, 410, 55), oname="AcDbBlockReference")
+    sess2 = _FakeSession([blk2], block_attrs={id(blk2): []})
+    sess2.nested[id(blk2)] = [("陈伟晖", (310, 42, 330, 48))]
+    _d, _r, notes = core._clean_titleblock(
+        sess2, "doc", "model", region, frame, CFG, lambda m: None, mode="real_rect")
+    check("N-01 嵌套人名不直接删除（防破坏块定义）", not blk2.deleted, "")
+    check("N-01 嵌套文字给出提示", any("嵌套文字" in n for n in notes), str(notes))
+
+
+def test_n02_region_signature_expand():
+    """N-02：文字簇反推区域按签署列扩展，盖住全部人名列。"""
+    print("[N-02] 签署列区域扩展（漏删人名补回）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    # 反推区域上界恰切在人名列中间（真机图3：代必虎在区域外）
+    region = (300, 20, 410, 48)
+    boxes = [
+        {"norm": "设计", "minx": 300, "miny": 40, "maxx": 306, "maxy": 44},
+        {"norm": "审核", "minx": 300, "miny": 35, "maxx": 306, "maxy": 39},
+        {"norm": "审定", "minx": 300, "miny": 30, "maxx": 306, "maxy": 34},
+        {"norm": "制图", "minx": 300, "miny": 25, "maxx": 306, "maxy": 29},
+        {"norm": "李安武", "minx": 310, "miny": 40, "maxx": 320, "maxy": 44},
+        {"norm": "代必虎", "minx": 310, "miny": 30, "maxx": 320, "maxy": 34},
+    ]
+    fl, pl, dl, cl = core._titleblock_label_sets(CFG)
+    exp = titleblock.expand_region_for_signature_rows(region, boxes, frame, pl, CFG)
+    check("N-02 区域下界扩展到签署列底（盖住制图行 25）", exp[1] <= 25.0, str(exp))
+    # 扩展后的区域应覆盖此前漏掉的"代必虎"行
+    check("N-02 区域覆盖值列全部行（含代必虎 34）", exp[3] >= 44.0 and exp[1] <= 29.0, str(exp))
+
+
+def test_n05_top_band_signature_clean():
+    """N-05：目录页（top_band）底部签署栏全图框关联删除。"""
+    print("[N-05] 目录页签署栏删除（top_band 全图框关联）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    # top_band 只覆盖顶部条带，签署栏在底部（区域外）
+    region = (0, 250, 420, 297)
+    E = _FakeEnt
+    ents = [
+        E("顶部公司", "紫金(厦门)工程设计有限公司", (30, 260, 80, 265)),
+        E("负责人标签", "项目负责人", (40, 20, 70, 26)),
+        E("负责人", "陈彪文", (72, 20, 90, 26)),
+        E("校核标签", "校核", (40, 12, 56, 18)),
+        E("校核人", "林子程", (58, 12, 76, 18)),
+        E("目录图名", "粗碎车间布置图", (120, 30, 200, 36)),
+        E("目录图号", "X398·301Z-02", (60, 30, 110, 36)),
+    ]
+    sess = _FakeSession([_FakeEnt(e.Name, e.TextString, e._box) for e in ents])
+    core._clean_titleblock(sess, "doc", "model", region, frame, CFG, lambda m: None,
+                           mode="top_band")
+    emap = {e.Name: e for e in sess.ents}
+    check("N-05 项目负责人值删除", emap["负责人"].deleted, "")
+    check("N-05 校核值删除", emap["校核人"].deleted, "")
+    check("N-05 目录图名保留（含保护词）", not emap["目录图名"].deleted, "")
+    check("N-05 目录图号保留", not emap["目录图号"].deleted, "")
+
+
 def main():
     print("=" * 64)
     print("dwg_cleaner 纯逻辑回归测试（无 AutoCAD 依赖）")
@@ -447,6 +570,10 @@ def main():
     test_f07_label_delete_protection()
     test_f08_cert_number_outside_region()
     test_f09_protected_field_replace()
+    test_n04_project_name_not_deleted()
+    test_n01_block_attributes_collected()
+    test_n02_region_signature_expand()
+    test_n05_top_band_signature_clean()
     print("=" * 64)
     print("结果：通过 %d，失败 %d" % (_PASS, _FAIL))
     print("=" * 64)

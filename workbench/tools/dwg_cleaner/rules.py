@@ -41,6 +41,14 @@ def normalize_config(cfg):
     cfg["_person_label_re"] = re.compile(
         r"^(?:%s)(?:[:：\s]{1,3}[\S]{1,12})?$" % "|".join(re.escape(x) for x in labels)
     )
+    # N-04：标题栏保护字段标签文字本身（"子项名称"等）在白名单模式下也保留，
+    # 避免"标签被删、值被留"的残缺标题栏。精确匹配（可带冒号/尾随空白）。
+    _fl = [x for x in (cfg.setdefault("titleblock", {}).get("field_labels") or []) if x]
+    _fl = sorted(set(_fl), key=len, reverse=True)
+    cfg["_field_label_re"] = (
+        re.compile(r"^(?:%s)(?:[:：\s]{0,2})?$" % "|".join(re.escape(x) for x in _fl))
+        if _fl else None
+    )
     cfg["_date_re"] = [re.compile(p) for p in dk.get("date_patterns", [])]
     cfg.setdefault("titleblock", {})
     cfg.setdefault("frame_detect", {})
@@ -129,6 +137,48 @@ def _is_protected(t, cfg):
     """是否命中保护词。C2：空白归一化；F-03：先剥 MText 格式码。"""
     nt = _norm_spaces(strip_mtext_codes(t))
     return any(_norm_spaces(k) in nt for k in cfg["protect_keywords"])
+
+
+# N-04：工程名称类**值**（纯值不含保护词，但明显是工程/项目描述的长文本）。
+# 真机：图2 标题栏「刚果（金）Manono锂矿5Mt/年采选冶项目」是"工程名称"的值，
+# 但标题栏内无"工程名称"标签可关联（标签缺失），被"设计证书编号"标签的删除
+# 关联当右侧值误删。判定：可见文本长度≥6 且含工程特征词（项目/工程/锂矿/采选/
+# 冶炼/矿山/Manono 等）。坐标/图号/人名/标签短词均不命中。
+_PROJECT_NAME_WORDS = ("项目", "工程", "锂矿", "采选", "选冶", "冶炼", "选矿",
+                       "矿山", "矿厂", "Manono", "manono", "生产线", "厂房")
+
+
+def _is_project_name_like(t, cfg):
+    """N-04：是否为工程名称类长文本值（须保护，不得被删除关联/白名单误删）。
+
+    排除：坐标标注、设计院/公司名（"紫金(厦门)工程设计有限公司"含"工程"但属
+    institution，必须删除优先）。
+    """
+    s = strip_mtext_codes(t or "").strip()
+    if len(s) < 6:
+        return False
+    if _is_axis_coordinate(s):
+        return False
+    if _is_institution(s, cfg):
+        return False
+    if any(k in s for k in _PROJECT_NAME_WORDS):
+        return True
+    return False
+
+
+def _is_field_label(t, cfg):
+    """N-04：是否命中标题栏保护字段**标签**文字（工程名称/子项名称/图号…）。
+
+    白名单模式下标签文字本身也保留（竣工图标题栏字段标签不缺失）；值由 C1
+    几何关联保护。精确匹配（可带冒号/尾随空白），避免把"值"当标签。
+    """
+    t = strip_mtext_codes(t or "").strip()
+    if not t:
+        return False
+    re_ = cfg.get("_field_label_re")
+    if not re_:
+        return False
+    return bool(re_.match(t))
 
 
 # 坐标网格轴标注：X/Y 后紧跟 3 位以上数字（如 X9193900、Y549350、x:12345），
@@ -232,6 +282,14 @@ def judge_whitelist_text(text, cfg):
     # C3：坐标网格/测量数值即使落入标题栏区域也保留（防区域外扩误删坐标）
     if _is_axis_coordinate(t):
         return "keep", "axis_coordinate", None
+    # N-04：标题栏保护字段标签文字本身（工程名称/子项名称/图号…）保留，
+    # 避免"子项名称"这类标签被白名单整删、只剩值（残缺标题栏）。
+    if _is_field_label(t, cfg):
+        return "keep", "field_label", None
+    # N-04：工程名称类**值**（长文本含项目/工程/锂矿等特征词）保留。
+    # 真机图2 标题栏无"工程名称"标签可关联，此值只能靠内容规则保护。
+    if _is_project_name_like(t, cfg):
+        return "keep", "project_name", None
     # F-08：资质/设计证书编号（A135036965）即使在区域外被证书扩展捞到也删
     if is_cert_number(t):
         return "delete", "cert_number", None

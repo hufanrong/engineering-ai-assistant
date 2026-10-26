@@ -11,9 +11,55 @@
 - AcDbPolyline        : 轻量多段线（含 RECTANG 生成的图框）
 - AcDbLine            : 直线
 - AcDbProxyEntity     : 代理实体（天正等第三方对象）
+
+P-09（2026-10-26）：AutoCAD 忙（模态/重生成）时拒绝 COM 调用
+com_error(-2147418111, RPC_E_CALL_REJECTED)；统一封装 _retry_com 忙等待重试。
+P-11（2026-10-26）：会话用 DispatchEx 独立实例（不复用用户手开/僵尸实例），
+退出时 Quit 后轮询进程真正退出（≤10s），未退出按 HWND→PID 强制结束。
 """
 
 import re
+
+# P-09：RPC_E_CALL_REJECTED（AutoCAD 忙时拒绝 COM 调用）
+_COM_REJECTED_HRESULT = -2147418111
+# P-09：忙等待重试默认参数（40 次 × 0.25s = 10s，覆盖重生成/模态窗口）
+_COM_RETRY_TRIES = 40
+_COM_RETRY_WAIT = 0.25
+
+
+def _is_com_rejected(e):
+    """是否为"呼叫被拒绝"（AutoCAD 忙）类 COM 错误。"""
+    hres = getattr(e, "hresult", None)
+    if hres == _COM_REJECTED_HRESULT:
+        return True
+    s = str(e)
+    return any(k in s for k in ("被呼叫方拒绝接收呼叫", "呼叫被拒绝", "RPC_E_CALL_REJECTED",
+                                "0x80010001"))
+
+
+def sys_platform_startswith_win():
+    """是否 Windows（P-11 进程管理用；避免顶层 import sys 干扰模块语义）。"""
+    import sys
+    return sys.platform.startswith("win")
+
+
+def _retry_com(fn, tries=_COM_RETRY_TRIES, wait=_COM_RETRY_WAIT):
+    """P-09：调用 fn()，遇"呼叫被拒绝"忙等待重试；其它异常立即上抛。
+
+    用于 AutoCAD 忙（模态/重生成）时被拒的 COM 调用：iter_entities（Count/Item）、
+    SaveAs 等高频/关键调用点。返回 fn() 结果；重试耗尽抛出最后一次异常。
+    """
+    import time
+    last = None
+    for _ in range(tries):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if not _is_com_rejected(e):
+                raise
+            time.sleep(wait)
+    raise last
 
 # SaveAs 格式枚举（AutoCAD 2018 DWG = 64；低版本 AutoCAD 无法保存高版本格式）
 AC_2018_DWG = 64   # R2018+
@@ -80,19 +126,32 @@ class CadSession:
         import time
         pythoncom.CoInitialize()
         self._com_initialized = True
-        # 2026-10-25 实测（Bug9）：AutoCAD 冷启动期任意 COM 调用可能被拒
-        # （-2147418111 被呼叫方拒绝接收呼叫），会话启动加就绪重试（5秒×6次）。
+        # P-11（2026-10-26）：DispatchEx 启动**独立实例**——不复用用户手开的 AutoCAD，
+        # 也绝不复用崩溃遗留的半死实例（其 Documents.Open 代理失效 <unknown>.Open，
+        # 会导致后续所有运行全部失败）。
         app = None
         last_err = None
         for _ in range(6):
             try:
-                app = win32com.client.Dispatch("AutoCAD.Application")
+                app = win32com.client.DispatchEx("AutoCAD.Application")
                 break
             except Exception as e:  # noqa: BLE001
                 last_err = e
                 time.sleep(5)
         if app is None:
-            raise CadError("无法启动 AutoCAD（冷启动连接被拒，重试6次仍失败）：%s" % last_err)
+            raise CadError("无法启动独立 AutoCAD 实例（DispatchEx 冷启动被拒，重试6次仍失败）：%s"
+                           % last_err)
+        # P-11：就绪探测——冷启动期 COM 动态绑定短暂失效，实际访问一次才算就绪
+        ready = False
+        for _ in range(12):
+            try:
+                _ = app.Documents.Count
+                ready = True
+                break
+            except Exception:  # noqa: BLE001
+                time.sleep(2)
+        if not ready:
+            raise CadError("独立 AutoCAD 实例未就绪（COM 绑定失稳，重试12次仍失败）")
         self.app = app
         # 版本容错：真实版本串可能是 "23.1s (LMS Tech)"，只取数字头
         try:
@@ -122,6 +181,9 @@ class CadSession:
                     self.app.Quit()
             except Exception:
                 pass
+            # P-11：Quit 不等于进程退出——轮询进程是否真正消失（≤10s），
+            # 未退出按 HWND→PID 强制结束，避免残留半死实例污染下次运行。
+            self._ensure_process_exit()
             self.app = None
             if self._com_initialized:
                 try:
@@ -130,6 +192,56 @@ class CadSession:
                 except Exception:
                     pass
         return False
+
+    def _ensure_process_exit(self, timeout=10.0):
+        """P-11：Quit 后轮询 AutoCAD 进程真正退出；未退出则 taskkill 强制结束。"""
+        import time
+        pid = self._app_pid()
+        if pid is None:
+            return
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not self._pid_alive(pid):
+                return
+            time.sleep(0.5)
+        # 超时仍存活 → 强制结束（Windows taskkill /F /T；Linux kill -9）
+        try:
+            import subprocess
+            if sys_platform_startswith_win():
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                               capture_output=True, timeout=15)
+            else:
+                subprocess.run(["kill", "-9", str(pid)], capture_output=True, timeout=10)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _app_pid(self):
+        """按 app.HWND 定位 AutoCAD 进程 PID（Windows）；失败返回 None。"""
+        if not sys_platform_startswith_win():
+            return None
+        try:
+            import win32gui
+            hwnd = int(self.app.HWND)
+            _tid, pid = win32gui.GetWindowThreadProcessId(hwnd)
+            return int(pid)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _pid_alive(self, pid):
+        """进程是否存活（Windows tasklist 精确匹配；Linux os.kill 探测）。"""
+        try:
+            if sys_platform_startswith_win():
+                import subprocess
+                out = subprocess.run(
+                    ["tasklist", "/FI", "PID eq %d" % pid],
+                    capture_output=True, text=True, encoding="gbk", errors="replace",
+                    timeout=15).stdout
+                return str(pid) in (out or "")
+            import os
+            os.kill(pid, 0)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     # ---------- 文档 ----------
 
@@ -235,10 +347,11 @@ class CadSession:
             os_remove(path)
         fmt = saveas_format_for_release(self.release, dxf=dxf)
         try:
-            doc.SaveAs(path, fmt)
+            # P-09：SaveAs 是 AutoCAD 重生成时最容易被拒的调用，忙等待重试
+            _retry_com(lambda: doc.SaveAs(path, fmt))
         except Exception:
             try:
-                doc.SaveAs(path)
+                _retry_com(lambda: doc.SaveAs(path))
             except Exception:
                 pass
         # F-04：AutoCAD 偶发按保存格式自动追加扩展名（.dwg 路径 + DXF 格式 → .dwg.dxf），
@@ -257,10 +370,17 @@ class CadSession:
     # ---------- 实体遍历 ----------
 
     def iter_entities(self, space):
-        """安全遍历实体集合（允许在收集完成后统一删除）。"""
+        """安全遍历实体集合（允许在收集完成后统一删除）。
+
+        P-09：Count/Item 在 AutoCAD 重生成/模态时可能被拒（RPC_E_CALL_REJECTED），
+        统一忙等待重试，避免遍历中途整单崩溃。
+        """
         i = 0
-        while i < space.Count:
-            yield space.Item(i)
+        while True:
+            count = _retry_com(lambda: space.Count)
+            if i >= count:
+                break
+            yield _retry_com(lambda: space.Item(i))
             i += 1
 
     # ---------- 布局空间（v0.1.156：图纸在 Layout 出图的情况） ----------
@@ -477,6 +597,94 @@ class CadSession:
             return list(arr)
         except Exception:
             return []
+
+    def collect_block_attributes(self, ent):
+        """N-01：读取块引用（AcDbBlockReference）的**属性文字**。
+
+        标题栏块里"公司名/证书号/人名"常是块属性（AcDbAttribute），iter_entities
+        收集不到顶层文字、炸开又失败时残留。属性实体由 GetAttributes() 返回，
+        位置为**世界坐标**、可单独 Delete（不影响块定义）。
+
+        返回 [(text, (minx,miny,maxx,maxy), attr_ent), ...]；失败返回 []。
+        """
+        out = []
+        try:
+            attrs = ent.GetAttributes()
+        except Exception:
+            return out
+        for a in (attrs or []):
+            try:
+                if str(a.ObjectName) != "AcDbAttribute":
+                    continue
+                t = str(a.TextString or "")
+                if not t:
+                    continue
+                b = self.get_bounds(a)
+                if not b:
+                    continue
+                out.append((t, b, a))
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    def collect_block_nested_texts(self, ent):
+        """N-01：读取块引用内的**嵌套文字**（块定义中的 TEXT/MTEXT，非属性）。
+
+        嵌套文字实体属于块定义，直接 Delete 会破坏块定义（影响所有引用该块的
+        实例），因此只用于**判定与提示**（调用方记 notes，提示人工在 AutoCAD
+        炸开块后重试）。位置按块变换（插入点 + 旋转 + 缩放）换算到世界坐标。
+
+        返回 [(text, (minx,miny,maxx,maxy)), ...]；失败返回 []。
+        """
+        import math
+        try:
+            name = str(ent.Name or "")
+            if not name:
+                return []
+            blk = self._doc.Blocks.Item(name)
+        except Exception:
+            return []
+        try:
+            ip = tuple(ent.InsertionPoint)
+        except Exception:
+            return []
+        rot = 0.0
+        try:
+            rot = float(ent.Rotation)
+        except Exception:
+            pass
+        sx = sy = 1.0
+        try:
+            sx = float(ent.XScaleFactor)
+        except Exception:
+            pass
+        try:
+            sy = float(ent.YScaleFactor)
+        except Exception:
+            pass
+        cos, sin = math.cos(rot), math.sin(rot)
+
+        def _wpt(x, y):
+            x2, y2 = x * sx, y * sy
+            return (ip[0] + x2 * cos - y2 * sin, ip[1] + x2 * sin + y2 * cos)
+
+        out = []
+        for sub in blk:
+            try:
+                if str(sub.ObjectName) not in self.TEXT_NAMES:
+                    continue
+                t = str(sub.TextString or "")
+                if not t:
+                    continue
+                mn, mx = sub.GetBoundingBox()
+                pts = [_wpt(mn[0], mn[1]), _wpt(mx[0], mn[1]),
+                       _wpt(mx[0], mx[1]), _wpt(mn[0], mx[1])]
+                box = (min(p[0] for p in pts), min(p[1] for p in pts),
+                       max(p[0] for p in pts), max(p[1] for p in pts))
+                out.append((t, box))
+            except Exception:  # noqa: BLE001
+                continue
+        return out
 
     def convert_to_autocad_type(self, ent):
         """把代理/自定义实体（天正 TArch 等）转换为 AutoCAD 基础实体（原地转换）。

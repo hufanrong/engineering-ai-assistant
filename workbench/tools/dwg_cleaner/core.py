@@ -168,7 +168,12 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
 
             # 另存清稿副本（F-04：save_as 返回规整后的真实路径，纠正双扩展名）
             cleaned_path = session.save_as(doc, cleaned_path) or cleaned_path
-            doc.Close(False)
+            # P-10（2026-10-26）：收尾 Close 失败（COM 失稳抛 AttributeError: <unknown>.Close）
+            # 不得把整单判 failed——产物（清稿 DWG/PDF）已生成，只记备注。
+            try:
+                doc.Close(False)
+            except Exception as e:
+                notes.append("提示：收尾关闭文档失败（%s），产物已生成，不影响结果" % e)
             session._doc = None
             log("已保存清稿：%s_清稿.%s" % (base, ext_out))
 
@@ -409,6 +414,14 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
         frame, text_boxes, seed_lab, field_lab, cfg)
     if infer:
         region, strong, seeds = infer
+        # N-02（2026-10-26 真机 P1）：文字簇反推区域边界偏小时，签署标签列
+        # （设计/审核/审定/检图/制图…）的人名行会被切掉一半漏删（图3 漏代必虎/
+        # 李安武）。按签署列把区域向上下扩展到该列完整行范围。
+        exp_region = titleblock.expand_region_for_signature_rows(
+            region, text_boxes, frame, person_lab, cfg)
+        if exp_region != region:
+            log("签署列扩展区域（N-02）：%s -> %s" % (_norm_region(region), _norm_region(exp_region)))
+            region = exp_region
         notes.append("已由标题栏文字簇反推锁定真实区域（命中 %d 个字段标签），"
                      "按白名单模式清理" % strong)
         log("标题栏真实边界（白名单模式，文字簇反推，强标签%d/标签%d）：%s"
@@ -651,6 +664,7 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
     - R3：删除/替换统一用 CleanOp 强类型，杜绝裸元组解包
     """
     deleted, replaced, notes = [], [], []
+    nested_del = []   # N-01：块内嵌套文字命中删除（仅提示，不破坏块定义）
     tb = cfg.get("titleblock", {})
     # 只有真实小矩形才启用白名单整删；条带/页眉强制黑名单（C3/R5）
     use_whitelist = bool(tb.get("whitelist_mode", True)) if mode == "real_rect" else False
@@ -730,6 +744,35 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
             continue
         if txt is not None:
             text_targets.append((ent, txt, p, box))
+        # N-01（2026-10-26 真机 P1）：标题栏是块参照时，公司名/证书号/人名常是
+        # 块**属性**（AcDbAttribute），iter_entities 收集不到顶层文字、炸开又失败，
+        # 导致"紫金(厦门)工程设计有限公司""A135036965"残留。读取块属性文字并入
+        # 收集（属性实体是世界坐标、可单独 Delete，不影响块定义）。
+        if ent.ObjectName == "AcDbBlockReference":
+            for itxt, ibox, ient in session.collect_block_attributes(ent):
+                ipos = ((ibox[0] + ibox[2]) / 2.0, (ibox[1] + ibox[3]) / 2.0)
+                if not in_reg(ipos[0], ipos[1]):
+                    continue
+                frame_all_texts.append((ient, itxt, ipos, ibox))
+                text_targets.append((ient, itxt, ipos, ibox))
+                log("N-01 收集块属性文字 %r (%.1f,%.1f)" % (itxt, ipos[0], ipos[1]))
+            # N-01：块内**嵌套文字**（块定义中的 TEXT/MTEXT）只判定提示——
+            # 直接删除会破坏块定义，须人工在 AutoCAD 炸开块后重试。
+            try:
+                for ntxt, nbox in session.collect_block_nested_texts(ent):
+                    nx = (nbox[0] + nbox[2]) / 2.0
+                    ny = (nbox[1] + nbox[3]) / 2.0
+                    if not in_reg(nx, ny):
+                        continue
+                    if rules._is_protected(ntxt, cfg) or rules._is_axis_coordinate(ntxt):
+                        continue
+                    _a, _r, _n = (rules.judge_whitelist_text(ntxt, cfg) if use_whitelist
+                                  else rules.judge_text(ntxt, cfg))
+                    if _a == "delete":
+                        nested_del.append((ntxt, nbox))
+                        log("N-01 嵌套文字命中删除（仅提示，不删块定义）%r" % ntxt)
+            except Exception as e:  # noqa: BLE001
+                log("N-01 嵌套文字收集异常：%s" % e)
 
     # 2.5) C1 标签→值【保护】 + F-01/F-02 标签→值【删除】
     # norm 同时剥 MText 格式码（F-03），使 {\T1.5;李安武} 这类值也能被几何关联。
@@ -746,11 +789,16 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
     # 删除：人名/日期/证书标签右侧/下方紧邻的值（人名/日期/证书号）→ 删除；
     # 遇字段标签即止；并剔除受保护值（保护优先，C1 优先级最高）。
     # 白名单模式下这些裸值本就会被规则删除，此处主要是黑名单模式的双保险（F-01/F-02）。
+    # N-04：delete 模式右侧跨距收紧（max(fh*0.05, 8.0)）——人名/日期/证书号紧贴标签，
+    # 工程名称值距删除标签可达数十单位（真机"设计证书编号"标签误关联删掉工程名称）。
+    _delete_gap = max(frame.height * 0.05, 8.0)
     delete_idx = titleblock.associate_label_values(
-        assoc_targets, delete_lab, field_lab, frame, mode="delete") - protected_idx
+        assoc_targets, delete_lab, field_lab, frame, mode="delete",
+        right_max_gap=_delete_gap) - protected_idx
     # F-07（2026-10-26 真机 P0）：保护优先是绝对原则。标签关联删除只减了 C1 几何保护集，
     # 未排除"含保护词文本"（图名 '粗碎车间\\P平面布置图' 含"车间"）与 C3 坐标标注（Y549625），
     # 导致它们几何上落在签署标签邻域时被误删。这里逐项过滤，凡含保护词/坐标一律不删。
+    # N-04：工程名称类长文本值（项目/工程/锂矿…）同样绝对不删。
     _safe_delete = set()
     for i in delete_idx:
         raw_txt = text_targets[i][1]
@@ -758,6 +806,8 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
             log("F-07 保护优先，跳过标签关联删除（含保护词）%r" % raw_txt)
         elif rules._is_axis_coordinate(raw_txt):
             log("F-07 保护优先，跳过标签关联删除（坐标标注）%r" % raw_txt)
+        elif rules._is_project_name_like(raw_txt, cfg):
+            log("N-04 保护优先，跳过标签关联删除（工程名称类值）%r" % raw_txt)
         else:
             _safe_delete.add(i)
     delete_idx = _safe_delete
@@ -827,14 +877,40 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
     for i, (ent, txt, pos, _box) in enumerate(frame_all_texts):
         if i not in cert_del_idx or id(ent) in _handled_ent_ids:
             continue
-        # 双保险：保护词/坐标绝不删
-        if rules._is_protected(txt, cfg) or rules._is_axis_coordinate(txt):
-            log("F-08 证书扩展跳过（保护/坐标）%r" % txt)
+        # 双保险：保护词/坐标/工程名称类值绝不删
+        if rules._is_protected(txt, cfg) or rules._is_axis_coordinate(txt) \
+                or rules._is_project_name_like(txt, cfg):
+            log("F-08 证书扩展跳过（保护/坐标/工程名）%r" % txt)
             continue
         ops.append(CleanOp(ent, "delete",
                            "%r [%s] (%.1f,%.1f)" % (
                                txt, "cert_number_extension", pos[0], pos[1])))
         log("删除（证书编号扩展·区域外）%r" % txt)
+
+    # N-05（2026-10-26 真机 P2）：目录页（top_band）底部签署栏"项目负责人 陈彪文 /
+    # 校核 林子程 / 制表 李安武"不在顶部页眉条带内，漏删。用**全图框**文字做删除
+    # 关联：签署标签（项目负责人/校核/制表…，已在 person_labels）右侧紧邻的人名删除；
+    # 目录条目（图号/图名）由 F-07 保护词与 N-04 工程名称规则兜底，不误删。
+    if mode == "top_band":
+        frame_assoc = [{
+            "key": i,
+            "norm": rules._norm_spaces(rules.strip_mtext_codes(txt)),
+            "minx": box[0], "miny": box[1], "maxx": box[2], "maxy": box[3],
+        } for i, (_e, txt, _p, box) in enumerate(frame_all_texts)]
+        _sig_gap = max(frame.height * 0.05, 8.0)
+        frame_del = titleblock.associate_label_values(
+            frame_assoc, delete_lab, field_lab, frame, mode="delete",
+            right_max_gap=_sig_gap) - protected_idx
+        for i in frame_del:
+            raw_txt = frame_all_texts[i][1]
+            if rules._is_protected(raw_txt, cfg) or rules._is_axis_coordinate(raw_txt) \
+                    or rules._is_project_name_like(raw_txt, cfg):
+                continue
+            ent2, txt2, pos2, _b2 = frame_all_texts[i]
+            ops.append(CleanOp(ent2, "delete",
+                               "%r [%s] (%.1f,%.1f)" % (
+                                   txt2, "signature_band", pos2[0], pos2[1])))
+            log("删除（目录签署栏·全框关联）%r" % txt2)
 
     # 4) 执行：先解锁涉及的锁定图层，操作后恢复
     locked_layers = {}
@@ -867,6 +943,13 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         for layer, was in locked_layers.items():
             if was:
                 session.set_layer_lock(doc, layer, True)
+
+    # N-01：嵌套文字命中删除的汇总提示（不删块定义，人工在 AutoCAD 炸开块后重试）
+    if nested_del:
+        uniq = sorted(set(t for t, _b in nested_del))
+        notes.append("警告：标题栏块内存在需清理但未直接删除的嵌套文字 %d 条（%s）。"
+                     "请在 AutoCAD 中炸开标题栏块后重试清稿，或人工删除"
+                     % (len(uniq), "、".join(uniq[:8])))
 
     return deleted, replaced, notes
 

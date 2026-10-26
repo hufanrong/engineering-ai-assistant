@@ -380,6 +380,80 @@ def infer_titleblock_region_from_texts(frame, text_boxes, seed_labels, strong_la
     return region, best[0][0], best[0][1]
 
 
+def expand_region_for_signature_rows(region, text_boxes, frame, sign_labels, cfg=None):
+    """N-02：签署列扩展——文字簇反推区域边界偏小时，扩展到签署标签所在列的完整行范围。
+
+    真机：图3 模板标题栏区域上界切在人名列中间行，"代必虎/李安武"漏删（同行
+    其它人已删）。标题栏"设计/审核/审定/检图/制图"标签纵向同列、其值（人名）在
+    右邻列：把区域内签署标签按 x 聚类成列，取全图框内与该列水平重叠的全部文字
+    的 y 范围，仅**向外扩展** region 的 miny/maxy（不收缩），并夹取到图框内。
+
+    参数
+    ----
+    region      : (minx, miny, maxx, maxy)
+    text_boxes  : list[dict]，同 infer_titleblock_region_from_texts（norm/minx/miny/maxx/maxy）
+    frame       : Frame
+    sign_labels : set[str]，签署标签（设计/审核/审定/检图/制图/校核/制表…，已归一化）
+    返回扩展后的 (minx, miny, maxx, maxy)；无签署标签时原样返回。
+    """
+    if region is None or not text_boxes or not sign_labels:
+        return region
+    fw, fh = frame.width, frame.height
+    if fw <= 0 or fh <= 0:
+        return region
+    cfg = cfg or {}
+    tb = cfg.get("titleblock", {})
+    col_tol = fw * float(tb.get("infer_gap_x_ratio", 0.02)) or fw * 0.02
+
+    def _is_sign(norm):
+        if not norm:
+            return False
+        for lab in sign_labels:
+            if lab and (norm == lab or norm.rstrip("：:") == lab
+                        or norm.startswith(lab) and len(norm) <= len(lab) + 2):
+                return True
+        return False
+
+    rminx, rminy, rmaxx, rmaxy = region
+    signs = []
+    for t in text_boxes:
+        cx = (t["minx"] + t["maxx"]) / 2.0
+        cy = (t["miny"] + t["maxy"]) / 2.0
+        if (rminx - 1e-6 <= cx <= rmaxx + 1e-6
+                and rminy - 1e-6 <= cy <= rmaxy + 1e-6
+                and _is_sign(t["norm"])):
+            signs.append(t)
+    if not signs:
+        return region
+    # 标签按 x 聚类成列
+    cols = []
+    for s in sorted(signs, key=lambda t: (t["minx"] + t["maxx"]) / 2.0):
+        scx = (s["minx"] + s["maxx"]) / 2.0
+        placed = False
+        for c in cols:
+            if abs((c[0] + c[1]) / 2.0 - scx) <= col_tol:
+                c[0] = min(c[0], s["minx"])
+                c[1] = max(c[1], s["maxx"])
+                placed = True
+                break
+        if not placed:
+            cols.append([s["minx"], s["maxx"]])
+    # 每列（标签列+右邻值列）内的全部文字 y 范围 → 仅扩展不收缩
+    new_miny, new_maxy = rminy, rmaxy
+    for lo, hi in cols:
+        members = [t for t in text_boxes
+                   if t["maxx"] >= lo - col_tol and t["minx"] <= hi + col_tol]
+        if not members:
+            continue
+        new_miny = min(new_miny, min(t["miny"] for t in members))
+        new_maxy = max(new_maxy, max(t["maxy"] for t in members))
+    new_miny = max(new_miny, frame.miny - 2)
+    new_maxy = min(new_maxy, frame.maxy + 2)
+    if not (rminx < rmaxx and new_miny < new_maxy):
+        return region
+    return (rminx, new_miny, rmaxx, new_maxy)
+
+
 def in_region(x, y, region):
     return region[0] - 1e-6 <= x <= region[2] + 1e-6 and region[1] - 1e-6 <= y <= region[3] + 1e-6
 
@@ -394,7 +468,8 @@ DEFAULT_FIELD_LABELS = (
 )
 
 
-def associate_label_values(targets, field_labels, block_labels, frame, mode="protect"):
+def associate_label_values(targets, field_labels, block_labels, frame, mode="protect",
+                           right_max_gap=None):
     """标题栏"标签→值"几何关联（纯逻辑，不依赖 AutoCAD，可单测）。
 
     背景：标题栏中"工程名称"（标签）与"刚果（金）Manono…项目"（值）是两个独立
@@ -408,6 +483,11 @@ def associate_label_values(targets, field_labels, block_labels, frame, mode="pro
                       关联到的值（人名/日期/证书号）标记为"删除"；block_labels 应传
                       保护字段标签，避免误删到相邻字段值。两种模式几何完全相同，
                       区别只在调用方传入的标签集与对结果的处理。
+
+    right_max_gap（N-04，2026-10-26）：
+      右侧关联的最大水平跨距。None=按图幅 fw*0.5（protect 模式工程名较长需要大跨距）；
+      delete 模式应传紧邻值（max(fh*0.05, 8.0)）——人名/日期/证书号都紧贴标签，
+      而工程名称值距删除标签可达数十单位（真机被"设计证书编号"误关联删除）。
 
     参数
     ----
@@ -423,10 +503,11 @@ def associate_label_values(targets, field_labels, block_labels, frame, mode="pro
     ----
     set[key]：与种子标签关联到的值实体 key 集合
     """
-    return associate_values(targets, field_labels, block_labels, frame)
+    return associate_values(targets, field_labels, block_labels, frame,
+                            right_max_gap=right_max_gap)
 
 
-def associate_values(targets, seed_labels, stop_labels, frame):
+def associate_values(targets, seed_labels, stop_labels, frame, right_max_gap=None):
     """通用"标签→值"几何关联（associate_label_values 的实现，protect/delete 共用）。
 
     规则：对每个种子标签，取其**同行右侧紧邻**的值（水平间隙内、遇下一个标签即止），
@@ -458,7 +539,11 @@ def associate_values(targets, seed_labels, stop_labels, frame):
         (labels if _is_seed(t.get("norm")) else others).append(t)
 
     row_tol = max(fh * 0.012, 1.0)          # 同行容差（约一行字高）
-    max_gap_x = fw * 0.5                      # 标签→值水平最大跨距（工程名较长）
+    # N-04：delete 模式右侧跨距收紧（紧邻值才关联）；protect 模式保持大跨距（工程名长）
+    if right_max_gap is None:
+        max_gap_x = fw * 0.5                  # 标签→值水平最大跨距（工程名较长）
+    else:
+        max_gap_x = float(right_max_gap)
     # F-08：0.06→0.10，证书号常在标签正下方、与标签隔一行，0.06 够不到
     below_max_dy = fh * 0.10                  # 下方关联最大垂直距离
     overlap_gap = fw * 0.02                   # 允许标签与值轻微重叠/缝隙
