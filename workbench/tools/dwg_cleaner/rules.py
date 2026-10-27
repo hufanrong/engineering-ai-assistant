@@ -278,6 +278,25 @@ def _is_institution(t, cfg):
     return any(k in s for k in cfg["delete_keywords"].get("institution", []))
 
 
+# N-01（v0.1.165）：标题栏"设计院公司名"正则判定——覆盖"XX工程(设计|建设|咨询|
+# 监理|勘察)有限公司/研究院"等未列入关键词库的全称（真机图2/图3 "紫金(厦门)
+# 工程设计有限公司"）。图纸正文不会出现这类机构全称，用于全图框专项删除。
+_INSTITUTION_RE = re.compile(
+    r"^[\w（）()·．.\-]{2,30}?"
+    r"(工程设计|工程咨询|工程监理|工程建设|工程勘察|勘察设计|规划设计|"
+    r"设计研究院|设计有限|咨询有限|建设有限|监理有限|矿业有限|冶金有限|"
+    r"研究院|设计院)"
+    r"[\w（）()·．.\-]{0,20}?有限公司$")
+
+
+def _is_institution_name(t, cfg):
+    """N-01：是否为机构全称（公司名/设计院名）。用于全图框专项删除。"""
+    s = strip_mtext_codes(t or "").strip()
+    if not s or len(s) < 5:
+        return False
+    return bool(_INSTITUTION_RE.match(s))
+
+
 def _strip_delete_segments(t, cfg):
     """v0.1.156：在**命中保护词**的混合文本里剥离可删段（人名标签段/日期段），
     保留保护段——解决"图号：X301 审核 王五"整块 keep 导致人名漏删的问题。

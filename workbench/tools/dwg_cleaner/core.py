@@ -665,6 +665,7 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
     """
     deleted, replaced, notes = [], [], []
     nested_del = []   # N-01：块内嵌套文字命中删除（仅提示，不破坏块定义）
+    attdef_clear = []  # N-01（v0.1.165）：块内固定属性（ATTDEF）命中删除 → 就地置空
     tb = cfg.get("titleblock", {})
     # 只有真实小矩形才启用白名单整删；条带/页眉强制黑名单（C3/R5）
     use_whitelist = bool(tb.get("whitelist_mode", True)) if mode == "real_rect" else False
@@ -764,9 +765,11 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
                 frame_all_texts.append((ient, itxt, ipos, ibox))
                 text_targets.append((ient, itxt, ipos, ibox))
                 log("N-01 收集块属性文字 %r (%.1f,%.1f)" % (itxt, ipos[0], ipos[1]))
-            # N-01：块内**嵌套文字**（块定义中的 TEXT/MTEXT）只判定提示——
-            # 直接删除会破坏块定义，须人工在 AutoCAD 炸开块后重试。
-            for ntxt, nbox in _blk_nested:
+            # N-01：块内**嵌套文字**（块定义中的 TEXT/MTEXT/ATTDEF）——直接删除
+            # 会破坏块定义。ATTDEF（固定属性，v0.1.165）可**就地置空**（不删实体，
+            # 只改块定义内文字为空；公司名/证书号/人名本就是要清的内容，所有引用
+            # 该块的图框同步脱敏）。普通嵌套文字仍仅提示人工炸开块后重试。
+            for ntxt, nbox, nent, nkind in _blk_nested:
                 nx = (nbox[0] + nbox[2]) / 2.0
                 ny = (nbox[1] + nbox[3]) / 2.0
                 if not in_reg(nx, ny):
@@ -776,7 +779,12 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
                     continue
                 _a, _r, _n = (rules.judge_whitelist_text(ntxt, cfg) if use_whitelist
                               else rules.judge_text(ntxt, cfg))
-                if _a == "delete":
+                if _a != "delete":
+                    continue
+                if nkind == "attdef":
+                    attdef_clear.append((nent, ntxt, (nx, ny), _r))
+                    log("N-01 固定属性置空 %r [%s] (%.1f,%.1f)" % (ntxt, _r, nx, ny))
+                else:
                     nested_del.append((ntxt, nbox))
                     log("N-01 嵌套文字命中删除（仅提示，不删块定义）%r" % ntxt)
 
@@ -895,6 +903,24 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
                                txt, "cert_number_extension", pos[0], pos[1])))
         log("删除（证书编号扩展·区域外）%r" % txt)
 
+    # N-01（v0.1.165 真机 P1 残余）：标题栏"设计院公司名"全框专项删除——
+    # 文字簇反推区域常把标题栏顶部公司名行裁掉（公司名非字段标签、不参与
+    # 文字簇），区域内白名单/关联够不到（图2/图3 "紫金(厦门)工程设计有限公司"
+    # 残留）。全图框定位"XX工程设计/建设…有限公司"类全称删除，图纸正文
+    # 不会出现这类机构全称，误删风险极低。
+    _inst_del = []
+    for i, (ent, txt, pos, _box) in enumerate(frame_all_texts):
+        if id(ent) in _handled_ent_ids:
+            continue
+        if rules._is_institution(txt, cfg) or rules._is_institution_name(txt, cfg):
+            _inst_del.append((ent, txt, pos))
+    for ent, txt, pos in _inst_del:
+        ops.append(CleanOp(ent, "delete",
+                           "%r [%s] (%.1f,%.1f)" % (
+                               txt, "institution_anywhere", pos[0], pos[1])))
+        log("删除（标题栏公司名·全框）%r" % txt)
+    _handled_ent_ids |= {id(e) for e, _t, _p in _inst_del}
+
     # N-05（2026-10-26 真机 P2）：目录页（top_band）底部签署栏"项目负责人 陈彪文 /
     # 校核 林子程 / 制表 李安武"不在顶部页眉条带内，漏删。用**全图框**文字做删除
     # 关联：签署标签（项目负责人/校核/制表…，已在 person_labels）右侧紧邻的人名删除；
@@ -959,6 +985,22 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         notes.append("警告：标题栏块内存在需清理但未直接删除的嵌套文字 %d 条（%s）。"
                      "请在 AutoCAD 中炸开标题栏块后重试清稿，或人工删除"
                      % (len(uniq), "、".join(uniq[:8])))
+
+    # N-01（v0.1.165）：块内固定属性（ATTDEF）命中删除 → 就地置空（不删实体，
+    # 不破坏块定义；公司名/证书号/人名在块定义内置空，所有引用同步脱敏）。
+    if attdef_clear:
+        _ok, _fail = 0, 0
+        for _ent, _txt, _pos, _reason in attdef_clear:
+            try:
+                session.set_text(_ent, "")
+                _ok += 1
+            except Exception as _e:  # noqa: BLE001
+                _fail += 1
+                notes.append("固定属性置空失败 %r: %s" % (_txt, _e))
+        notes.append("标题栏块内固定属性文字已就地置空 %d 条（公司名/证书号/人名，"
+                     "%s）；失败 %d 条请人工核对"
+                     % (_ok, _reason if _ok == 1 else "多类", _fail))
+        deleted.append({"text": "固定属性置空 %d 条" % _ok, "reason": "attdef_clear", "pos": ""})
 
     return deleted, replaced, notes
 

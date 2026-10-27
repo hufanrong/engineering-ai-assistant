@@ -673,7 +673,9 @@ class CadSession:
         炸开块后重试）。位置按块变换（插入点 + 旋转 + 缩放）换算到世界坐标。
 
         v0.1.163：**支持嵌套块递归**（块定义内再嵌 INSERT，标题栏常为二级嵌套）；
-        ObjectName 比较统一规范化。返回 [(text, (minx,miny,maxx,maxy)), ...]；
+        ObjectName 比较统一规范化。返回 [(text, (minx,miny,maxx,maxy), ent, kind), ...]
+        kind ∈ {"text", "attdef"}；attdef=固定属性（ATTDEF，Constant 属性文字：
+        GetAttributes 不返回，需就地置空而非删除）。
         块名/块定义不可读时抛异常（调用方记日志，便于真机定位收集路径失败点）。
         """
         import math
@@ -727,6 +729,22 @@ class CadSession:
                         # 嵌套块递归：子块文字按本块变换叠加子块变换
                         out.extend(_walk_nested(sub, depth + 1))
                         continue
+                    if on == "AcDbAttributeDefinition":
+                        # v0.1.165：固定属性（ATTDEF，Constant）——GetAttributes 不返回，
+                        # 公司名/证书号/部分签署值常以固定属性存在标题栏块内。
+                        t = str(sub.TextString or "")
+                        if not t:
+                            continue
+                        try:
+                            mn, mx = sub.GetBoundingBox()
+                        except Exception:
+                            continue
+                        pts = [_wpt(mn[0], mn[1]), _wpt(mx[0], mn[1]),
+                               _wpt(mx[0], mx[1]), _wpt(mn[0], mx[1])]
+                        box = (min(p[0] for p in pts), min(p[1] for p in pts),
+                               max(p[0] for p in pts), max(p[1] for p in pts))
+                        out.append((t, box, sub, "attdef"))
+                        continue
                     if on not in self.TEXT_NAMES:
                         continue
                     t = str(sub.TextString or "")
@@ -737,7 +755,7 @@ class CadSession:
                            _wpt(mx[0], mx[1]), _wpt(mn[0], mx[1])]
                     box = (min(p[0] for p in pts), min(p[1] for p in pts),
                            max(p[0] for p in pts), max(p[1] for p in pts))
-                    out.append((t, box))
+                    out.append((t, box, sub, "text"))
                 except Exception:  # noqa: BLE001
                     continue
             return out
@@ -783,6 +801,21 @@ class CadSession:
                     if on2 == "AcDbBlockReference":
                         out.extend(_walk_nested(sub2, depth + 1))
                         continue
+                    if on2 == "AcDbAttributeDefinition":
+                        t2 = str(sub2.TextString or "")
+                        if not t2:
+                            continue
+                        try:
+                            mn, mx = sub2.GetBoundingBox()
+                        except Exception:
+                            continue
+                        p1, p2 = _swpt(mn[0], mn[1]), _swpt(mx[0], mx[1])
+                        pts = [_wpt(p1[0], p1[1]), _wpt(p2[0], p1[1]),
+                               _wpt(p2[0], p2[1]), _wpt(p1[0], p2[1])]
+                        box = (min(p[0] for p in pts), min(p[1] for p in pts),
+                               max(p[0] for p in pts), max(p[1] for p in pts))
+                        out.append((t2, box, sub2, "attdef"))
+                        continue
                     if on2 not in self.TEXT_NAMES:
                         continue
                     t2 = str(sub2.TextString or "")
@@ -795,7 +828,7 @@ class CadSession:
                            _wpt(p2[0], p2[1]), _wpt(p1[0], p2[1])]
                     box = (min(p[0] for p in pts), min(p[1] for p in pts),
                            max(p[0] for p in pts), max(p[1] for p in pts))
-                    out.append((t2, box))
+                    out.append((t2, box, sub2, "text"))
                 except Exception:  # noqa: BLE001
                     continue
             return out

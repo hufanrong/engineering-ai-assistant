@@ -656,12 +656,14 @@ def find_cert_numbers(targets, cert_labels, frame):
             vcy = (v["miny"] + v["maxy"]) / 2.0
             dy = lcy - vcy  # 正下方 dy>0
             below = 0 < dy <= fh * 0.13
+            above = -fh * 0.13 <= dy < 0  # N-01（v0.1.165）：证书号在标签**上方**
+            # （标题栏顶部公司名区，文字簇反推区域常裁掉），同样几何严格匹配
             left_ok = abs(v["minx"] - lab["minx"]) <= fw * 0.03
             proj_ok = (v["minx"] <= lab["maxx"] + fw * 0.02
                        and v["maxx"] >= lab["minx"] - fw * 0.02)
             gap = v["minx"] - lab["maxx"]
             right = 0 <= gap <= fw * 0.35 and abs(vcy - lcy) <= max(fh * 0.012, 1.0)
-            if (below and (left_ok or proj_ok)) or right:
+            if ((below or above) and (left_ok or proj_ok)) or right:
                 result.add(v["key"])
     return result
 

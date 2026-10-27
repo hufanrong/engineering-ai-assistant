@@ -197,7 +197,8 @@ class _FakeSession:
     def __init__(self, ents, block_attrs=None):
         self.ents = ents
         self.block_attrs = block_attrs or {}   # id(ent) -> [(text, box, attr_ent)]
-        self.nested = {}                       # id(ent) -> [(text, box)]
+        self.nested = {}                       # id(ent) -> [(text, box, ent, kind)]
+        self.texts_cleared = []                # ATTDEF 固定属性置空记录
 
     def iter_entities(self, space):
         return list(self.ents)
@@ -215,7 +216,9 @@ class _FakeSession:
     def explode_ref(self, e): return []
     def convert_to_autocad_type(self, e): return False
     def table_cell_texts(self, e): return []
-    def set_text(self, e, t): e.TextString = t
+    def set_text(self, e, t):
+        e.TextString = t
+        self.texts_cleared.append((e.Name, t))
     def drain_plot_warnings(self): return []
     def collect_block_attributes(self, e):
         return list(self.block_attrs.get(id(e), []))
@@ -414,6 +417,13 @@ def test_f08_cert_number_outside_region():
     ]
     got = titleblock.find_cert_numbers(targets, set(["设计证书编号"]), frame)
     check("F-08 find_cert_numbers 命中下方编号", got == {1}, str(got))
+    # N-01（v0.1.165）：证书号在标签**上方**（标题栏顶部公司名区）也命中
+    targets_above = [
+        {"key": 0, "norm": "设计证书编号", "minx": 272, "miny": 44, "maxx": 340, "maxy": 50},
+        {"key": 1, "norm": "A135036965", "minx": 272, "miny": 54, "maxx": 332, "maxy": 60},
+    ]
+    got_above = titleblock.find_cert_numbers(targets_above, set(["设计证书编号"]), frame)
+    check("N-01 find_cert_numbers 命中上方编号", got_above == {1}, str(got_above))
 
 
 def test_f09_protected_field_replace():
@@ -498,11 +508,67 @@ def test_n01_block_attributes_collected():
     # 嵌套文字：命中删除只提示不删（块定义保护）
     blk2 = E("块2", "", (300, 20, 410, 55), oname="AcDbBlockReference")
     sess2 = _FakeSession([blk2], block_attrs={id(blk2): []})
-    sess2.nested[id(blk2)] = [("陈伟晖", (310, 42, 330, 48))]
+    sess2.nested[id(blk2)] = [("陈伟晖", (310, 42, 330, 48), E("n1", "陈伟晖", (310, 42, 330, 48)), "text")]
     _d, _r, notes = core._clean_titleblock(
         sess2, "doc", "model", region, frame, CFG, lambda m: None, mode="real_rect")
     check("N-01 嵌套人名不直接删除（防破坏块定义）", not blk2.deleted, "")
     check("N-01 嵌套文字给出提示", any("嵌套文字" in n for n in notes), str(notes))
+
+
+def test_n01_attdef_fixed_attr_cleared():
+    """N-01（v0.1.165）：块内固定属性（ATTDEF，Constant）——GetAttributes 不返回、
+    iter_entities 不收集，公司名/证书号/人名以固定属性存在时残留（图2/图3 真机）。
+    修复：collect_block_nested_texts 收集 ATTDEF，命中删除的**就地置空**（不破坏块定义）。"""
+    print("[N-01-attdef] 固定属性文字就地置空（公司名/证书号/人名）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    region = (270, 20, 415, 55)
+    E = _FakeEnt
+    blk = E("标题栏块", "", (300, 20, 410, 55), oname="AcDbBlockReference")
+    attdef_co = E("attdef公司", "紫金(厦门)工程设计有限公司", (310, 42, 370, 48),
+                  oname="AcDbAttributeDefinition")
+    attdef_cert = E("attdef证书", "A135036965", (310, 34, 360, 40),
+                    oname="AcDbAttributeDefinition")
+    attdef_person = E("attdef人名", "代必虎", (310, 26, 330, 31),
+                      oname="AcDbAttributeDefinition")
+    attdef_keep = E("attdef图号", "X398·301Z-02", (310, 20, 340, 25),
+                    oname="AcDbAttributeDefinition")
+    sess = _FakeSession([blk], block_attrs={id(blk): []})
+    sess.nested[id(blk)] = [
+        (attdef_co.TextString, attdef_co._box, attdef_co, "attdef"),
+        (attdef_cert.TextString, attdef_cert._box, attdef_cert, "attdef"),
+        (attdef_person.TextString, attdef_person._box, attdef_person, "attdef"),
+        (attdef_keep.TextString, attdef_keep._box, attdef_keep, "attdef"),
+    ]
+    _d, _r, notes = core._clean_titleblock(
+        sess, "doc", "model", region, frame, CFG, lambda m: None, mode="real_rect")
+    check("N-01-attdef 公司名固定属性已置空", attdef_co.TextString == "", attdef_co.TextString)
+    check("N-01-attdef 证书号固定属性已置空", attdef_cert.TextString == "", attdef_cert.TextString)
+    check("N-01-attdef 人名固定属性已置空", attdef_person.TextString == "", attdef_person.TextString)
+    check("N-01-attdef 保护字段（图号）未置空",
+          attdef_keep.TextString == "X398·301Z-02", attdef_keep.TextString)
+    check("N-01-attdef 给出置空备注", any("固定属性文字已就地置空" in n for n in notes), str(notes))
+
+
+def test_n01_institution_anywhere():
+    """N-01（v0.1.165）：标题栏公司名全框专项删除——文字簇反推区域把公司名行
+    裁掉（区域外），白名单/关联够不到 → 残留（图2/图3 真机）。全图框定位删除。"""
+    print("[N-01-institution] 公司名全框专项删除（区域外也删）")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    # 反推区域：只覆盖签署标签区（25-48），公司名(54-60)/证书号(49-55)在区域外上方
+    region = (270, 25, 415, 48)
+    E = _FakeEnt
+    co = E("公司", "紫金(厦门)工程设计有限公司", (270, 54, 380, 60))
+    cert = E("证书", "A135036965", (330, 49, 380, 55))
+    cert_lab = E("证书标签", "设计证书编号", (270, 49, 326, 55))
+    tag = E("标签", "设计", (270, 40, 276, 44))
+    val = E("值", "李安武", (280, 40, 300, 44))
+    sess = _FakeSession([co, cert, cert_lab, tag, val])
+    _d, _r, notes = core._clean_titleblock(
+        sess, "doc", "model", region, frame, CFG, lambda m: None, mode="real_rect")
+    check("N-01-institution 区域外公司名被删", co.deleted, "")
+    # 证书号通过 find_cert_numbers 上方扩展删除
+    check("N-01-institution 区域外证书号被删", cert.deleted, "")
+    check("N-01-institution 签署标签/值照常处理", tag.deleted or val.deleted, "")
 
 
 def test_n02_region_signature_expand():
@@ -673,6 +739,8 @@ def main():
     test_f09_protected_field_replace()
     test_n04_project_name_not_deleted()
     test_n01_block_attributes_collected()
+    test_n01_attdef_fixed_attr_cleared()
+    test_n01_institution_anywhere()
     test_n02_region_signature_expand()
     test_n05_top_band_signature_clean()
     test_r01_legend_not_deleted()
