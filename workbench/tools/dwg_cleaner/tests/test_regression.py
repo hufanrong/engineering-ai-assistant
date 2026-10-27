@@ -199,6 +199,8 @@ class _FakeSession:
         self.block_attrs = block_attrs or {}   # id(ent) -> [(text, box, attr_ent)]
         self.nested = {}                       # id(ent) -> [(text, box, ent, kind)]
         self.texts_cleared = []                # ATTDEF 固定属性置空记录
+        self.plot_calls = []                   # N-07：打印窗口记录 (minx,miny,maxx,maxy,path)
+        self._extents = (0.0, 0.0, 500.0, 400.0)
 
     def iter_entities(self, space):
         return list(self.ents)
@@ -224,6 +226,12 @@ class _FakeSession:
         return list(self.block_attrs.get(id(e), []))
     def collect_block_nested_texts(self, e):
         return list(self.nested.get(id(e), []))
+    def get_polyline_rect(self, e): return None
+    def collect_lines(self, space): return [], []
+    def plot_frame(self, doc, frame, pdf_path, cfg):
+        self.plot_calls.append((frame.minx, frame.miny, frame.maxx, frame.maxy, pdf_path))
+    def space_extents(self, space):
+        return self._extents
 
 
 def _x398_titleblock_ents():
@@ -571,6 +579,77 @@ def test_n01_institution_anywhere():
     check("N-01-institution 签署标签/值照常处理", tag.deleted or val.deleted, "")
 
 
+def test_n06_tianzheng_titleblock_block_texts():
+    """N-06（v0.1.166）：天正/暖通图标题栏封装在图签 INSERT 块内，顶层文字不可达 →
+    标题栏特征判定全落空（16 框 0 清理）。修复：块内文字（属性/嵌套/ATTDEF）并入
+    保护词/文字簇判定，图签图层块兜底。"""
+    print("[N-06] 天正图签块内文字并入标题栏特征判定 + 图签图层兜底")
+    frame = titleblock.Frame(0, 0, 420, 297)
+    E = _FakeEnt
+    # 图签块：无顶层文字，块内文字（嵌套/ATTDEF）含 图号/设计阶段/施工图/比例
+    blk = E("图签块", "", (300, 20, 410, 55), oname="AcDbBlockReference")
+    n1 = E("n图号", "图号", (330, 46, 348, 52))
+    n2 = E("n图号值", "X398·301F01-02", (352, 46, 390, 52))
+    n3 = E("n阶段", "设计阶段", (330, 38, 360, 44))
+    n4 = E("n施工图", "施工图", (364, 38, 384, 44))
+    sess = _FakeSession([blk])
+    sess.nested[id(blk)] = [
+        (n1.TextString, n1._box, n1, "text"),
+        (n2.TextString, n2._box, n2, "text"),
+        (n3.TextString, n3._box, n3, "text"),
+        (n4.TextString, n4._box, n4, "text"),
+    ]
+    notes = []
+    region, mode = core._resolve_region(sess, "model", frame, [], CFG,
+                                        lambda m: None, notes)
+    check("N-06 块内文字使标题栏特征被识别", region is not None, str((region, notes)))
+    check("N-06 识别模式为白名单（real_rect）", mode == "real_rect", mode)
+    check("N-06 块内文字使文字簇反推命中",
+          any("文字簇反推" in n for n in notes), str(notes))
+
+    # 图层兜底：图签专用图层块存在、块内文字不可读（代理）→ 黑名单保守清理
+    blk2 = E("图签块2", "", (300, 20, 410, 55), layer="＠图签文字",
+             oname="AcDbBlockReference")
+    sess2 = _FakeSession([blk2])
+    sess2.nested[id(blk2)] = []   # 块内文字收集失败（代理不可读）
+    notes2 = []
+    region2, mode2 = core._resolve_region(sess2, "model", frame, [], CFG,
+                                          lambda m: None, notes2)
+    check("N-06 图签图层块兜底识别（fallback_band）",
+          region2 is not None and mode2 == "fallback_band", str((region2, mode2)))
+    check("N-06 兜底备注", any("天正图签图层" in n for n in notes2), str(notes2))
+
+
+def test_n07_blank_pdf_guard():
+    """N-07（v0.1.166）：图框与内容错位 → 空白 PDF 静默交付。修复：打印前内容
+    自检，空框按实际内容范围重算，仍无内容回退整图范围并告警。"""
+    print("[N-07] 打印前内容自检（空白 PDF 兜底）")
+    E = _FakeEnt
+    # 场景1：框内有足够文字（≥3）→ 按识别框正常打印
+    frame1 = titleblock.Frame(0, 0, 100, 80)
+    t1 = E("文字1", "设计说明", (10, 10, 40, 16))
+    t2 = E("文字2", "设备布置", (10, 20, 50, 26))
+    t3 = E("文字3", "1:100", (10, 30, 40, 36))
+    sess1 = _FakeSession([t1, t2, t3])
+    notes1 = []
+    core._plot_frame_safe(sess1, "doc", "model", frame1, "/tmp/p1.pdf", CFG, 1, notes1)
+    check("N-07 有内容时按识别框打印", len(sess1.plot_calls) == 1 and
+          abs(sess1.plot_calls[0][0]) < 1e-6, str(sess1.plot_calls))
+    check("N-07 有内容不告警", not any("错位" in n or "回退" in n for n in notes1), str(notes1))
+    # 场景2：空框（仅框线、无文字无块）→ 回退整图范围 + 告警
+    frame2 = titleblock.Frame(0, 0, 100, 80)
+    line1 = E("框线1", "", (0, 0, 100, 2))
+    line2 = E("框线2", "", (0, 0, 2, 80))
+    sess2 = _FakeSession([line1, line2])
+    notes2 = []
+    core._plot_frame_safe(sess2, "doc", "model", frame2, "/tmp/p2.pdf", CFG, 2, notes2)
+    check("N-07 空框触发兜底打印", bool(sess2.plot_calls), "")
+    last2 = sess2.plot_calls[-1]
+    check("N-07 兜底窗口为整图范围(500x400)", abs(last2[2] - last2[0] - 500) < 1e-6
+          and abs(last2[3] - last2[1] - 400) < 1e-6, str(last2))
+    check("N-07 空框给出告警", any("回退整图范围" in n for n in notes2), str(notes2))
+
+
 def test_n02_region_signature_expand():
     """N-02：文字簇反推区域按签署列扩展，盖住全部人名列。"""
     print("[N-02] 签署列区域扩展（漏删人名补回）")
@@ -741,6 +820,8 @@ def main():
     test_n01_block_attributes_collected()
     test_n01_attdef_fixed_attr_cleared()
     test_n01_institution_anywhere()
+    test_n06_tianzheng_titleblock_block_texts()
+    test_n07_blank_pdf_guard()
     test_n02_region_signature_expand()
     test_n05_top_band_signature_clean()
     test_r01_legend_not_deleted()

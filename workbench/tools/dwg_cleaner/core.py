@@ -147,8 +147,10 @@ def process_file(dwg_path, out_dir, config=None, on_progress=None):
                 notes.extend(nt)
                 frames_count += fc
                 if has_content:
-                    _plot_model_frames(session, doc, space, cfg, temp_pdfs, item_dir,
-                                       len(temp_pdfs))
+                    _plot_notes = _plot_model_frames(
+                        session, doc, space, cfg, temp_pdfs, item_dir,
+                        len(temp_pdfs))
+                    notes.extend(_plot_notes)
 
             # PDF 合并（R1：合并前先做逐页产物断言，存在性 + 页数）
             valid_pdfs, _pt = _verify_pdf_pages(
@@ -273,7 +275,14 @@ def _process_space(session, doc, space, cfg, log, notes, layout_name=""):
 
 
 def _plot_model_frames(session, doc, space, cfg, temp_pdfs, item_dir, start_idx):
-    """模型空间逐图框窗口打印（多图框逐页）。"""
+    """模型空间逐图框窗口打印（多图框逐页）。
+
+    N-07（2026-10-27 真机 P1）：图框检测与实际内容错位时，直接按识别框打印会
+    产出**空白 PDF**（暖通图 16 页仅框线）。打印前做内容自检，内容过少则按
+    框内实际内容包围盒重算打印窗口；仍无内容则回退整图范围并明确告警。
+    返回本阶段备注（写入处理日志）。
+    """
+    notes = []
     rects = _collect_rects(session, space, cfg)
     frames = titleblock.detect_frames(rects, cfg)
     if not frames:
@@ -281,10 +290,41 @@ def _plot_model_frames(session, doc, space, cfg, temp_pdfs, item_dir, start_idx)
         frames = [titleblock.Frame(ext[0], ext[1], ext[2], ext[3])]
     for i, frame in enumerate(titleblock.sort_frames(frames)):
         tmp = os.path.join(item_dir, "_tmp_p%d.pdf" % (start_idx + i))
-        session.plot_frame(doc, frame, tmp, cfg)
+        _plot_frame_safe(session, doc, space, frame, tmp, cfg, start_idx + i, notes)
         # 2026-10-26 修复（v0.1.156 回归 Bug）：原实现打印后未登记到 temp_pdfs，
         # 导致合并步骤拿不到页、最终 PDF 不生成且临时文件残留在成品目录。
         temp_pdfs.append(tmp)
+    return notes
+
+
+def _plot_frame_safe(session, doc, space, frame, pdf_path, cfg, idx, notes):
+    """N-07：单图框安全打印——内容自检 + 错位重算兜底，杜绝空白 PDF 静默交付。
+
+    判据：框内顶层文字 ≥3 或存在块参照 → 视为有内容，按识别框正常打印；
+    否则（框线/空框）→ 按框内实际实体包围盒重算窗口打印；
+    框内无任何可打印内容 → 回退整图范围打印，并在处理日志备注说明。
+    """
+    n_ent, n_txt, n_blk = _count_frame_content(session, space, frame)
+    if n_txt >= 3 or n_blk >= 1:
+        session.plot_frame(doc, frame, pdf_path, cfg)
+        return
+    cb = _frame_content_bbox(session, space, frame)
+    if cb:
+        # 内容包围盒与识别框几乎重合（≥80% 面积）→ 框内只有框线本身，仍视为空框，
+        # 直接回退整图（避免按框线范围再打一次白页）。
+        f_area = (frame.maxx - frame.minx) * (frame.maxy - frame.miny)
+        cb_area = (cb[2] - cb[0]) * (cb[3] - cb[1])
+        if f_area > 0 and cb_area < f_area * 0.8:
+            notes.append("图 %d：打印范围与内容错位（框内文字 %d/实体 %d），"
+                         "已按实际内容范围重算打印窗口" % (idx, n_txt, n_ent))
+            session.plot_frame(doc, titleblock.Frame(cb[0], cb[1], cb[2], cb[3],
+                                                     frame.rotation), pdf_path, cfg)
+            return
+    ext = session.space_extents(space)
+    notes.append("图 %d：识别图框内无内容（文字 %d/实体 %d），已回退整图范围打印，"
+                 "请人工核对图框检测" % (idx, n_txt, n_ent))
+    session.plot_frame(doc, titleblock.Frame(ext[0], ext[1], ext[2], ext[3]),
+                       pdf_path, cfg)
 
 
 def _plot_layout_page(session, doc, space, pdf_path, cfg):
@@ -337,6 +377,131 @@ def _all_text_pos(session, space, frame):
         if p:
             out.append((ent, txt, p))
     return out
+
+
+# 天正图签专用图层（N-06：暖通/天正图标题栏整块封装在图签 INSERT 内，
+# 顶层遍历不可达；图层名是固定特征，参与"图签块"识别）
+SIGN_BLOCK_LAYER_KEYS = ("图签", "PUB_TITLE", "PUB_TAB", "T_TITLE", "TITLE")
+
+
+def _collect_block_texts(session, space, frame):
+    """N-06：收集空间内**块参照的块内文字**（属性/嵌套文字/ATTDEF 固定属性）。
+
+    天正/暖通图的标题栏（图签）整块封装在 INSERT（常为匿名块 *U…/代理块）内，
+    iter_entities 顶层遍历一条文字都到不了引擎。此函数把块内文字按块变换换算到
+    世界坐标，供标题栏特征判定（保护词/文字簇反推）与清理复用。
+
+    返回 [(text, box, ent, kind, layer)]，kind ∈ {"attr","text","attdef"}；
+    只取包围盒中心落在 frame（含 2 容差）内的文字。
+    """
+    out = []
+    for ent in session.iter_entities(space):
+        if getattr(ent, "ObjectName", "") != "AcDbBlockReference":
+            continue
+        layer = ""
+        try:
+            layer = str(getattr(ent, "Layer", "") or "")
+        except Exception:
+            pass
+        items = []
+        try:
+            for _t, _b, _e in session.collect_block_attributes(ent):
+                items.append((_t, _b, _e, "attr"))
+        except Exception:
+            pass
+        try:
+            items.extend(session.collect_block_nested_texts(ent))
+        except Exception:
+            pass
+        for _t, _b, _e, _k in items:
+            if not _t:
+                continue
+            cx = (_b[0] + _b[2]) / 2.0
+            cy = (_b[1] + _b[3]) / 2.0
+            if (frame.minx - 2 <= cx <= frame.maxx + 2
+                    and frame.miny - 2 <= cy <= frame.maxy + 2):
+                out.append((_t, _b, _e, _k, layer))
+    return out
+
+
+def _is_sign_block_layer(layer):
+    """N-06：图层名是否天正图签/标题栏特征层（全角＠等变体）。"""
+    if not layer:
+        return False
+    l = "".join((layer or "").split())
+    if not l:
+        return False
+    if l in ("PUB_TITLE", "PUB_TAB"):
+        return True
+    return any(k in l for k in SIGN_BLOCK_LAYER_KEYS)
+
+
+def _frame_has_sign_layer_block(session, space, frame):
+    """N-06：图框内是否存在图签专用图层上的块参照（天正标题栏特征）。"""
+    x0, y0, x1, y1 = frame.minx - 2, frame.miny - 2, frame.maxx + 2, frame.maxy + 2
+    for ent in session.iter_entities(space):
+        if getattr(ent, "ObjectName", "") != "AcDbBlockReference":
+            continue
+        try:
+            layer = str(getattr(ent, "Layer", "") or "")
+        except Exception:
+            continue
+        if not _is_sign_block_layer(layer):
+            continue
+        p = _entity_pos(session, ent, frame)
+        if p and (x0 <= p[0] <= x1 and y0 <= p[1] <= y1):
+            return True
+    return False
+
+
+def _count_frame_content(session, space, frame):
+    """N-07：统计图框内可见内容量 (实体数, 文字数, 块参照数)。
+
+    供打印前自检——图框与内容错位时避免交付空白 PDF。
+    """
+    n_ent = n_txt = n_blk = 0
+    x0, y0, x1, y1 = frame.minx - 2, frame.miny - 2, frame.maxx + 2, frame.maxy + 2
+    for ent in session.iter_entities(space):
+        p = _entity_pos(session, ent, frame)
+        if not p or not (x0 <= p[0] <= x1 and y0 <= p[1] <= y1):
+            continue
+        n_ent += 1
+        if session.get_text(ent):
+            n_txt += 1
+        if getattr(ent, "ObjectName", "") == "AcDbBlockReference":
+            n_blk += 1
+    return n_ent, n_txt, n_blk
+
+
+def _frame_content_bbox(session, space, frame):
+    """N-07：图框内可见实体的实际包围盒并集；无可打印内容返回 None。
+
+    用于图框与内容错位时的打印窗口重算兜底。
+    """
+    box = None
+    x0, y0, x1, y1 = frame.minx - 2, frame.miny - 2, frame.maxx + 2, frame.maxy + 2
+    for ent in session.iter_entities(space):
+        p = _entity_pos(session, ent, frame)
+        if not p or not (x0 <= p[0] <= x1 and y0 <= p[1] <= y1):
+            continue
+        try:
+            b = session.get_bounds(ent)
+        except Exception:
+            continue
+        if not b:
+            continue
+        minx, miny = min(b[0], b[2]), min(b[1], b[3])
+        maxx, maxy = max(b[0], b[2]), max(b[1], b[3])
+        if maxx - minx <= 1e-9 or maxy - miny <= 1e-9:
+            continue
+        if box is None:
+            box = [minx, miny, maxx, maxy]
+        else:
+            box[0] = min(box[0], minx)
+            box[1] = min(box[1], miny)
+            box[2] = max(box[2], maxx)
+            box[3] = max(box[3], maxy)
+    return tuple(box) if box else None
 
 
 def _texts_in_region(alltp, region):
@@ -400,6 +565,27 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
              if (frame.minx - 2 <= p[0] <= frame.maxx + 2
                  and frame.miny - 2 <= p[1] <= frame.maxy + 2)]
 
+    # N-06（2026-10-27 真机 P1）：天正/暖通图标题栏整块封装在图签 INSERT 内，
+    # 顶层文字不可达 → 保护词/文字簇判定全落空 → 16 框全部"未识别到标题栏特征"。
+    # 把框内块参照的块内文字（属性/嵌套/ATTDEF）并入判定；命中图签专用图层的块
+    # 文字优先。同时供文字簇反推使用。
+    _blk_txts = []
+    try:
+        _blk_txts = _collect_block_texts(session, space, frame)
+    except Exception:
+        pass
+    block_text_boxes = []
+    if _blk_txts:
+        for _t, _b, _e, _k, _ly in _blk_txts:
+            alltp.append((_e, _t, ((_b[0] + _b[2]) / 2.0, (_b[1] + _b[3]) / 2.0)))
+            block_text_boxes.append({
+                "norm": rules._norm_spaces(rules.strip_mtext_codes(_t)),
+                "minx": _b[0], "miny": _b[1], "maxx": _b[2], "maxy": _b[3],
+                "layer": _ly,
+            })
+        log("N-06 图 %d 并入块内文字 %d 条（天正图签/标题栏块）"
+            % (0, len(_blk_txts)))
+
     # 1) 真实小矩形候选列表，逐个验保护词（F-05②）
     for cand in titleblock.detect_titleblock_regions(frame, rects, cfg):
         if _texts_have_protect(_texts_in_region(alltp, cand), cfg):
@@ -408,6 +594,7 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
 
     # 2) 文字簇反推真实区域（F-05①，线条表格标题栏兜底；F-06 已限本框）
     text_boxes = _collect_text_boxes(session, alltp, frame)
+    text_boxes.extend(block_text_boxes)  # N-06：块内文字（世界坐标 box）参与文字簇
     field_lab, person_lab, date_lab, cert_lab = _titleblock_label_sets(cfg)
     seed_lab = field_lab | person_lab | date_lab | cert_lab
     infer = titleblock.infer_titleblock_region_from_texts(
@@ -445,6 +632,15 @@ def _resolve_region(session, space, frame, rects, cfg, log, notes):
                          "保守清理（公司名/人名/日期），其余内容保留")
             log("检测到顶部页眉（黑名单模式）")
             return top, "top_band"
+
+    # 3.5) N-06（2026-10-27 真机 P2）：天正图签专用图层块存在（图签不可读/代理）时，
+    # 按底部条带黑名单保守清理——图签块 Layer 命中 ＠图签文字/PUB_TITLE/PUB_TAB 是
+    # 明确的标题栏特征（其余内容不受影响，只删公司名/人名/日期）。
+    if _frame_has_sign_layer_block(session, space, frame):
+        notes.append("检测到天正图签图层块（标题栏封装在块内），回退到底部条带，"
+                     "按黑名单模式保守清理（公司名/人名/日期），块内其余内容保留")
+        log("天正图签图层块兜底（黑名单模式）")
+        return titleblock.titleblock_region(frame, cfg), "fallback_band"
 
     return None, None
 
