@@ -15,6 +15,29 @@ on:
 
 jobs:
   ############################################
+  # Job 0：Python 纯逻辑回归测试（dwg_cleaner，零第三方依赖）
+  #  对应「真机验收驱动」底线：每版推送自动复核回归全过
+  ############################################
+  python-tests:
+    name: Python Regression Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 运行 dwg_cleaner 全部纯逻辑回归
+        run: |
+          cd workbench/tools
+          python -m dwg_cleaner.tests.test_regression
+          python -m dwg_cleaner.tests.test_titleblock
+          python -m dwg_cleaner.tests.test_core_logic
+
+  ############################################
   # Job 1：构建 Android APK
   ############################################
   build-android:
