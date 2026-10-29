@@ -78,7 +78,11 @@ jobs:
         working-directory: packaging/fangong-android
         run: |
           rm -rf android/app/src/main/assets/public
-          npx cap copy android
+          # R4（2026-10-29）：cap copy 只拷 web 资源，不生成原生依赖工程，导致
+          # capacitor.build.gradle 第 10 行读取的
+          # capacitor-cordova-android-plugins/cordova.variables.gradle 不存在，
+          # assembleDebug 直接 BUILD FAILED。改用 cap sync（= copy + update）。
+          npx cap sync android
 
       - name: 构建 Debug APK
         working-directory: packaging/fangong-android/android
