@@ -199,6 +199,40 @@ def test_find_cert_numbers():
     check("超距纯数字排除", 5 not in got)
 
 
+def test_find_cert_numbers_table_cell_overlap():
+    """R3（2026-10-29 真机）：表格线分格时标签盒与值盒重叠，仍须命中。
+
+    取自实测图2 page_03 真实几何（A2 图框 549299.5~549720.0 × 9193880~9194177）：
+      标签「设计证书编号」盒 549652.34~549672.66
+      编号 A135036965    盒 549667.34~549687.66（起点落在标签盒内 5.32）
+    旧实现 `0 <= gap` 漏判 → 清稿后证书号仍被打印。
+    """
+    print("[R3 证书号·同格邻位（表格线重叠）]")
+    f = tb.Frame(549299.5, 9193880.0, 549720.0, 9194177.0)
+    targets = [
+        _box(1, "设计证书编号", 549652.34, 9193903.83, 549672.66, 9193905.17),
+        _box(2, "A135036965", 549667.34, 9193904.08, 549687.66, 9193904.92),
+    ]
+    got = tb.find_cert_numbers(targets, {"设计证书编号"}, f)
+    check("标签/值盒重叠仍命中", 2 in got)
+
+    # 反例：值在标签**左侧**同一行，不得命中（防向左回退文本误删）
+    targets2 = [
+        _box(1, "设计证书编号", 549620.0, 9193903.83, 549640.0, 9193905.17),
+        _box(2, "A135036965", 549580.0, 9193904.08, 549600.0, 9193904.92),
+    ]
+    got2 = tb.find_cert_numbers(targets2, {"设计证书编号"}, f)
+    check("值在标签左侧不命中", 2 not in got2)
+
+    # 反例：横向中心距超出图框 35%，不得命中（防跨栏误删）
+    targets3 = [
+        _box(1, "设计证书编号", 549310.0, 9193903.83, 549330.0, 9193905.17),
+        _box(2, "A135036965", 549600.0, 9193904.08, 549620.0, 9193904.92),
+    ]
+    got3 = tb.find_cert_numbers(targets3, {"设计证书编号"}, f)
+    check("跨栏超距不命中", 2 not in got3)
+
+
 def test_cluster_and_rects():
     print("[聚类与线段组矩形]")
     check("一维聚类合并", tb.cluster([1, 1.5, 10], 2.0) == [1.25, 10])
@@ -241,6 +275,7 @@ def main():
     test_in_region()
     test_associate_label_values()
     test_find_cert_numbers()
+    test_find_cert_numbers_table_cell_overlap()
     test_cluster_and_rects()
     test_infer_region_from_texts()
     print("=" * 64)

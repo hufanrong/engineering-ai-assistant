@@ -661,8 +661,16 @@ def find_cert_numbers(targets, cert_labels, frame):
             left_ok = abs(v["minx"] - lab["minx"]) <= fw * 0.03
             proj_ok = (v["minx"] <= lab["maxx"] + fw * 0.02
                        and v["maxx"] >= lab["minx"] - fw * 0.02)
-            gap = v["minx"] - lab["maxx"]
-            right = 0 <= gap <= fw * 0.35 and abs(vcy - lcy) <= max(fh * 0.012, 1.0)
+            # R3（2026-10-29 真机）：标题栏由表格线分格时，标签盒与值盒会**重叠**——
+            # 实测图2 page_03：标签「设计证书编号」盒 549652.34~549672.66，
+            # 编号 A135036965 盒 549667.34~549687.66，gap=-5.32（值起点落在标签盒
+            # 内部 5.3 个单位）。旧实现 `0 <= gap` 必然漏判，按 fw*1% 放宽也不够
+            # （fw=420.5 时容差仅 4.2）。故改用**中心点**判据：值中心在标签中心右侧、
+            # 横向中心距 ≤ fw*35%，且同一行（纵向中心对齐）。格式特异（字母+8~15 位
+            # 连续数字 / 9~15 位纯数字，已排除 X/Y 坐标）保证误判面很小。
+            center_gap = vcx - lcx
+            right = (0 < center_gap <= fw * 0.35
+                     and abs(vcy - lcy) <= max(fh * 0.012, 1.0))
             if ((below or above) and (left_ok or proj_ok)) or right:
                 result.add(v["key"])
     return result
