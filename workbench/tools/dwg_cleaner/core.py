@@ -1023,6 +1023,28 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         else:
             _safe_delete.add(i)
     delete_idx = _safe_delete
+    # R4（2026-10-29 真机）：签署值中心点判据。C1「保护优先」除保护词外还含**几何**
+    # 关联（protect 模式的"下方/同列"分支）：图框3「图纸名称」「设计阶段」标签在上一行、
+    # 水平投影相交，就把签署栏人名（李安武 93C7A5 / 代必虎 93C7A8）当字段值保护起来，
+    # 于是白名单判定为 delete 却永不执行。此判据与 protect 分支正交：只认「签署标签
+    # 同行右邻格的短串」，且限定在标题栏区域内，命中即从保护集改判为删除；
+    # 保护词/坐标/图号/工程名类值在 extra_block 与下方 _safe_delete 双重把关。
+    _sig_idx = set()
+    try:
+        _sig_idx = titleblock.find_signature_values(
+            assoc_targets, person_lab | date_lab | cert_lab, region, frame,
+            field_lab, cfg,
+            extra_block=lambda n, t: (
+                rules._is_protected(n, cfg) or rules._is_axis_coordinate(n)
+                or rules._is_drawing_no(n) or rules._is_project_name_like(n, cfg)))
+    except Exception as e:  # noqa: BLE001
+        log("R4 签署值中心点判据异常（跳过，不影响既有链路）：%s" % e)
+    if _sig_idx:
+        _rescued = _sig_idx & protected_idx
+        protected_idx = protected_idx - _sig_idx
+        delete_idx = delete_idx | (_sig_idx - delete_idx)
+        log("R4 签署值中心点判据：命中 %d 个签署值，其中 %d 个此前被 C1 几何保护"
+            "（已改判为删除）" % (len(_sig_idx), len(_rescued)))
     if protected_idx:
         log("C1 标签→值关联，保护 %d 个值实体（工程名/图号/图名的值）" % len(protected_idx))
     if delete_idx:
@@ -1047,9 +1069,11 @@ def _clean_titleblock(session, doc, space, region, frame, cfg, log, mode="real_r
         pos_str = "%.1f,%.1f" % (pos[0], pos[1])
         if i in delete_idx:
             # F-01/F-02：标签（设计/审核/审定/标图/日期/证书编号）旁的值，黑名单也删
+            # R4：签署值中心点判据命中的，来源标注区分，便于取证
+            _why = "signature_value" if i in _sig_idx else "label_value"
             ops.append(CleanOp(ent, "delete",
-                               "%r [%s] (%s)" % (txt, "label_value", pos_str)))
-            log("删除（标签关联签署值）%r" % txt)
+                               "%r [%s] (%s)" % (txt, _why, pos_str)))
+            log("删除（%s）%r" % (_why, txt))
             continue
         if use_whitelist:
             action, reason, new_text = rules.judge_whitelist_text(txt, cfg)

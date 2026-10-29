@@ -676,6 +676,147 @@ def find_cert_numbers(targets, cert_labels, frame):
     return result
 
 
+def find_signature_values(targets, sign_labels, region, frame, field_labels=None,
+                          cfg=None, extra_block=None):
+    """R4（2026-10-29 真机）：签署值中心点判据——在图框内定位「签署栏邻格的值」。
+
+    真机问题（图框3 / page_03）：签署值「李安武」93C7A5(y=9193889.5)、「代必虎」
+    93C7A8(y=9193898.5) 已落在反推区域**内**，白名单判定也是 delete，却仍被打印。
+    取证定位到根因不在区域裁剪，而在 **C1「保护优先」集的几何误关联**：
+    protect 模式的「下方/同列」分支把签署栏人名当成上方字段标签（图纸名称/设计阶段/
+    子项名称）的值——标签在上一行、水平投影相交即命中——于是被并入 protected_idx，
+    再被 `delete - protected` 剔除，任何删除规则都够不到。
+
+    本函数据此补一条与 protect 分支正交的正向判据：值必须是**某个签署标签同一行
+    的右邻格**，且两点之间不夹其它文字（邻格唯一性），并且值本身是短串。
+    几何全部约束在标题栏 region 内（区域约束），严禁按姓名全图清理。
+
+    判据（全部满足才命中）
+    --------------------
+    1. 值中心点在 region 内（区域约束）；
+    2. 同行左侧存在签署标签：0 < 中心距 ≤ fw*35%，|dy| ≤ max(fh*1.2%, 1.0)；
+       （取同行**最近**的签署标签为锚，与 R3 证书号中心点判据同一思路）
+    3. 邻格唯一性：锚标签与该值之间，同一行不得夹着其它非标签文字
+       （防「图纸名称的值」「比例值」等远处字段值被当成签署值）；
+    4. 短串：norm 长度 ≤ 8 且包围盒宽 ≤ fw*20%（人名/日期/证书号；图名/工程名排除）；
+    5. 锚标签与该值不得同为字段标签（值若命中 field_labels 直接排除）。
+
+    参数
+    ----
+    targets     : list[dict]，键 key/norm/minx/miny/maxx/maxy（同 associate_values）
+    sign_labels : set[str]，签署标签（设计/审核/审定/检图/制图/校核…，已归一化）
+    region      : (minx,miny,maxx,maxy)，标题栏区域；None 表示不做区域约束（不推荐）
+    frame       : Frame
+    field_labels: set[str] | None，保护字段标签（值命中即排除）
+    cfg         : 规则配置（读取 titleblock.sign_value_* 阈值）
+    extra_block : callable(norm, target) -> bool，返回 True 表示明确不可删
+                  （调用方传入保护词/坐标/图号/工程名类过滤）
+
+    返回 set[key]（应删除的签署值 key 集合）。
+    """
+    result = set()
+    if not targets or not sign_labels or frame is None:
+        return result
+    fw, fh = frame.width, frame.height
+    if fw <= 0 or fh <= 0:
+        return result
+    tb_ = (cfg or {}).get("titleblock", {})
+    max_center_gap = fw * float(tb_.get("sign_value_right_ratio", 0.35))
+    # 行容差必须**小于行距**：真机文字高 3、行距 3，若容差 ≥ 3 会把上一行/下一行的
+    # 证书编号/日期标签当成同一行锚（实测 frame2「施工图」被上一行「设计证书编号」
+    # 误锚），故取图高 0.6% 且不超过标签自身高 65%。
+    row_tol = max(fh * float(tb_.get("sign_value_row_tol_ratio", 0.006)), 1.0)
+    max_len = int(tb_.get("sign_value_max_len", 8))
+    max_width = fw * float(tb_.get("sign_value_max_width_ratio", 0.2))
+
+    def _norm(s):
+        return "".join((s or "").split())
+
+    def _hit(norm, labels):
+        if not norm or not labels:
+            return False
+        for lab in labels:
+            if not lab:
+                continue
+            ln = _norm(lab)
+            if not ln:
+                continue
+            if norm == ln or norm.rstrip("：:") == ln or \
+                    (norm.startswith(ln) and len(norm) <= len(ln) + 2):
+                return True
+        return False
+
+    def _cx(t):
+        return (t["minx"] + t["maxx"]) / 2.0
+
+    def _cy(t):
+        return (t["miny"] + t["maxy"]) / 2.0
+
+    # 字段标签（工程名称/设计阶段/图号/比例…）——同行左邻若是字段标签，则该值是
+    # **字段值**（保护分支的正确结果，如「设计阶段=施工图」待替换而非删除），不属签署值。
+    # 注意分类优先级：字段标签优先于签署标签——「设计阶段」按前缀也会命中签署标签
+    # 「设计」（startswith + 长度容差），若当成签署锚会把人名/阶段值一起误删。
+    field_anchors = [t for t in targets if field_labels and _hit(t.get("norm"), field_labels)]
+    anchors = [t for t in targets
+               if _hit(t.get("norm"), sign_labels) and t not in field_anchors]
+    if not anchors:
+        return result
+    others = [t for t in targets if t not in anchors]
+
+    for v in others:
+        norm = v.get("norm") or ""
+        if not norm:
+            continue
+        if _hit(norm, field_labels):
+            continue
+        if len(norm) > max_len:
+            continue
+        if (v["maxx"] - v["minx"]) > max_width:
+            continue
+        vcx, vcy = _cx(v), _cy(v)
+        if region is not None and not in_region(vcx, vcy, region):
+            continue
+        if extra_block and extra_block(norm, v):
+            continue
+        cands = []
+        for a in anchors:
+            dx = vcx - _cx(a)
+            if dx <= 0 or dx > max_center_gap:
+                continue
+            lh = max(a["maxy"] - a["miny"], 1.0)
+            if abs(vcy - _cy(a)) > max(row_tol, lh * float(
+                    tb_.get("sign_value_label_h_ratio", 0.65))):
+                continue
+            cands.append((dx, a))
+        if not cands:
+            continue
+        dx, lab = min(cands, key=lambda z: z[0])
+        lcx, lcy = _cx(lab), _cy(lab)
+        # 字段值优先：若同行左侧更近的标签是字段标签（设计阶段/工程名称/图号…），
+        # 该值属字段值（保护分支的正确结论），不得当签署值删除。
+        field_closer = False
+        for fa in field_anchors:
+            fdx = vcx - _cx(fa)
+            if 0 < fdx < dx and abs(vcy - _cy(fa)) <= row_tol:
+                field_closer = True
+                break
+        if field_closer:
+            continue
+        # 邻格唯一性：锚与值之间同行的其它非标签文字即视为「不是邻格」
+        blocked = False
+        for o in others:
+            if o is v or o is lab:
+                continue
+            ocx = _cx(o)
+            if lcx < ocx < vcx and abs(_cy(o) - lcy) <= row_tol:
+                blocked = True
+                break
+        if blocked:
+            continue
+        result.add(v["key"])
+    return result
+
+
 def cluster(vals, tol):
     """一维坐标聚类（合并接近的值），返回代表值列表。"""
     vals = sorted(vals)

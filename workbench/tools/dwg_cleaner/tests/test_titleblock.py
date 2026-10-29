@@ -233,6 +233,97 @@ def test_find_cert_numbers_table_cell_overlap():
     check("跨栏超距不命中", 2 not in got3)
 
 
+def test_find_signature_values():
+    """R4（2026-10-29 真机）：签署值中心点判据——签署标签同行右邻格的人名。
+
+    取自图框3（549740~550037 × 9193880~9194090，A4 横放）真实几何与失败方式：
+      签署标签列 x 549942~549952（设计/审核/审定/检图/制图，行距 3，字高 3）
+      签署值列   x 549952~549960（李安武/陈伟晖/代必虎）
+      残留：李安武 93C7A5(y=9193889.5)、代必虎 93C7A8(y=9193898.5)
+    两者在区域内、白名单判定也是 delete，却被 C1 protect 的「下方/同列」分支
+    误关联到上一行的「图纸名称」「设计阶段」标签而并入保护集。
+    """
+    print("[R4 签署值中心点判据]")
+    f = tb.Frame(549740.0, 9193880.0, 550037.0, 9194090.0)
+    sign = {"设计", "审核", "审定", "检图", "制图"}
+    field = {"图纸名称", "设计阶段", "工程名称", "图号"}
+    region = (549924.5, 9193878.0, 550037.0, 9193930.0)
+
+    def _sig_targets():
+        return [
+            _box(0, "设计", 549942.0, 9193888.0, 549952.0, 9193891.0),
+            _box(1, "审核", 549942.0, 9193894.0, 549952.0, 9193897.0),
+            _box(2, "审定", 549942.0, 9193897.0, 549952.0, 9193900.0),
+            _box(3, "检图", 549942.0, 9193891.0, 549952.0, 9193894.0),
+            _box(4, "制图", 549942.0, 9193885.0, 549952.0, 9193888.0),
+            # 签署值：盒与标签盒相接（gap=0），真机更极端（重叠）
+            _box(5, "李安武", 549952.0, 9193889.0, 549960.0, 9193891.0),
+            _box(6, "代必虎", 549952.0, 9193898.0, 549960.0, 9193900.0),
+            # 字段标签在其上一行、水平投影相交（真机误保护来源）
+            _box(7, "图纸名称", 549987.0, 9193892.5, 549999.0, 9193894.5),
+            _box(8, "设计阶段", 549979.5, 9193901.5, 549991.5, 9193903.5),
+            _box(9, "施工图", 549994.5, 9193901.5, 550004.5, 9193903.5),
+        ]
+
+    got = tb.find_signature_values(_sig_targets(), sign, region, f, field)
+    check("签署值命中（正常邻格）", 5 in got)
+    check("签署值命中（审定行）", 6 in got)
+    check("字段值「施工图」不得命中", 9 not in got)
+    check("字段标签自身不得命中", 7 not in got and 8 not in got)
+
+    # ① 盒重叠（gap<0）：真机真实几何，值起点落在标签盒内
+    t = _sig_targets()
+    t[5] = _box(5, "李安武", 549948.0, 9193889.0, 549956.0, 9193891.0)  # 与标签重叠 4
+    got2 = tb.find_signature_values(t, sign, region, f, field)
+    check("标签/值盒重叠仍命中", 5 in got2)
+
+    # ② 区域外同名（正文/人员表）不得命中
+    t = _sig_targets()
+    t[5] = _box(5, "李安武", 549760.0, 9193889.0, 549768.0, 9193891.0)  # 区域左侧正文
+    got3 = tb.find_signature_values(t, sign, region, f, field)
+    check("区域外同名不命中", 5 not in got3)
+
+    # ③ 邻格唯一性：值前夹着另一个值（非紧邻）
+    t = _sig_targets()
+    t.append(_box(10, "张三", 549960.0, 9193889.0, 549968.0, 9193891.0))
+    t[5] = _box(5, "李安武", 549968.0, 9193889.0, 549976.0, 9193891.0)
+    got4 = tb.find_signature_values(t, sign, region, f, field)
+    check("非紧邻（被同名值隔开）不命中", 5 not in got4)
+    check("紧邻的中间值命中", 10 in got4)
+
+    # ④ 长文本（图名/工程名）不得命中
+    t = _sig_targets()
+    t[5] = _box(5, "粗碎车间平面布置图", 549952.0, 9193889.0, 549990.0, 9193891.0)
+    got5 = tb.find_signature_values(t, sign, region, f, field)
+    check("长文本不命中", 5 not in got5)
+
+    # ⑤ 宽度过大（即使字符少）不得命中
+    t = _sig_targets()
+    t[5] = _box(5, "宽", 549952.0, 9193889.0, 550030.0, 9193891.0)
+    got6 = tb.find_signature_values(t, sign, region, f, field)
+    check("超宽值不命中", 5 not in got6)
+
+    # ⑥ 不同行（该行无签署标签，且超出标签字高 65%）不得命中
+    t = _sig_targets()
+    t[5] = _box(5, "李安武", 549952.0, 9193905.0, 549960.0, 9193907.0)  # 错行到 3906
+    got7 = tb.find_signature_values(t, sign, region, f, field)
+    check("错行同名不命中", 5 not in got7)
+
+    # ⑦ extra_block（保护词/坐标/图号）阻断
+    t = _sig_targets()
+    got8 = tb.find_signature_values(t, sign, region, f, field,
+                                    extra_block=lambda n, x: n.startswith("李"))
+    check("extra_block 阻断生效", 5 not in got8 and 6 in got8)
+
+    # ⑧ 无签署标签锚点 → 空集（不得凭姓名删任何东西）
+    got9 = tb.find_signature_values(_sig_targets()[5:], sign, region, f, field)
+    check("无签署标签时为空集", got9 == set())
+
+    # ⑨ 区域为 None 时不因无约束而放大到全图（仍要求邻格几何）
+    got10 = tb.find_signature_values(_sig_targets(), sign, None, f, field)
+    check("region=None 仍受邻格几何约束", 5 in got10 and 9 not in got10)
+
+
 def test_cluster_and_rects():
     print("[聚类与线段组矩形]")
     check("一维聚类合并", tb.cluster([1, 1.5, 10], 2.0) == [1.25, 10])
@@ -276,6 +367,7 @@ def main():
     test_associate_label_values()
     test_find_cert_numbers()
     test_find_cert_numbers_table_cell_overlap()
+    test_find_signature_values()
     test_cluster_and_rects()
     test_infer_region_from_texts()
     print("=" * 64)
