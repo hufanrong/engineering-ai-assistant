@@ -64,6 +64,11 @@ jobs:
 
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # R4（2026-10-29）：动作默认 packages 含 `tools`，新版 cmdline-tools(16.0)
+          # 已无该包 → `Warning: Failed to find package 'tools'` 后 sdkmanager
+          # 退出 1，整步失败（历史性失败的真实原因，与 preinstalled 版本告警无关）。
+          packages: 'platform-tools'
 
       - name: 安装 Capacitor 依赖
         working-directory: packaging/fangong-android
