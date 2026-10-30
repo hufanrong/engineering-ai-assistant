@@ -1,0 +1,74 @@
+{
+  "run_id": "20261030_091044",
+  "started": "2026-10-30 09:10:44",
+  "status": "passed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "a7ebf667968480f52e478fa38992ac9506853512",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 0,
+      "out": "{\"passed\": 40, \"failed\": 0, \"skipped\": 0, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 10, \"failed\": 0, \"skipped\": 0}, \"4\": {\"passed\": 6, \"failed\": 0, \"skipped\": 0}}}",
+      "err": ""
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=passed rc=0"
+    }
+  ],
+  "summary": {
+    "passed": 40,
+    "failed": 0,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0
+      },
+      "4": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "a7ebf667968480f52e478fa38992ac9506853512",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-10-30 09:13:59",
+  "commit_before": "a7ebf667968480f52e478fa38992ac9506853512",
+  "commit_after": "a7ebf667968480f52e478fa38992ac9506853512"
+}
