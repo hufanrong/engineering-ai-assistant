@@ -279,6 +279,57 @@ def generate_volume(project_id, book, workshop=''):
     with open(todo_path, 'w', encoding='utf-8') as f:
         f.write(todo_md)
     results['todo_file'] = todo_path
+
+    # v0.1.175：阶段③收尾 —— 卷内目录 / 案卷封面 / 卷内备考表
+    # 页次用 LibreOffice 渲染出的真实页数累计，渲不出来就如实标「未计算」，
+    # 不做「1 份算 1 页」的估算（页次要印在交给监理的正式目录上）。
+    try:
+        from . import volume_catalog as _vc
+        _pkg = _vc.build_volume_package(
+            vol, book=_clean_book(book), workshop=workshop or '全厂',
+            org_unit=(results.get('org_unit') or ''),
+            registry_items=items, count_pages=True)
+        results['catalog'] = {
+            '文件': [os.path.basename(v) for v in _pkg['files'].values()],
+            '件数': _pkg['catalog']['file_count'],
+            '页数': _pkg['catalog']['total_pages'],
+            '页数依据': _pkg['catalog']['page_basis'],
+            '未生成项': _pkg['catalog']['missing_count'],
+        }
+        # 装盒清单按「册」汇总：扫本册下所有车间的卷目录，一册一行
+        try:
+            _book_dir = os.path.join(_proj_root(project_id), 'volumes', _clean_book(book))
+            _vols = []
+            if os.path.isdir(_book_dir):
+                for _ws_name in sorted(os.listdir(_book_dir)):
+                    _d = os.path.join(_book_dir, _ws_name)
+                    if not os.path.isdir(_d):
+                        continue
+                    _files = _vc.collect_volume_files(_d)
+                    _pages = 0
+                    _allcounted = True
+                    for _f in _files:
+                        _r = _vc.real_page_count(_f['路径'])
+                        if _r['pages']:
+                            _pages += _r['pages']
+                        else:
+                            _allcounted = False
+                    _vols.append({
+                        'book': _clean_book(book), 'workshop': _ws_name,
+                        'file_count': len(_files),
+                        'total_pages': _pages if (_files and _allcounted) else None,
+                        'missing_count': 0,
+                    })
+            if _vols:
+                _box = os.path.join(_book_dir, '_装盒清单.xlsx')
+                _vc.write_boxing_list_xlsx(_vols, _box)
+                results['catalog']['装盒清单'] = os.path.basename(_box)
+                results['catalog']['盒数'] = len(_vols)
+        except Exception as _e2:  # noqa: BLE001
+            results.setdefault('catalog', {})['装盒清单错误'] = f'{type(_e2).__name__}: {_e2}'
+    except Exception as _e:  # noqa: BLE001
+        results['catalog_error'] = f'{type(_e).__name__}: {_e}'
+
     results['ok'] = not results['errors']
     results['empty_shell_count'] = len(results.get('empty_shells', []))
     results['device_source'] = _dev_info

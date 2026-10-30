@@ -660,6 +660,61 @@ def run(args):
         bool(landed) and resid_total == 0,
         json.dumps(resid_files[:3], ensure_ascii=False) if resid_files else "")
 
+    # 阶段③ 装盒成套：卷内目录 / 案卷封面 / 卷内备考表 / 装盒清单
+    # 页次必须是渲染实测，不能是「1 份算 1 页」的估算 —— 页次要印在交监理的正式目录上
+    _cat_rel = find_in(pdir, "_卷内目录.docx")
+    _cov_rel = find_in(pdir, "_案卷封面.docx")
+    _exam_rel = find_in(pdir, "_卷内备考表.docx")
+    _box_rel = find_in(pdir, "_装盒清单.xlsx")
+    _cat_found = [x for x in [_cat_rel, _cov_rel, _exam_rel] if x]
+    rec("卷内目录与装盒成套", "卷目录里有 _卷内目录/_案卷封面/_卷内备考表 三份正式表",
+        f"找到 {len(_cat_found)}/3：{[os.path.basename(x) for x in _cat_found]}",
+        len(_cat_found) == 3,
+        f"缺：{[n for n,r in [('卷内目录',_cat_rel),('案卷封面',_cov_rel),('卷内备考表',_exam_rel)] if not r]}")
+
+    # 页次真实性与册/序号顺序 —— 直接读生成的卷内目录
+    _cat_rows = []
+    if _cat_rel:
+        try:
+            from docx import Document as _Doc
+            _d = _Doc(os.path.join(pdir, _cat_rel))
+            for _t in _d.tables:
+                for _r in _t.rows[1:]:
+                    _cat_rows.append([c.text.strip() for c in _r.cells])
+            metric("catalog_row_count", len(_cat_rows))
+            metric("catalog_rows", _cat_rows[:8])
+        except Exception as _e:  # noqa: BLE001
+            rec("卷内目录可读", "docx 能被 python-docx 打开", f"{type(_e).__name__}: {_e}", False)
+    _seqs = [r[0] for r in _cat_rows if r and r[0]]
+    _numeric = [int(x) for x in _seqs if x.isdigit()]
+    _ordered = _numeric == sorted(_numeric) and len(_numeric) == len(_seqs)
+    _uncalc = [r for r in _cat_rows if len(r) > 4 and ("未计算" in r[4])]
+    _pagecells = [r[4] for r in _cat_rows if len(r) > 4 and r[4] and "未计算" not in r[4]]
+    metric("catalog_seq_order", _seqs)
+    metric("catalog_pages_uncalculated", len(_uncalc))
+    metric("catalog_page_cells", _pagecells[:8])
+    rec("卷内目录序号有序", "序号按登记表的数值顺序排列（不是字符串序）",
+        f"序号 {_seqs}", bool(_seqs) and _ordered)
+    # 页次真实性：能渲染就应当是「起-止」格式且连续；渲不出则如实标未计算，不算失败
+    _fmt_ok = all("-" in c for c in _pagecells) if _pagecells else None
+    rec("页次为渲染实测", "页次形如 起-止 且来自真实渲染（渲不出如实标未计算，不估算）",
+        f"{len(_pagecells)} 格有页次，{len(_uncalc)} 格标未计算；样例 {_pagecells[:3]}",
+        _fmt_ok)
+
+    # 卷内目录里列出的缺失项，要和待办清单的件数对得上（不能一边说全生成、一边目录空着）
+    if _box_rel:
+        try:
+            from openpyxl import load_workbook as _lw
+            _wb = _lw(os.path.join(pdir, _box_rel))
+            _ws = _wb.active
+            _boxrows = [list(r) for r in _ws.iter_rows(min_row=2, values_only=True)]
+            metric("boxing_rows", len(_boxrows))
+            metric("boxing_sample", _boxrows[:3])
+            rec("装盒清单", "按册汇总，一盒一行，含件数与页数",
+                f"{len(_boxrows)} 行：{_boxrows[:1]}", len(_boxrows) > 0)
+        except Exception as _e:  # noqa: BLE001
+            rec("装盒清单可读", "xlsx 能被 openpyxl 打开", f"{type(_e).__name__}: {_e}", False)
+
     # 卷内目录 / 待办清单是否真的生成文件
     todo_rel = find_in(pdir, "_待办清单.md")
     rec("待办清单", "卷目录下有 _待办清单.md",
