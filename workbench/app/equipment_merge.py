@@ -370,6 +370,89 @@ def get_merged() -> list:
     return list(m.get("merged", {}).values())
 
 
+# ---------------- 设备写入项目索引（v0.1.172） ----------------
+# 背景：supervision_templates._get_workshop_devices 读的是项目 index.json 的 "devices"，
+# 但全库检索下来这个字段从来没有赋值处（INDEX_RESERVED_KEYS 保留了键，却没人写），
+# 于是「监理确认表按车间出设备行」永远拿不到设备，产出只剩表头。
+# 这里补齐写入链路：解析缓存里的台账行 → 合并 → 写 index.json["devices"]（按位号做键）。
+
+def sync_devices_to_index(data_dir: str) -> dict:
+    """把当前项目解析出的设备台账行写进 index.json 的 devices 字段。
+    返回 {"devices": n, "with_workshop": n, "sources": [...]}；无数据时 devices=0 且不覆盖原值以外的键。
+    """
+    data_dir = data_dir or config.DATA_DIR
+    idx_path = os.path.join(data_dir, "index.json")
+    cache_dir = os.path.join(data_dir, "parsed_cache")
+    if not os.path.isfile(idx_path):
+        return {"devices": 0, "with_workshop": 0, "sources": [], "error": "index.json 不存在"}
+    try:
+        with open(idx_path, encoding="utf-8") as f:
+            idx = json.load(f)
+    except Exception as e:  # noqa: BLE001
+        return {"devices": 0, "with_workshop": 0, "sources": [], "error": f"index.json 读取失败：{e}"}
+
+    docs = {}
+    for sha, info in idx.items():
+        if sha in ("files", "devices", "workshops", "version", "updated_at", "relations"):
+            continue
+        if not isinstance(info, dict):
+            continue
+        cf = os.path.join(cache_dir, f"{sha}.json")
+        if not os.path.isfile(cf):
+            continue
+        try:
+            with open(cf, encoding="utf-8") as f:
+                cache = json.load(f)
+        except Exception:  # noqa: BLE001
+            continue
+        docs[sha] = {"_cache": cache, "file_name": info.get("file_name", "")}
+
+    equipment = extract_all_equipment(docs)
+    if not equipment:
+        # 不写空值到磁盘：保留上一次的有效结果，避免「一次扫描没解析到台账」把已有设备清空
+        return {"devices": 0, "with_workshop": 0, "sources": [],
+                "note": "本次未从解析缓存提取到设备行，保留索引里已有的 devices"}
+
+    merged = merge_equipment_list(equipment)["merged"]
+    devices = {}
+    for d in merged:
+        tag = (d.get("canonical_tag") or "").strip()
+        if not tag:
+            continue
+        devices[tag] = {
+            "name": d.get("name", ""),
+            "model": d.get("model", ""),
+            "quantity": d.get("quantity", ""),
+            "weight": d.get("weight", ""),
+            "workshop": d.get("workshop", ""),
+            "manufacturer": (d.get("fields") or {}).get("厂家", "") or (d.get("fields") or {}).get("生产厂家", ""),
+            "drawing_no": (d.get("fields") or {}).get("图号", ""),
+            "source_file": ((d.get("versions") or [{}])[-1] or {}).get("source_file", ""),
+            "source_count": d.get("source_count", 1),
+        }
+    idx["devices"] = devices
+    idx["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 车间键顺手补齐（同一份索引里两个键都是"给人看的分组视图"）
+    ws_map = {}
+    for tag, d in devices.items():
+        ws = (d.get("workshop") or "").strip()
+        if not ws:
+            continue
+        ws_map.setdefault(ws, []).append(tag)
+    if ws_map:
+        idx["workshops"] = {k: {"devices": v} for k, v in sorted(ws_map.items())}
+
+    tmp = idx_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(idx, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, idx_path)
+    sources = sorted({d.get("source_file", "") for d in merged if d.get("source_file")})
+    return {"devices": len(devices),
+            "with_workshop": sum(1 for d in devices.values() if d.get("workshop")),
+            "sources": sources[:10],
+            "workshops": sorted(ws_map)}
+
+
 def get_pending() -> list:
     """获取待人工确认的匹配对。"""
     m = _load()

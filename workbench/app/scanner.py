@@ -214,7 +214,24 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
             if progress_cb:
                 progress_cb(i + 1, len(file_list), f"异常 {os.path.basename(path)}: {e}")
 
+    # v0.1.172：扫描结束把设备台账行写进 index.json["devices"]
+    # （原来该字段无人写入，导致监理确认表按车间出设备行时恒为空）
+    try:
+        sync_devices(ddir)
+    except Exception:  # noqa: BLE001
+        pass
     return stats
+
+
+def sync_devices(data_dir=None) -> dict:
+    """v0.1.172：把设备台账行写进 index.json 的 devices。
+    失败不影响主流程（设备同步是下游增强项，不能让解析入库回滚）。"""
+    ddir = _get_data_dir(data_dir)
+    try:
+        from . import equipment_merge as _em
+        return _em.sync_devices_to_index(ddir)
+    except Exception as e:  # noqa: BLE001
+        return {"devices": 0, "error": f"设备同步失败：{e}"}
 
 
 def _save_parsed_cache(res: ParseResult, data_dir=None):

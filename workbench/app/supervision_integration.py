@@ -136,6 +136,16 @@ def generate_volume(project_id, book, workshop=''):
                 'error': f'整编要求登记表中没有「{_clean_book(book)}」这一册的条目',
                 'book': _clean_book(book),
                 'available_books': sorted({_clean_book(it.get('册')) for it in load_registry() if it.get('册')})}
+    # v0.1.172：设备台账前置校验。整卷的 A/B 类都是"按设备一行"的确认表，
+    # 设备库为空时生成出来的必然是只有表头的空壳。先同步一次设备再把结果说清楚。
+    _dev_info = {'devices': 0}
+    try:
+        from . import project_manager as _pm
+        from . import equipment_merge as _em
+        _ddir = _pm.get_project_data_dir(project_id)
+        _dev_info = _em.sync_devices_to_index(_ddir)
+    except Exception as e:  # noqa: BLE001
+        _dev_info = {'devices': 0, 'error': str(e)}
     vol = _volume_dir(project_id, book, workshop)
     os.makedirs(vol, exist_ok=True)
     results = {'ok': True, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': []}
@@ -158,8 +168,22 @@ def generate_volume(project_id, book, workshop=''):
             continue
         r = st.generate_batch(category=cat, workshop=workshop or '全厂', project_id=project_id)
         if not r.get('ok'):
-            results['errors'].append({'序号': seq, '名称': name, '原因': r.get('error')})
+            _reason = r.get('error') or '生成失败'
+            results['errors'].append({'序号': seq, '名称': name, '原因': _reason,
+                                      '空壳拦截': bool(r.get('empty_shell_blocked'))})
+            results['todo'].append({'序号': seq, '名称': name, '原因': _reason})
             continue
+        # v0.1.172：整卷链路同样吃「空壳闸门」——单张模板出一份文件但没接住设备，
+        # 也必须记账，不能因为 generate_batch 返回 ok 就当已生成
+        if r.get('uncovered_devices'):
+            results.setdefault('empty_shells', []).append({
+                '序号': seq, '名称': name,
+                '未覆盖设备': r.get('uncovered_devices'),
+                '空表类型': r.get('empty_tables', []),
+            })
+        if r.get('type_fallback'):
+            results.setdefault('type_fallback', []).append({
+                '序号': seq, '名称': name, '借用情况': r.get('type_fallback')})
         # 移动生成文件到卷目录
         src = os.path.join(_proj_root(project_id), 'exports', r['output_file'])
         _safe_name = re.sub(r'[\\/:*?"<>|]', '', name)[:50]
@@ -172,17 +196,45 @@ def generate_volume(project_id, book, workshop=''):
             todo_fields.append({'序号': seq, '名称': name, '待补字段': uf})
     results['todo_fields'] = todo_fields
     # 写待办清单
-    todo_md = _render_todo(todo_fields, results['todo'], results['errors'])
+    todo_md = _render_todo(todo_fields, results['todo'], results['errors'],
+                           results.get('empty_shells', []), results.get('type_fallback', []),
+                           workshop=workshop)
     todo_path = os.path.join(vol, '_待办清单.md')
     with open(todo_path, 'w', encoding='utf-8') as f:
         f.write(todo_md)
     results['todo_file'] = todo_path
     results['ok'] = not results['errors']
+    results['empty_shell_count'] = len(results.get('empty_shells', []))
+    results['device_source'] = _dev_info
+    results['workshop_devices'] = len(st._get_workshop_devices(workshop, project_id))
+    if _dev_info.get('devices', 0) == 0:
+        results['warnings'] = results.get('warnings', []) + [
+            '设备库为空：整卷的确认表都是按设备出一行，没有设备只会产出表头。'
+            '请先上传设备台账（Excel/CSV，含位号、设备名称、规格型号、数量、车间）并重新解析。']
     return results
 
 
-def _render_todo(todo_fields, todos, errors):
-    lines = ['# 整编待办清单', '', f'生成时间：{__import__("datetime").datetime.now():%Y-%m-%d %H:%M}', '']
+def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=None, workshop=''):
+    lines = ['# 整编待办清单', '', f'生成时间：{__import__("datetime").datetime.now():%Y-%m-%d %H:%M}',
+             f'车间：{workshop or "全厂"}', '']
+    if empty_shells:
+        # 注意用词：这些项的文件是**已经生成**的，只是车间里还有设备没被模板覆盖。
+        # 原来标题写「未计入已生成」，但 generate_volume 里它们确实进了 generated，
+        # 用户按标题去卷目录找不到文件会对不上账。
+        lines.append('## 〇、已生成但设备未覆盖全（需补表或人工补做）')
+        for t in empty_shells:
+            _devs = '、'.join(f"{d.get('位号', '')} {d.get('名称', '')}".strip()
+                            for d in (t.get('未覆盖设备') or [])[:10])
+            lines.append(f"- {t['序号']} {t['名称']}：已出文件；另 {len(t.get('未覆盖设备') or [])} 台未覆盖（{_devs}）")
+            _et = t.get('空表类型') or []
+            if _et:
+                lines.append(f"  该车间无此类型设备、模板内已删表：{'、'.join(_et)}")
+    if type_fallback:
+        lines.append('## 〇之二、借用通用表（需人工核对检查项是否适用）')
+        for t in type_fallback:
+            for f in (t.get('借用情况') or [])[:10]:
+                lines.append(f"- {t['序号']} {t['名称']}：{f.get('设备类型')}「{f.get('设备')}」"
+                             f"借用 {f.get('借用表')} 的表")
     if todo_fields:
         lines.append('## 一、B 类预填，待人工补充实测数据')
         for t in todo_fields:
@@ -196,7 +248,7 @@ def _render_todo(todo_fields, todos, errors):
         lines.append('## 三、生成失败')
         for t in errors:
             lines.append(f"- {t['序号']} {t['名称']}：{t.get('原因')}")
-    if not todo_fields and not todos and not errors:
+    if not todo_fields and not todos and not errors and not empty_shells and not type_fallback:
         lines.append('（无待办项，全部完成）')
     return '\n'.join(lines)
 

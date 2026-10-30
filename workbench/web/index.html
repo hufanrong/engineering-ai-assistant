@@ -654,6 +654,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
         <button class="btn btn-sm" onclick="checkSupervision()">🔍 检查缺项</button>
         <button class="btn btn-sm btn-primary" onclick="runVolume()" style="background:#5B3EA8;border-color:#5B3EA8;color:#fff">📚 一键整卷</button>
       </div>
+      <!-- v0.1.172：整编要求登记表导入入口。整卷依赖这份登记表，此前界面里没有任何导入入口，
+           点「一键整卷」必然报「登记表不存在」，且用户无处可补。 -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:8px;background:#fff;border:1px dashed #c9b8e6;border-radius:6px;align-items:center">
+        <span style="font-size:12px;color:#5B3EA8;font-weight:600">① 整编要求登记表</span>
+        <span id="supRegStatus" style="font-size:12px;color:#888">检查中...</span>
+        <input type="file" id="supRegFile" accept=".json,.xlsx,.xlsm,.csv" style="font-size:12px;max-width:230px">
+        <button class="btn btn-sm" onclick="importRegistry()" style="border-color:#5B3EA8;color:#5B3EA8">📥 导入登记表</button>
+        <button class="btn btn-sm" onclick="loadRegistryStatus()" style="font-size:11px">↻ 刷新状态</button>
+        <span id="supRegMsg" style="font-size:12px;color:#666"></span>
+      </div>
       <div id="supStatusBar" style="font-size:12px;color:#5B3EA8;padding:8px;border-radius:6px;background:#fff;border:1px solid #e8e0f5;min-height:20px">选择册与车间后点击「检查缺项」。</div>
       <div id="supMissingList" style="font-size:12px;max-height:240px;overflow:auto;margin-top:8px"></div>
       <div id="supTodoBar" style="font-size:12px;margin-top:8px"></div>
@@ -829,7 +839,7 @@ function switchModule(moduleName) {
     
     // 模块加载时刷新数据（无项目时也能访问，显示空状态）
     if (moduleName === 'resource') { try { loadResourceData(); loadStorageLocations(); } catch(e) {} }
-    if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); loadSupCategories(); loadSupWorkshops(); loadSupConfig(); } catch(e) {} }
+    if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); loadSupCategories(); loadSupWorkshops(); loadSupConfig(); loadRegistryStatus(); } catch(e) {} }
     if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); onEnterArchiveModule(); } catch(e) {} }
     if (moduleName === 'ai') { try { loadOperationLogs(); } catch(e) {} }
     if (moduleName === 'update') { try { loadUpdateInfo(); } catch(e) {} }
@@ -2255,6 +2265,52 @@ function getCurrentProjectIdForSup() {
         if (c && c.value) return c.value;
     } catch(e) {}
     return '';
+}
+
+// v0.1.172：整编要求登记表状态 / 导入
+function loadRegistryStatus() {
+    var el = document.getElementById('supRegStatus');
+    if (!el) return;
+    fetch('/api/supervision/registry')
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if (!d.ok) { el.innerHTML = '<span style="color:#c62828">登记表状态读取失败</span>'; return; }
+            var g = d.registry || {};
+            if (g.ready) {
+                var books = g.books || {};
+                var parts = [];
+                Object.keys(books).forEach(function(k){ parts.push(k + ' ' + books[k]); });
+                el.innerHTML = '<span style="color:#2e7d32">已就绪：共 <b>' + g.total + '</b> 项</span>'
+                    + (parts.length ? '｜' + parts.join('、') : '')
+                    + (g.incomplete_items ? '｜<span style="color:#e08a00">' + g.incomplete_items + ' 项字段不全</span>' : '');
+            } else if (g.exists) {
+                el.innerHTML = '<span style="color:#c62828">登记表存在但无有效条目（' + (g.total||0) + ' 项），整卷不可用</span>';
+            } else {
+                el.innerHTML = '<span style="color:#c62828">尚未导入整编要求登记表，整卷不可用</span>';
+            }
+        })
+        .catch(function(){ el.innerHTML = '<span style="color:#c62828">登记表状态读取失败</span>'; });
+}
+function importRegistry() {
+    var f = document.getElementById('supRegFile');
+    var msg = document.getElementById('supRegMsg');
+    if (!f || !f.files || !f.files.length) { msg.textContent = '请先选择登记表文件（.xlsx / .csv / .json）'; return; }
+    var fd = new FormData();
+    fd.append('file', f.files[0]);
+    msg.textContent = '导入中...';
+    fetch('/api/supervision/registry', { method: 'POST', body: fd })
+        .then(function(r){ return r.json().then(function(j){ return {s: r.status, j: j}; }); })
+        .then(function(x){
+            if (!x.j.ok) {
+                msg.innerHTML = '<span style="color:#c62828">导入失败：' + ((x.j.detail || x.j.error) || '未知错误') + '</span>';
+                return;
+            }
+            var g = x.j.registry || {};
+            msg.innerHTML = '<span style="color:#2e7d32">已导入 ' + (g.imported||0) + ' 项'
+                + (g.items_without_book ? '（' + g.items_without_book + ' 项未标册）' : '') + '</span>';
+            loadRegistryStatus();
+        })
+        .catch(function(e){ msg.innerHTML = '<span style="color:#c62828">导入失败：' + e + '</span>'; });
 }
 function checkSupervision() {
     var pid = getCurrentProjectIdForSup();

@@ -216,6 +216,10 @@ DEVICE_TYPE_KEYWORDS = [
     ("胶带输送机", ["胶带输送机", "胶带机"]),
     ("给料机", ["给料机"]),
     ("破碎机", ["破碎机", "颚式", "圆锥破", "反击破"]),
+    # v0.1.172：选矿主流程设备原来全部落到「通用」，模板匹配时无法报出具体缺哪类表
+    ("磨矿设备", ["球磨机", "棒磨机", "半自磨机", "磨机"]),
+    ("浮选设备", ["浮选机", "浮选柱", "浮选"]),
+    ("磁选设备", ["磁选机"]),
     ("除铁器", ["除铁器", "磁选"]),
     ("除尘设备", ["除尘", "袋式"]),
     ("离心风机", ["风机", "通风机", "G6-51"]),
@@ -553,17 +557,35 @@ def _fill_element(root, fill: Dict) -> set:
     return unfilled
 
 
+def _table_signature(tbl) -> tuple:
+    """表格结构指纹：逐行逐格文本（占位符原样保留）。
+    同一模板内指纹相同的两张表 = 表单内容完全一致，可用于判定「该表与设备类型无关」。"""
+    sig = []
+    for tr in tbl.findall(q('tr')):
+        cells = []
+        for tc in tr.findall(q('tc')):
+            cells.append(''.join(x.text or '' for x in tc.findall('.//' + q('t')))
+                         .strip())
+        sig.append(' | '.join(cells))
+    return tuple(sig)
+
+
 def _render_docx_by_workshop(template_path: str, fill_base: Dict,
                              dev_groups: Dict[str, List[Dict]],
                              workshop: str = "",
                              logical_name: str = "") -> Dict:
     """
-    车间级渲染核心：
+    车间级渲染核心（v0.1.172 重写「空壳」链路）：
     - 打开模板 docx，遍历 body 下所有 tbl
     - 每个 tbl 按表序从 _table_index.json 取设备类型 → 匹配 dev_groups[类型]
       - 组内 N 台 → 复制 N 份表，每份填一台设备
-      - 无设备 → 跳过
+      - 同一表格指纹（=表单内容完全一致）在多张表出现时，同一台设备只出一次，
+        避免同一份表被重复打印 N 遍
+      - 该类型无设备，但该表指纹被模板里多个不同设备类型共用（=与类型无关的表）
+        → 允许借给模板未覆盖的其它类型设备使用，并记入 type_fallback 供人工核对
+      - 该表指纹只属于本类型（=类型专用检查项表）→ 不生产空白表，记入 empty_tables
     - 通用表（清单标"通用"）→ 只填项目常量
+    - 覆盖闸门：本车间有设备但一台都没被任何表覆盖 → ok=False，绝不产出空壳文件
     - 输出：保留原文档结构 + 表格序列
     """
     with ZipFile(template_path) as z:
@@ -597,23 +619,82 @@ def _render_docx_by_workshop(template_path: str, fill_base: Dict,
     filled_count = 0
     skipped_tables = []
     total_unfilled = set()
+    empty_tables = []          # 模板声明了该类型表，但本车间没有该类型设备
+    dedup_tables = []          # 同一张表单在模板里重复出现，已去重（不是缺表）
+    type_fallback = []         # 设备借用了「与类型无关的表」，需人工核对
+    covered_devices = []       # 真正进了表的设备（位号/名称）
+    uncovered_devices = []     # 本车间有、但本模板一张表都没接住的设备（空壳的可见证据）
+
+    # 预扫：每个表格指纹被哪些设备类型共用（共用 ≥2 种 = 该表与设备类型无关）
+    sig_types: Dict[tuple, set] = {}
+    slot_sig = []
+    slot_type = []
+    for seq, tbl in enumerate(tbls_in_body):
+        dev_type = table_index[seq] if seq < len(table_index) else _classify_table(tbl)
+        sig = _table_signature(tbl)
+        slot_sig.append(sig)
+        slot_type.append(dev_type)
+        sig_types.setdefault(sig, set()).add(dev_type)
+    declared_types = set(slot_type)
+
+    # 车间实际拥有的设备（按类型），含「通用」= 未能识别出专表类型的设备
+    present_types = {t: v for t, v in dev_groups.items() if v}
+    # 模板完全没声明的类型 → 只能借「与类型无关的表」，借不到就如实报缺
+    borrow_types = [t for t in present_types if t not in declared_types]
+
+    emitted = set()  # (表格指纹, 设备key) —— 同一份表 + 同一台设备只出一次，避免重复打印
+
+    def _dev_key(dev):
+        if not dev:
+            return ''
+        return dev.get('tag') or dev.get('name') or ''
 
     for seq, tbl in enumerate(tbls_in_body):
-        # 优先用清单（表序），缺失时用内容兜底
-        dev_type = table_index[seq] if seq < len(table_index) else _classify_table(tbl)
-        group = dev_groups.get(dev_type, [])
-        if not group:
-            # 无该类型设备 → 跳过（通用表例外：保留填项目常量）
-            if dev_type != '通用':
-                skipped_tables.append(dev_type)
-                body.remove(tbl)
+        dev_type = slot_type[seq]
+        sig = slot_sig[seq]
+        queue = []
+        # ① 本类型设备（去重：同一份表同一台设备只出一遍）
+        for dev in dev_groups.get(dev_type, []):
+            key = (sig, _dev_key(dev))
+            if key in emitted:
                 continue
-            group = [None]  # 通用表：只填常量，不填设备
+            emitted.add(key)
+            queue.append(dev)
+        # ② 通用表：无设备时只填项目常量（也只出一份）
+        if not queue and dev_type == '通用':
+            key = (sig, '')
+            if key not in emitted:
+                emitted.add(key)
+                queue.append(None)
+        # ③ 该表与设备类型无关（同一份表被多种类型共用）→ 借给模板未覆盖的类型
+        if not queue and dev_type != '通用' and len(sig_types.get(sig, ())) >= 2:
+            for other_type in list(borrow_types):
+                for dev in present_types.get(other_type, []):
+                    key = (sig, _dev_key(dev))
+                    if key in emitted:
+                        continue
+                    emitted.add(key)
+                    queue.append(dev)
+                    type_fallback.append({'设备类型': other_type, '设备': dev.get('name', ''),
+                                          '借用表': dev_type})
+        if not queue:
+            # 两种完全不同的情况，记账必须分开，否则用户看到「模板内空表类型」
+            # 里列着一个明明有设备的类型，会误判成模板缺表：
+            #   ① 本类型有设备，但这张表与前面某张表是同一张表单（指纹相同），
+            #      该设备的这一份记录已经出过 → 属重复表单去重，不是缺表
+            #   ② 本类型在本车间确实没有设备 → 删表，并计入 empty_tables
+            if dev_groups.get(dev_type):
+                dedup_tables.append(dev_type)
+            else:
+                empty_tables.append(dev_type)
+            skipped_tables.append(dev_type)
+            body.remove(tbl)
+            continue
 
         # 每台设备一份表；复制必须基于「未填充的原始表」
         orig_tbl = copy.deepcopy(tbl)
         prev = tbl
-        for i, dev in enumerate(group):
+        for i, dev in enumerate(queue):
             if i == 0:
                 cur_tbl = tbl
             else:
@@ -628,10 +709,20 @@ def _render_docx_by_workshop(template_path: str, fill_base: Dict,
                 fill['施工图号'] = dev.get('drawing_no', '')
                 fill['数量'] = dev.get('quantity', '')
                 fill['单重'] = dev.get('weight', '')
+                covered_devices.append({'位号': dev.get('tag', ''), '名称': dev.get('name', ''),
+                                        '设备类型': dev.get('dev_type', '')})
             unf = _fill_element(cur_tbl, fill)
             total_unfilled.update(unf)
             filled_count += 1
             prev = cur_tbl
+
+    # 记账：哪些设备一张表都没接住（= 这份文件对它是空壳）
+    covered_keys = {(_d.get('位号') or _d.get('名称') or '') for _d in covered_devices}
+    for _t, _devs in present_types.items():
+        for _d in _devs:
+            if (_d.get('tag') or _d.get('name') or '') not in covered_keys:
+                uncovered_devices.append({'位号': _d.get('tag', ''), '名称': _d.get('name', ''),
+                                          '设备类型': _d.get('dev_type', '')})
 
     xml_bytes = etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True)
     # 去重跳过列表（同类型多表只记录一次）
@@ -639,14 +730,53 @@ def _render_docx_by_workshop(template_path: str, fill_base: Dict,
     for s in skipped_tables:
         if s not in seen_skip:
             seen_skip.append(s)
+    seen_empty = []
+    for s in empty_tables:
+        if s not in seen_empty:
+            seen_empty.append(s)
+    # 一台设备会在多张表里出现，覆盖清单按设备去重
+    seen_cov = set()
+    cov_out = []
+    for _c in covered_devices:
+        _k = _c.get('位号') or _c.get('名称') or ''
+        if _k in seen_cov:
+            continue
+        seen_cov.add(_k)
+        cov_out.append(_c)
     return {
         "ok": True,
         "xml": xml_bytes,
         "others": others,
         "filled_count": filled_count,
         "skipped_tables": seen_skip,
+        "empty_tables": seen_empty,
+        "dedup_tables": _uniq(dedup_tables),
+        "type_fallback": type_fallback,
+        "uncovered_devices": uncovered_devices,
+        "covered_devices": cov_out,
         "unfilled_fields": sorted(total_unfilled),
     }
+
+
+def _uniq(seq):
+    """保序去重（同一类型在多张表里出现时只记一次）。"""
+    out = []
+    for x in seq:
+        if x not in out:
+            out.append(x)
+    return out
+
+
+def _classify_slots(template_path: str, logical_name: str = "") -> List[str]:
+    """模板声明的设备类型清单（去重）。用于报错时说明「模板只认哪些类型」。"""
+    tpl_name = os.path.basename(template_path)
+    idx = _load_table_index()
+    types = idx.get(tpl_name) or (idx.get(logical_name + '.docx') if logical_name else None) or []
+    out = []
+    for t in types:
+        if t and t not in out:
+            out.append(t)
+    return out
 
 
 def _classify_table(tbl) -> str:
@@ -729,6 +859,31 @@ def render_supervision_doc(category: str = "", workshop: str = "",
     if not result.get("ok"):
         return result
 
+    # v0.1.172：空壳闸门 —— 一张表都没填（= 整份文件只剩标题段落）就不产出文件。
+    # 原来这里无论 filled_count 是多少都写盘并返回 ok=True，
+    # 用户在现场打印出来才发现整份文件只有表头、没有一行设备记录。
+    if not result.get('filled_count'):
+        _types = sorted({d['dev_type'] for d in devices})
+        _slots = _classify_slots(tpl_path, chosen.get('name', ''))
+        if not devices:
+            _why = (f"「{workshop or '全厂'}」车间没有设备数据，模板内的设备表全部落空。"
+                    f"请先上传设备台账并确认设备已归到该车间")
+        else:
+            _why = (f"模板与「{workshop or '全车间'}」的设备对不上：车间设备类型 "
+                    f"{'、'.join(_types) or '未知'}，模板只声明 {'、'.join(_slots) or '未知'}")
+        return {
+            "ok": False,
+            "error": _why,
+            "empty_shell_blocked": True,
+            "device_count": len(devices),
+            "covered_devices": [],
+            "uncovered_devices": result.get('uncovered_devices', []),
+            "empty_tables": result.get('empty_tables', []),
+            "template_types": _slots,
+            "workshop_types": _types,
+            "suggestion": "缺对应设备类型的监理表模板：需补模板，或改人工填报；不能自动产出空表",
+        }
+
     # 输出到项目 exports
     from . import project_manager as _pm
     data_dir = _pm.get_project_data_dir(project_id)
@@ -761,6 +916,10 @@ def render_supervision_doc(category: str = "", workshop: str = "",
         "device_count": len(devices),
         "filled_tables": result['filled_count'],
         "skipped_tables": result['skipped_tables'],
+        "empty_tables": result.get('empty_tables', []),
+        "covered_devices": result.get('covered_devices', []),
+        "uncovered_devices": result.get('uncovered_devices', []),
+        "type_fallback": result.get('type_fallback', []),
         "filled_fields": filled_fields,
         "unfilled_fields": result['unfilled_fields'],
     }

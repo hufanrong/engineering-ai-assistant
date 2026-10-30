@@ -604,6 +604,15 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
         except Exception as e:  # noqa: BLE001
             results.append({"file": f.filename or "unnamed", "status": "failed", "error": str(e)})
     _refresh_project_stats()
+    # v0.1.172：上传后同步设备台账到 index.json["devices"]
+    # （原来这个字段没人写，监理确认表按车间出设备行永远为空）
+    try:
+        from . import project_manager as _pm3
+        _cur3 = _pm3.get_current_project()
+        if _cur3:
+            scanner.sync_devices(_pm3.get_project_data_dir(_cur3["id"]))
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "results": results}
 
 
@@ -1560,7 +1569,13 @@ def equipment_merge_run():
                     cache = _json.load(f)
                 docs[sha] = {"_cache": cache, "file_name": info.get("file_name", "")}
     result = _em.run_merge(docs)
-    return {"ok": True, "data_dir": data_dir, **result}
+    # v0.1.172：合并结果同步写进 index.json["devices"]
+    # —— 原来合并结果只落在 equipment_merge.json，监理确认表读 index.json 仍是空的
+    try:
+        _sync = _em.sync_devices_to_index(data_dir)
+    except Exception as _e:  # noqa: BLE001
+        _sync = {"devices": 0, "error": str(_e)}
+    return {"ok": True, "data_dir": data_dir, "index_sync": _sync, **result}
 
 
 @app.get("/api/equipment-merge/list")
