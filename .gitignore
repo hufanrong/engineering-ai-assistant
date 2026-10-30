@@ -67,3 +67,13 @@ pnpm-lock.yaml
 # 例外：壳项目的 webDir 需要纳入版本管理
 !packaging/fangong-android/dist/
 !packaging/fangong-android/dist/index.html
+
+# 自测临时产物：样本目录、selftest 报告、服务日志
+# reports/<run_id>/ 里的正式报告要提交（那是回传通道），只挡临时与运行期垃圾
+workbench/tools/_samples/
+workbench/tools/selftest_report.json
+workbench/tools/selftest_report.md
+reports/service.log
+reports/.wb_loop.lock
+**/__pycache__/
+*.pyc
