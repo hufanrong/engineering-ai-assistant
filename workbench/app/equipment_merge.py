@@ -73,9 +73,12 @@ def extract_equipment_from_cache(cache: dict) -> list:
                     model = str(row.get("型号") or row.get("规格型号") or row.get("规格") or "").strip()
                     ws = str(row.get("车间") or row.get("所属车间") or row.get("区域") or "").strip()
                     weight = str(row.get("重量") or row.get("设备重量") or "").strip()
+                    # v0.1.167：补采「数量」—— 原来只取重量，台账里的数量列整列丢失，
+                    # 设备库/竣工资料的数量恒为空
+                    qty = str(row.get("数量") or row.get("台数") or "").strip()
                 else:
                     vals = [str(v or "").strip() for v in row]
-                    tag = name = model = ws = weight = ""
+                    tag = name = model = ws = weight = qty = ""
                     for i, h in enumerate(header):
                         if i >= len(vals):
                             break
@@ -89,13 +92,18 @@ def extract_equipment_from_cache(cache: dict) -> list:
                             ws = vals[i]
                         elif h in ("重量", "设备重量"):
                             weight = vals[i]
+                        elif h in ("数量", "台数"):
+                            qty = vals[i]
                 if not tag and not name:
                     continue
                 fields = {}
                 if weight:
                     fields["重量"] = weight
+                if qty:
+                    fields["数量"] = qty
                 out.append({
                     "tag": tag, "name": name, "model": model,
+                    "quantity": qty, "weight": weight,
                     "workshop": ws, "source_file": fname,
                     "source_type": "excel", "version_ts": ts,
                     "fields": fields,
@@ -250,6 +258,10 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 "canonical_tag": tag,
                 "name": eq.get("name", ""),
                 "model": eq.get("model", ""),
+                # v0.1.167：数量/重量提到顶层 —— 下游 /api/supervision-templates/equipment
+                # 与 docgen 读的是顶层字段，只放在 fields 里读不到
+                "quantity": eq.get("quantity", "") or (eq.get("fields", {}) or {}).get("数量", ""),
+                "weight": eq.get("weight", "") or (eq.get("fields", {}) or {}).get("重量", ""),
                 "workshop": eq.get("workshop", ""),
                 "versions": [eq],
                 "fields": dict(eq.get("fields", {})),
@@ -272,6 +284,12 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 existing["model"] = eq["model"]
             if eq.get("workshop"):
                 existing["workshop"] = eq["workshop"]
+            # v0.1.167：数量/重量同样合并（首个非空即采用，后续非空覆盖）
+            for _f in ("quantity", "weight"):
+                _v = eq.get(_f or "", "") or (eq.get("fields", {}) or {}).get(
+                    "数量" if _f == "quantity" else "重量", "")
+                if _v:
+                    existing[_f] = _v
             # 字段合并：冲突记录
             for k, v in eq.get("fields", {}).items():
                 if k in existing["fields"] and existing["fields"][k] != v:
