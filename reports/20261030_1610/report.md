@@ -57,3 +57,26 @@ evidence/
   fieldtest_report_详细版.md/.json  完整版实测报告（含优先级建议）
   word_samples/*.docx             4 份 Word 可打开成品，供人工核对【待补充】
 ```
+
+---
+
+## 附：与远端 v0.1.176 逐条对照（回传时顺手核对，避免报告过期）
+
+推回前拉取了 `origin/main`（已到 v0.1.176），对本次 P0/P1 逐条看了一遍，结论：**这份报告对 0.1.176 仍然有效**。
+
+| 问题 | 0.1.176 现状 | 依据 |
+|---|---|---|
+| .bat 纯 LF | **未修**：`install.bat` CRLF=0、`run_workbench.bat` CRLF=0、`install-full.bat` CRLF=0（`run_loop.bat` 已修为 38/38，说明只补了一个） | `git show origin/main:workbench/*.bat` |
+| requirements 在 py3.13 不可解 | **未修**：仍 `chromadb==0.5.5`、`sentence-transformers==3.0.1` | `workbench/requirements.txt` |
+| 一键竣工 500 | **未修**：`doc_type = req["type"]` 仍在（行号移到 252） | `workbench/app/completion_archive.py:252` |
+| 首页自检阈值误判 | **未修**：仍 `len(raw) > 200_000`，而 `index.html` 仍 193830 字节 | `workbench/tools/verify_install.py` |
+| 登记表无册列 → 整卷恒 0 | **未修，且找到显示/过滤口径不一致的根因** | 见下 |
+
+### 登记表这条要特别说明
+
+同一个模块里两处口径不一致：
+
+- `registry_info()`（行 595）展示用：`b = _clean_book(it.get("册")) or "（未标册）"` → 界面/接口告诉用户「（未标册）233 条」；
+- `_book_items()`（行 89）整卷过滤用：`[it for it in load_registry() if _clean_book(it.get('册')) == b]` → 条目本身没有 `册` 键，任何册名都匹配不上。
+
+结果就是用户看到 `books={'（未标册）':233}`、`available_books` 却是空，点整卷永远报「没有这一册」。**修法建议**：`_book_items()` 用与 `registry_info()` 相同的兜底口径（`or "（未标册）"`），或在登记表导入时就把「（未标册）」写进条目的 `册` 字段。
