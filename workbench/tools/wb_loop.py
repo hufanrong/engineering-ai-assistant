@@ -310,17 +310,23 @@ def stop_service():
 
 
 def start_service():
-    """后台拉起 start.py，等它健康。Windows 用 CREATE_NEW_PROCESS_GROUP 脱离。"""
+    """后台拉起 start.py，等它健康。Windows 用 CREATE_NEW_PROCESS_GROUP 脱离。
+
+    v0.1.169：加上 FANGONG_NO_BROWSER=1 —— 无人值守每轮都会重启服务，
+    否则每轮都弹一个浏览器窗口出来，跑一夜能堆几十个。
+    """
     py = sys.executable
     kwargs = {}
     if platform.system() == "Windows":
         kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True
+    child_env = dict(os.environ)
+    child_env["FANGONG_NO_BROWSER"] = "1"
     logf = open(os.path.join(REPORTS_DIR, "service.log"), "a", encoding="utf-8")
     try:
         subprocess.Popen([py, os.path.join(WB_DIR, "start.py")], cwd=WB_DIR,
-                         stdout=logf, stderr=logf, **kwargs)
+                         stdout=logf, stderr=logf, env=child_env, **kwargs)
     except Exception as e:  # noqa: BLE001
         return False, f"启动失败: {e}"
     for _ in range(30):
