@@ -48,13 +48,53 @@ BRANCH = "main"
 LOCK_FILE = os.path.join(REPORTS_DIR, ".wb_loop.lock")
 
 
+def git_dir_info():
+    """判断当前目录是不是 git 仓库，并取到「公共 git 目录」。
+
+    v0.1.170：原来用 os.path.isdir(REPO_DIR/.git) 判定。用户日常全在
+    **git worktree** 里开发（实测 r3/r4 都是 D:\fangong-workbench 的 worktree，
+    .git 是 55 字节的指针文件 `gitdir: .../worktrees/xxx`），isdir() 恒为假
+    → 通道在 worktree 里永远起不来，直接 return 2。改用 git 自己的判定。
+
+    返回 (is_repo, git_dir, common_dir)。
+    """
+    rc, out, _ = git("rev-parse", "--git-dir")
+    git_dir = out.strip() if rc == 0 else ""
+    if not git_dir:
+        return False, "", ""
+    rc2, out2, _ = git("rev-parse", "--git-common-dir")
+    common = out2.strip() if rc2 == 0 else git_dir
+    # git 可能返回相对路径，统一成绝对路径
+    if git_dir and not os.path.isabs(git_dir):
+        git_dir = os.path.abspath(os.path.join(REPO_DIR, git_dir))
+    if common and not os.path.isabs(common):
+        common = os.path.abspath(os.path.join(REPO_DIR, common))
+    return True, git_dir, common
+
+
 def acquire_lock():
     """单实例锁：避免用户误开两个窗口、两个循环互相抢端口和提交。
+
+    v0.1.170：锁文件落到 **git 公共目录**（worktree 之间共享），否则同一个
+    仓库的三个 worktree 各有一把锁，三个循环同时往 main 推，必然互相打断。
+    公共目录不可写时回落到 reports/。
 
     进程异常退出会留下锁文件，所以同时校验里面的 PID 是否还活着；
     死锁文件（stale）自动接管，不会把用户永久挡在外面。
     """
+    global LOCK_FILE
     os.makedirs(REPORTS_DIR, exist_ok=True)
+    _is_repo, _gd, common = git_dir_info()
+    if common and os.path.isdir(common):
+        try:
+            probe = os.path.join(common, ".wb_loop_probe")
+            with open(probe, "w", encoding="utf-8") as f:
+                f.write("1")
+            os.remove(probe)
+            LOCK_FILE = os.path.join(common, "wb_loop.lock")
+        except Exception:  # noqa: BLE001
+            LOCK_FILE = os.path.join(REPORTS_DIR, ".wb_loop.lock")
+
     if os.path.exists(LOCK_FILE):
         try:
             with open(LOCK_FILE, encoding="utf-8") as f:
@@ -539,7 +579,15 @@ def one_round(args):
     rec = {"run_id": run_id, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
            "status": "running", "steps": [], "summary": {}, "error": ""}
 
-    def finish(status, summary=None, error=""):
+    def write_report_files(status, summary=None, error=""):
+        """只负责把 report.json / report.md 落盘。
+
+        v0.1.170：原来 report.json/md 在 finish 里写，而 finish 在
+        commit_and_push **之后**才调用 → --once 单轮跑完时，这两个最关键的
+        文件还没生成就被提交了，实测远端那一轮只有 console.log / env.json /
+        selftest_report.json，没有 report.json，ai_side.py 读不到结论。
+        拆成「先写盘 → 再提交 → 最后收尾记账」，保证一次提交就完整。
+        """
         rec["status"] = status
         rec["summary"] = summary or {}
         rec["error"] = error
@@ -548,7 +596,6 @@ def one_round(args):
         rec["commit_after"] = local_head()
         with open(os.path.join(out_dir, "report.json"), "w", encoding="utf-8") as f:
             json.dump(rec, f, ensure_ascii=False, indent=2)
-        # 人读版
         with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as f:
             f.write(f"# WORKbuddy 自测报告 {run_id}\n\n")
             f.write(f"- 状态：**{status}**\n- 代码版本：`{rec['commit_after'][:12]}`\n")
@@ -563,12 +610,31 @@ def one_round(args):
                 f.write(f"- [{mark}] {s.get('step')}　rc={s.get('rc')}\n")
                 if s.get("err"):
                     f.write(f"  - {str(s['err'])[:200]}\n")
+
+    def record_state(status, summary=None):
+        """记账（本地状态文件），最后调用。"""
         st["runs"].append({"run_id": run_id, "status": status,
-                           "commit": rec["commit_after"], "summary": summary})
+                           "commit": rec.get("commit_after", ""), "summary": summary})
         st["runs"] = st["runs"][-30:]
         if status in ("passed", "failed"):
-            st["last_tested_commit"] = rec["commit_after"]
+            st["last_tested_commit"] = rec.get("commit_after", "")
         save_state(st)
+
+    def finish(status, summary=None, error="", push=True):
+        """收尾：写盘 → （可选）提交回传 → 记账。
+
+        顺序很重要：必须先落盘再 commit，否则 --once 的报告进不了远端。
+        """
+        write_report_files(status, summary, error)
+        if push and not getattr(args, "no_push", False):
+            # 提交信息里带状态，方便远端一眼看出这一轮过没过
+            pushed, psteps = commit_and_push(run_id, out_dir, status, summary or {},
+                                             err_msg=error)
+            rec["steps"].extend(psteps)
+            rec["pushed"] = pushed
+            # 提交后再写一次，保证 report.json 里也含回传结果
+            write_report_files(status, summary, error)
+        record_state(status, summary)
         log(f"本轮结束 status={status} 报告在 reports/{run_id}/")
         return status
 
@@ -649,19 +715,14 @@ def one_round(args):
     with open(os.path.join(out_dir, "env.json"), "w", encoding="utf-8") as f:
         json.dump(collect_env(), f, ensure_ascii=False, indent=2)
 
-    # ---- 4. 回传
+    # ---- 4. 回传（写盘、提交、记账都在 finish 里按正确顺序做完）
     status = "passed" if (rc == 0 and summary.get("failed", 1) == 0) else "failed"
     if not report:
         status = "error"
     rec["steps"].append({"step": "判定", "rc": 0,
                          "out": f"status={status} rc={rc}"})
 
-    if not args.no_push:
-        pushed, psteps = commit_and_push(run_id, out_dir, status, summary,
-                                         err_msg=rec["error"])
-        rec["steps"].extend(psteps)
-        rec["pushed"] = pushed
-    finish(status, summary)
+    finish(status, summary, error=rec.get("error", ""))
     return status
 
 
@@ -676,14 +737,18 @@ def main():
                     help="跳过拉取（仅调试用：沙箱里 git 不通，用于单独验证 TEST→REPORT 两段）")
     a = ap.parse_args()
 
-    if not os.path.isdir(os.path.join(REPO_DIR, ".git")):
+    is_repo, git_dir, common = git_dir_info()
+    if not is_repo:
         print(f"[错误] {REPO_DIR} 不是 git 仓库，请先确认路径")
+        print("       （worktree 也支持：判定用 git rev-parse --git-dir，不靠 .git 目录）")
         return 2
 
     ok, holder = acquire_lock()
     if not ok:
         print(f"[错误] 已有循环在跑（PID {holder}）。同一个仓库不要同时开两个循环。")
-        print("       确认上一个已经退出后，删除 reports/.wb_loop.lock 再试。")
+        # v0.1.170：锁已移到共享 git 目录（worktree 与主仓库共用同一把），
+        # 提示里的路径跟着实际 LOCK_FILE 走，免得按旧路径删不掉。
+        print(f"       确认上一个已经退出后，删除 {LOCK_FILE} 再试。")
         return 3
 
     try:
