@@ -17,6 +17,7 @@ from pydantic import BaseModel
 import datetime
 
 from . import config
+from . import telemetry
 from . import scanner
 from .vector_store import VectorStore
 from . import upload_queue
@@ -49,6 +50,49 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# v0.1.171：请求级遥测中间件。
+# 原来程序对真实使用中的失败不留任何痕迹：没有请求日志、没有异常钩子，
+# 用户遇到「上传 200 个 PDF 有 30 个解析不出来」时，事后查不到是哪个接口、
+# 什么错误、慢在哪一步 —— 这种状态下的日志没法用来优化。
+# 这里只记路由/状态码/耗时/异常类型，**不记请求体、响应体、文件路径**，
+# 且路径类信息在写入前经 telemetry.scrub() 脱敏（见 telemetry.py 说明）。
+@app.middleware("http")
+async def _telemetry_middleware(request: Request, call_next):
+    import time as _t
+    t0 = _t.perf_counter()
+    status = 0
+    err_kind, err_msg = "", ""
+    try:
+        resp = await call_next(request)
+        status = getattr(resp, "status_code", 0) or 0
+        return resp
+    except Exception as ex:  # noqa: BLE001
+        err_kind = type(ex).__name__
+        err_msg = str(ex)
+        raise
+    finally:
+        dur = (_t.perf_counter() - t0) * 1000
+        try:
+            try:
+                # 只读 Content-Length 头，绝不读正文：上传类接口的体积是判断
+                # 「200 个文件是不是真的传上来了」的关键线索，但正文含业务内容不能落盘。
+                _clen = int(request.headers.get("content-length") or 0)
+            except Exception:  # noqa: BLE001
+                _clen = 0
+            telemetry.record(
+                method=request.method,
+                route=request.url.path,
+                req_bytes=_clen,
+                # 异常路径 status 仍是 0（没拿到响应），按 500 记，才能被统计算成服务端错误
+                status=status or (500 if err_kind else 0),
+                dur_ms=dur,
+                err=err_msg,
+                err_kind=err_kind,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
 # 共享扫描状态（单任务）
 # v0.1.134：增加 start_ts/heartbeat 用于卡死检测（守护线程自动恢复）
@@ -109,7 +153,56 @@ def status():
     }
 
 
-# ---------- 扫描 ----------
+# ---------- 使用遥测（v0.1.171）----------
+# 三个只读 + 一个导出。导出的是**脱敏**诊断包（无项目名/客户/地点/文件名/路径），
+# 目的：真实使用数据能拿来做优化，又不会把企业业务信息公开出去。
+@app.get("/api/telemetry/stats")
+def telemetry_stats(since_min: int = 0):
+    """按路由聚合的耗时/错误统计。since_min>0 时只看最近 N 分钟。"""
+    since = (time.time() - since_min * 60) if since_min > 0 else 0.0
+    return {"ok": True, "data": telemetry.stats(since_ts=since)}
+
+
+@app.get("/api/telemetry/errors")
+def telemetry_errors(limit: int = 30, since_min: int = 0):
+    """错误指纹聚合（同一类错误只算一条），带一条脱敏后的示例。"""
+    since = (time.time() - since_min * 60) if since_min > 0 else 0.0
+    st = telemetry.stats(since_ts=since)
+    return {"ok": True, "items": st["errors"][:max(1, limit)], "total": len(st["errors"])}
+
+
+@app.get("/api/telemetry/export")
+def telemetry_export(full: bool = False, advance: bool = False):
+    """导出脱敏诊断包（JSON）。真实使用后取这个包来看，不要取原始日志。
+
+    full=true   看全部历史（默认从上次水位继续，便于"只看新增"）
+    advance=true 导出后把水位推进到本次截止时间
+    """
+    since = 0.0 if full else telemetry.read_watermark()
+    return {"ok": True, "data": telemetry.export_bundle(since_ts=since,
+                                                        advance_watermark=advance)}
+
+
+@app.post("/api/telemetry/watermark/reset")
+def telemetry_watermark_reset():
+    """复位水位（下次导出重新从最早记录开始）。"""
+    return {"ok": telemetry.reset_watermark()}
+
+
+@app.get("/api/telemetry/status")
+def telemetry_status():
+    """遥测自身的状态：是否在记录、已记多少条、水位在哪。"""
+    wm = telemetry.read_watermark()
+    return {
+        "ok": True,
+        "enabled": True,
+        "log_file": "data/telemetry/requests.jsonl",
+        "lines": telemetry.line_count(),
+        "watermark": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(wm)) if wm else "",
+        "privacy": "只记路由/状态/耗时/异常类型；导出包已脱敏，不含项目名与路径",
+    }
+
+
 class ScanReq(BaseModel):
     folder: Union[str, List[str]]
     force: bool = False

@@ -604,6 +604,117 @@ def phase4(samples_dir):
            f"{str(pdf_path)[:100]} ({pdf_size}B)", pdf_exists and pdf_size > 0, evidence)
 
 
+# ---------------- 阶段 5：使用遥测可用性与脱敏自检 ----------------
+def phase5(samples_dir):
+    """验证「真实使用数据能不能安全地拿来做优化」。
+
+    v0.1.171 新增。背景：真实使用里「上传 200 个 PDF、30 个没解析出来」，
+    原来程序对此**不留任何痕迹**（operation_log 只有 4 个粗粒度字段、无耗时、
+    无异常、无输入文件）。没有可用日志，所谓「用真实数据持续优化」就是空话。
+    本阶段不测业务功能，只回答两个问题：
+      ① 程序是否真在记录每一次请求（路由/状态/耗时/异常）；
+      ② 导出的诊断包是否真的脱敏到可以直接交给 AI 工程师（仓库是公开的）。
+    """
+    P = 5
+    print("\n=== 阶段 5：使用遥测可用性与脱敏自检 ===")
+
+    # 5.1 先打两个已知请求，制造可观测的记录（其中一个是 404，用于验证错误聚合）
+    call("GET", "/api/status")
+    call("GET", "/api/__telemetry_probe_404__")
+    time.sleep(0.2)
+
+    # 5.2 遥测状态接口
+    code, body, err = call("GET", "/api/telemetry/status")
+    ok = code == 200 and isinstance(body, dict) and body.get("ok") is True
+    lines = (body or {}).get("lines") if isinstance(body, dict) else None
+    record(P, "遥测状态接口", "200 且 enabled=true",
+           f"{code} lines={lines} err={err}", ok, json.dumps(body, ensure_ascii=False)[:200] if body else "")
+
+    # 5.3 是否真的落到了记录：至少记录数 > 0
+    n = lines if isinstance(lines, int) else 0
+    record(P, "请求记录落盘", "requests.jsonl 有记录（lines > 0）",
+           f"lines={n}", n > 0, f"/api/telemetry/status lines={n}")
+
+    # 5.4 统计接口：按路由聚合，而不是全挤成一条
+    code, body, err = call("GET", "/api/telemetry/stats")
+    ok4 = code == 200 and isinstance(body, dict) and body.get("ok") is True
+    data = (body or {}).get("data") or {}
+    by_route = data.get("by_route") or []
+    # 关键：路由必须保留斜杠结构。曾经 scrub() 把 /api/status 整段吃成 <PATH>，
+    # 所有请求聚成一条，统计彻底失去意义 —— 这里专门断言路由形态。
+    distinct = len({r.get("route") for r in by_route if isinstance(r, dict)})
+    has_slash = any(str(r.get("route", "")).count("/") >= 2 for r in by_route if isinstance(r, dict))
+    record(P, "按路由聚合", "by_route 存在且路由保留 /api/xxx 结构",
+           f"routes={distinct} total={data.get('total')} 分层={has_slash}",
+           ok4 and distinct >= 1 and has_slash,
+           json.dumps(by_route[:2], ensure_ascii=False)[:250] if by_route else (err or ""))
+
+    # 5.5 4xx 不能被算成服务端错误
+    c4 = sum(int(r.get("status_4xx") or 0) for r in by_route if isinstance(r, dict))
+    record(P, "4xx 计入客户端错误", "探测的 404 被计入 status_4xx",
+           f"status_4xx={c4}", c4 >= 1, f"by_route 汇总 status_4xx={c4}")
+
+    # 5.6 导出脱敏诊断包
+    code, body, err = call("GET", "/api/telemetry/export")
+    bundle = (body or {}).get("data") if isinstance(body, dict) else None
+    ok6 = code == 200 and isinstance(bundle, dict) and bool(bundle)
+    record(P, "导出诊断包", "200 且返回结构化 bundle",
+           f"{code} keys={list(bundle)[:8] if isinstance(bundle, dict) else '-'}",
+           ok6, err or "")
+
+    if not ok6:
+        for s2 in ("包内不含业务敏感信息", "包内不含绝对路径", "包内有解析失败聚合"):
+            record(P, s2, "-", "导出失败，无法校验", None)
+        return
+
+    blob = json.dumps(bundle, ensure_ascii=False)
+
+    # 5.7 脱敏标记必须在：privacy.sanitized=true
+    priv = bundle.get("privacy") or {}
+    record(P, "脱敏标记", "privacy.sanitized == true",
+           f"sanitized={priv.get('sanitized')}", priv.get("sanitized") is True,
+           json.dumps(priv, ensure_ascii=False)[:200])
+
+    # 5.8 绝对路径不得出现（Windows 盘符 / 家目录 / 沙箱路径都是业务信息）
+    import re as _re
+    drive = _re.findall(r"[A-Za-z]:[\\/]", blob)          # C:\ 或 C:/
+    home = ("/home/" in blob or "/root/" in blob
+            or "\\Users\\" in blob or "/Users/" in blob)
+    record(P, "包内不含绝对路径", "无盘符路径、无用户目录",
+           f"盘符命中={len(drive)} 用户目录={home}", (not drive) and (not home),
+           f"drive_hits={drive[:3]}")
+
+    # 5.9 业务敏感字段不得成为导出包的键（防止以后有人往里加原始文件名列表）
+    banned = ("project_name", "client", "customer", "file_path", "filename",
+              "file_list", "operator_name", "company")
+    keys = " ".join(_walk_keys(bundle)).lower()
+    hit = [b for b in banned if b in keys]
+    record(P, "包内不含业务敏感字段", "导出键名无项目名/客户/文件名/路径类字段",
+           f"命中={hit or '无'}", not hit, f"keys_sample={_walk_keys(bundle)[:12]}")
+
+    # 5.10 解析失败聚合可用（这是「上传 200 个漏了 30 个」的唯一线索）
+    pf = bundle.get("parse_failures") or {}
+    record(P, "解析失败聚合", "含 total_failed 与 by_ext/by_fingerprint",
+           f"total_failed={pf.get('total_failed')} by_ext={pf.get('by_ext')}",
+           isinstance(pf, dict) and "total_failed" in pf,
+           json.dumps({k: pf.get(k) for k in ("total_failed", "by_ext")}, ensure_ascii=False)[:250])
+
+
+def _walk_keys(obj, depth=0):
+    """递归收集 dict 的键名，用于检查导出包里有没有不该出现的字段。"""
+    out = []
+    if depth > 4:
+        return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out.append(str(k))
+            out.extend(_walk_keys(v, depth + 1))
+    elif isinstance(obj, list):
+        for v in obj[:3]:
+            out.extend(_walk_keys(v, depth + 1))
+    return out
+
+
 # ---------------- 报告 ----------------
 def write_report(out_path_json, out_path_md, samples_dir):
     payload = {
@@ -625,7 +736,8 @@ def write_report(out_path_json, out_path_md, samples_dir):
              f"- 样本目录：{samples_dir}", "", "## 汇总", "",
              "| 阶段 | 通过 | 失败 | 跳过 |", "|---|---|---|---|"]
     names = {1: "① 解析/分类/资料库", 2: "② 资料生成管理",
-             3: "③ 竣工资料生成", 4: "④ 竣工图清稿"}
+             3: "③ 竣工资料生成", 4: "④ 竣工图清稿",
+             5: "⑤ 使用遥测/脱敏自检"}
     for ph in sorted(PHASE_SUMMARY):
         s = PHASE_SUMMARY[ph]
         lines.append(f"| {names.get(ph, ph)} | {s['passed']} | {s['failed']} | {s['skipped']} |")
@@ -650,7 +762,7 @@ def write_report(out_path_json, out_path_md, samples_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--phase", default="all",
-                    help="1/2/3/4/all（可逗号分隔，如 1,2）")
+                    help="1/2/3/4/5/all（可逗号分隔，如 1,2）")
     ap.add_argument("--keep-samples", action="store_true", help="保留样本目录")
     ap.add_argument("--base", default=None, help="工作台地址，默认 127.0.0.1:8756")
     ap.add_argument("--inproc", metavar="WORKBENCH_DIR", default=None,
@@ -674,13 +786,13 @@ def main():
 
     phases = a.phase
     if phases == "all":
-        want = [1, 2, 3, 4]
+        want = [1, 2, 3, 4, 5]
     else:
         want = [int(x) for x in phases.split(",") if x.strip().isdigit()]
 
     for ph in want:
         try:
-            {1: phase1, 2: phase2, 3: phase3, 4: phase4}[ph](sdir)
+            {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5}[ph](sdir)
         except Exception:
             traceback.print_exc()
             record(ph, "阶段执行异常", "无异常", traceback.format_exc()[-300:], False)
