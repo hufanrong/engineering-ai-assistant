@@ -29,10 +29,26 @@ def _clean_book(book):
 
 
 def load_registry():
+    """读整编要求登记表。文件缺失/损坏时返回 []（调用方需自行判断并明确报错）。"""
     if not os.path.exists(REG_FILE):
         return []
-    with open(REG_FILE, encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        with open(REG_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+# v0.1.167：登记表缺失时的统一判定 —— 原来 load_registry() 静默返回 []，
+# generate_volume 拿到空清单后仍然 ok=True / generated=[] / todo=[]，
+# 用户点「一键整卷」看到成功却什么都没产出；route_uploaded_file 同样是静默空转。
+def registry_ready() -> bool:
+    """整编要求登记表是否可用（非空且条目结构完整）。"""
+    reg = load_registry()
+    if not reg:
+        return False
+    return all(isinstance(it, dict) and it.get("名称") for it in reg)
 
 
 def _book_items(book):
@@ -106,9 +122,22 @@ def _volume_dir(project_id, book, workshop):
 
 def generate_volume(project_id, book, workshop=''):
     """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录"""
+    items = _book_items(book)
+    # v0.1.167：登记表缺失时明确报错，不再返回「成功但什么都没生成」
+    if not registry_ready():
+        return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
+                'todo_fields': [],
+                'error': '整编要求登记表不存在或为空，无法整卷',
+                'missing_registry': REG_FILE,
+                'hint': '请先把整编要求登记表放到该路径（字段：册/序号/名称/表号/分类/阶段）'}
+    if not items:
+        return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
+                'todo_fields': [],
+                'error': f'整编要求登记表中没有「{_clean_book(book)}」这一册的条目',
+                'book': _clean_book(book),
+                'available_books': sorted({_clean_book(it.get('册')) for it in load_registry() if it.get('册')})}
     vol = _volume_dir(project_id, book, workshop)
     os.makedirs(vol, exist_ok=True)
-    items = _book_items(book)
     results = {'ok': True, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': []}
     todo_fields = []
     for it in items:
@@ -133,7 +162,8 @@ def generate_volume(project_id, book, workshop=''):
             continue
         # 移动生成文件到卷目录
         src = os.path.join(_proj_root(project_id), 'exports', r['output_file'])
-        dst = os.path.join(vol, f'{seq}_{re.sub(r"[\\/:*?\"<>|]", "", name)[:50]}.docx')
+        _safe_name = re.sub(r'[\\/:*?"<>|]', '', name)[:50]
+        dst = os.path.join(vol, f'{seq}_{_safe_name}.docx')
         if os.path.exists(src):
             os.replace(src, dst)
         results['generated'].append({'序号': seq, '名称': name, '文件': os.path.basename(dst)})
@@ -303,3 +333,133 @@ def manual_collect(project_id, sha256, book, workshop="", note=""):
     recs.append({"file_name": file_name, "sha256": sha256, "ts": __import__("datetime").datetime.now().isoformat(), "note": note})
     json.dump(recs, open(rec_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     return {"ok": True, "dir": base, "recs": len(recs)}
+
+
+# ---------------- 整编要求登记表导入（v0.1.168） ----------------
+# 背景：整卷生成依赖《整编要求登记表》（册/序号/名称/表号/分类/阶段，214 项），
+# 但仓库和设计文档里都没有这个文件，也没有任何上传入口 —— 用户即使拿到原件也无处导入，
+# 整卷生成会一直停在「登记表不存在」。这里补齐导入/查询/校验三个入口。
+#
+# 接受两种来源：JSON（[{册,序号,名称,表号,分类,阶段}] 或 {"items":[...]}）与 Excel
+# （首行表头，列名同字段名，支持常见别名如「图册/资料名称/归档分类」）。
+
+_REG_FIELDS = ["册", "序号", "名称", "表号", "分类", "阶段"]
+_REG_ALIAS = {
+    "图册": "册", "资料册": "册", "卷册": "册", "册别": "册",
+    "顺序": "序号", "编号": "序号", "项次": "序号",
+    "资料名称": "名称", "表格名称": "名称", "文件名称": "名称", "名称": "名称",
+    "表格编号": "表号", "表号": "表号", "编号表号": "表号",
+    "归档分类": "分类", "类别": "分类", "分类": "分类", "等级": "分类",
+    "阶段": "阶段", "所属阶段": "阶段", "施工阶段": "阶段",
+}
+
+
+def _normalize_item(raw: dict) -> dict:
+    """把一行原始记录规整成标准字段；未知列丢弃，空值给空串。"""
+    out = {f: "" for f in _REG_FIELDS}
+    for k, v in (raw or {}).items():
+        key = str(k).strip()
+        fld = key if key in _REG_FIELDS else _REG_ALIAS.get(key)
+        if not fld:
+            continue
+        val = "" if v is None else str(v).strip()
+        if val and not out[fld]:
+            out[fld] = val
+    return out
+
+
+def _parse_registry_excel(content: bytes) -> list:
+    """解析 Excel 登记表。需要 openpyxl；不可用时明确报错而不是静默返回空。"""
+    try:
+        import io
+        import openpyxl
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"缺少 openpyxl，无法解析 Excel：{e}")
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return []
+    header = [("" if c is None else str(c).strip()) for c in rows[0]]
+    items = []
+    for r in rows[1:]:
+        if r is None:
+            continue
+        rec = {}
+        for h, v in zip(header, r):
+            if h:
+                rec[h] = v
+        it = _normalize_item(rec)
+        # 名称与册都为空视为空行，跳过
+        if it["名称"] or it["册"]:
+            items.append(it)
+    return items
+
+
+def registry_info() -> dict:
+    """登记表状态：是否存在 / 条目数 / 册分布 / 字段完整度。供接口与前端展示。"""
+    items = load_registry()
+    books = {}
+    incomplete = 0
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        b = _clean_book(it.get("册")) or "（未标册）"
+        books[b] = books.get(b, 0) + 1
+        if not it.get("名称") or not str(it.get("序号") or "").strip():
+            incomplete += 1
+    return {
+        "ready": registry_ready(),
+        "path": REG_FILE,
+        "exists": os.path.exists(REG_FILE),
+        "total": len(items),
+        "books": dict(sorted(books.items(), key=lambda kv: -kv[1])),
+        "incomplete_items": incomplete,
+        "fields": _REG_FIELDS,
+    }
+
+
+def save_registry(items: list) -> dict:
+    """校验并落盘登记表。空表 / 全无效条目一律拒绝，避免写出一个"看起来存在"的空登记表。"""
+    clean = [_normalize_item(it) for it in items if isinstance(it, dict)]
+    clean = [it for it in clean if it["名称"]]
+    if not clean:
+        return {"ok": False, "error": "登记表没有任何含「名称」的有效条目，已拒绝写入"}
+    bad = [i for i, it in enumerate(clean) if not it["册"]]
+    os.makedirs(REG_DIR, exist_ok=True)
+    # 已有文件先备份，避免反复导入覆盖掉正确版本且无法回退
+    if os.path.exists(REG_FILE):
+        try:
+            import shutil
+            shutil.copy2(REG_FILE, REG_FILE + ".bak")
+        except Exception:  # noqa: BLE001
+            pass
+    with open(REG_FILE, "w", encoding="utf-8") as f:
+        json.dump(clean, f, ensure_ascii=False, indent=1)
+    info = registry_info()
+    info.update({"ok": True, "imported": len(clean), "items_without_book": len(bad)})
+    return info
+
+
+def import_registry_file(filename: str, content: bytes) -> dict:
+    """按扩展名分流导入：.json / .xlsx / .xls / .csv。"""
+    name = (filename or "").lower()
+    try:
+        if name.endswith(".json"):
+            data = json.loads(content.decode("utf-8-sig"))
+            if isinstance(data, dict):
+                data = data.get("items") or data.get("data") or []
+            if not isinstance(data, list):
+                return {"ok": False, "error": "JSON 结构不认识：需要数组或 {\"items\": [...]}"}
+            return save_registry(data)
+        if name.endswith((".xlsx", ".xlsm")):
+            return save_registry(_parse_registry_excel(content))
+        if name.endswith(".csv"):
+            import csv
+            import io
+            text = content.decode("utf-8-sig")
+            rows = list(csv.DictReader(io.StringIO(text)))
+            return save_registry(rows)
+        return {"ok": False, "error": f"不支持的文件类型：{filename}，请用 .json / .xlsx / .csv"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"解析失败：{e}"}
