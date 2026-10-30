@@ -1,0 +1,186 @@
+{
+  "tool": "fieldtest(workbuddy 侧整理)",
+  "generated_at": "2026-10-30 15:53:22",
+  "note": "fieldtest.py 在「竣工归档」步骤崩溃（fieldtest.py:681 AttributeError），未写出本轮报告。本文件由 WORKbuddy 依据 fieldtest2.log、接口原始响应、模板级验证整理，数字均可回溯到 raw/ 下的日志。",
+  "env": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.13.14 (venv)",
+    "install_dir": "D:/fangong-workbench-v0174/fangong-workbench",
+    "package": {
+      "version": "0.1.174",
+      "files": 377,
+      "bytes": 11931131
+    },
+    "parse_switches": {
+      "pdf": true,
+      "word": true,
+      "excel": true,
+      "text": true,
+      "ocr": false,
+      "cad": true,
+      "project": true
+    },
+    "vector": {
+      "chromadb": "1.5.9",
+      "sentence_transformers": "6.2.0",
+      "torch": "2.15.0",
+      "retrieval": "vector"
+    }
+  },
+  "inputs": {
+    "ledger": "选矿厂设备台账20251028（表1清单样式）.xlsx (182481 B, 11 sheet, 195 设备行 / 16 车间)",
+    "registry": "资料整编要求(1).xlsx (25521 B, Sheet1 233 条, 24 个类别文本, 无「册」列)",
+    "docs_dir": "D:/Users/hufanrong/Desktop/安装资料/选厂/重介质",
+    "docs_count": 237
+  },
+  "install": {
+    "install_bat_raw": "FAIL：install.bat 为 UTF-8 无 BOM + 纯 LF，cmd 解释乱行，venv 未创建",
+    "workaround": "改为 CRLF+BOM 后 install.bat 可运行",
+    "pip_requirements": "FAIL：chroma-hnswlib==0.7.6 → 回溯到 numpy 1.26.4 sdist → meson 构建失败（无 C 编译器）",
+    "pin_versions_core": "fastapi 0.111.0 / uvicorn 0.30.1 / python-multipart 0.0.9 / requests 2.32.3 / pypdf 4.2.0 / pdfplumber 0.11.2 / python-docx 1.1.2 / openpyxl 3.1.5 / tqdm 4.66.4 / pywin32 / ezdxf",
+    "vector_workaround": "按 requirements.txt 自带注释改用 chromadb>=1.5.9 + sentence-transformers>=3.3.1（实装 1.5.9 / 6.2.0 / torch 2.15.0）"
+  },
+  "verify_install": {
+    "offline": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 2
+    },
+    "online": {
+      "passed": 8,
+      "failed": 1,
+      "skipped": 2
+    },
+    "fail_detail": "首页可打开：200 bytes=193830 < 脚本阈值 200000，判 FAIL；实际返回的就是 web/index.html 全量（包内文件大小 193830，完全一致）→ 自检阈值误判",
+    "templates": 121,
+    "version": "0.1.174"
+  },
+  "business": {
+    "test_project_id": "3ec3d15f",
+    "test_project_name": "实测_20261030_152124",
+    "ledger_upload_first_try": "timeout 180s（首次触发 embedding 模型 paraphrase-multilingual-MiniLM-L12-v2 下载）",
+    "ledger_upload_cached": "22.84s, status=parsed, parser=excel, entities=87",
+    "device_count": 186,
+    "device_workshop_map": 0,
+    "scan": {
+      "found": 159,
+      "parsed": 159,
+      "vectorized": 79,
+      "failed": 0,
+      "duplicate": 0,
+      "indexed_total": 160
+    },
+    "workshop_attribution": {
+      "groups": [
+        "未归车间",
+        "选矿厂",
+        "重介质车间",
+        "马诺诺重介质车间"
+      ],
+      "unassigned": 154,
+      "total": 160
+    },
+    "retrieval": {
+      "hits": 5,
+      "mode": "vector"
+    },
+    "prefill_devices": 0,
+    "docgen_http": {
+      "result": "client timeout 180s",
+      "server_artifact": "generated_docs/施工方案/繁工AI_施工方案_20261030_153053.docx",
+      "artifact_document_xml_bytes": 4123,
+      "placeholder_residue": 0
+    },
+    "registry": {
+      "total": 233,
+      "books": {
+        "（未标册）": 233
+      },
+      "available_books": []
+    },
+    "volume_first_book": {
+      "book": "第一册",
+      "generated": 0,
+      "todo": 0,
+      "collect": 0,
+      "errors": 0,
+      "elapsed_s": 135,
+      "error": "整编要求登记表中没有「第一册」这一册的条目"
+    },
+    "volume_unlabeled": {
+      "book": "（未标册）",
+      "generated": 0,
+      "elapsed_s": 135,
+      "error": "整编要求登记表中没有「（未标册）」这一册的条目",
+      "available_books": []
+    },
+    "completion_archive": {
+      "server": "TypeError: string indices must be integers, not 'str' @ app/completion_archive.py:246 (req[\"type\"])",
+      "client": "AttributeError: 'str' object has no attribute 'get' @ tools/fieldtest.py:681"
+    },
+    "service_wedge": {
+      "symptom": "8756 端口 LISTEN，但 GET / 与 /api/status 均 30s 无响应",
+      "upload_queue_files": "96 → 160 → 357（持续增长）",
+      "batches_log_lines": 279
+    }
+  },
+  "v0174_fix_verification": {
+    "scope": "templates_builtin 全量 docx 120 份（空数据调用 _fill_element）",
+    "placeholders_total": 5452,
+    "split_across_runs": 0,
+    "residue_open": 0,
+    "residue_close": 0,
+    "marks_written": 5452,
+    "word_com_check": [
+      {
+        "tpl": "监理模板_设备开箱检查记录.docx",
+        "open": "0",
+        "mark": 72,
+        "tables": 9
+      },
+      {
+        "tpl": "监理模板_CTPT交接试验记录.docx",
+        "open": "0",
+        "mark": 26,
+        "tables": 1
+      },
+      {
+        "tpl": "监理模板_设备安装检查记录.docx",
+        "open": "0",
+        "mark": 45,
+        "tables": 9
+      },
+      {
+        "tpl": "监理模板_隐蔽工程验收记录.docx",
+        "open": "0",
+        "mark": 7,
+        "tables": 1
+      }
+    ],
+    "partial_fill": {
+      "filled": {
+        "施工单位": "紫金建设",
+        "设备名称": "离心泵",
+        "规格型号": "P-101"
+      },
+      "each_occurrences": 9,
+      "unfilled_fields": [
+        "供货厂家",
+        "分部工程",
+        "单位工程",
+        "施工图号",
+        "项目经理"
+      ],
+      "marks": 45,
+      "residue": 0
+    },
+    "verdict": "PASS：Windows + 真实 Word 环境下，{{占位符}} 残留 0 处，未填字段一律落成【待补充】，本次修复成立"
+  },
+  "artifacts": [
+    "verify_install.json",
+    "成品样本/*.docx（4 份 Word 可打开）",
+    "raw/install2.log",
+    "raw/fieldtest2.log",
+    "raw/tpl_scan.json"
+  ]
+}

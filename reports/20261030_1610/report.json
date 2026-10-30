@@ -1,0 +1,201 @@
+{
+  "run_id": "20261030_1610",
+  "status": "failed",
+  "mode": "manual-fieldtest",
+  "note": "本轮为手册第四节的真实资料实测（非 wb_loop 自测）。fieldtest.py 在「竣工归档」崩溃，未自动写出报告，本文件由 WORKbuddy 依原始日志整理；evidence/ 下为未改写的原始输出。",
+  "package_version": "0.1.174",
+  "started": "2026-10-30 14:39:39",
+  "finished": "2026-10-30 16:03:18",
+  "commit_after": "(安装包解压，非 git 仓库)",
+  "summary": {
+    "passed": 14,
+    "failed": 12,
+    "skipped": 0,
+    "by_phase": {
+      "业务链路": {
+        "passed": 6,
+        "failed": 9,
+        "skipped": 0
+      },
+      "修复验证v0174": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "装包": {
+        "passed": 0,
+        "failed": 2,
+        "skipped": 0
+      },
+      "验装": {
+        "passed": 4,
+        "failed": 1,
+        "skipped": 0
+      }
+    }
+  },
+  "inputs": {
+    "ledger": "选矿厂设备台账20251028（表1清单样式）.xlsx (182481B, 195 设备行/16 车间)",
+    "registry": "资料整编要求(1).xlsx (25521B, 233 条, 无「册」列)",
+    "docs": "D://Users//hufanrong//Desktop//安装资料//选厂//重介质 (237 文件)"
+  },
+  "v0174_fix_verdict": "PASS：Windows + Word 真机下 {{占位符}} 残留 0，未填字段落成【待补充】",
+  "steps": [
+    {
+      "phase": "装包",
+      "name": "install.bat 原样执行",
+      "passed": false,
+      "evidence": "UTF-8 无 BOM + 纯 LF（CRLF=0），cmd 乱行：'不是内部或外部命令'；venv 未创建"
+    },
+    {
+      "phase": "装包",
+      "name": "pip install -r requirements.txt",
+      "passed": false,
+      "evidence": "chroma-hnswlib==0.7.6 → numpy 1.26.4 sdist → meson 构建失败（无 C 编译器）"
+    },
+    {
+      "phase": "验装",
+      "name": "verify_install 离线",
+      "passed": true,
+      "evidence": "通过 7 / 失败 0 / 跳过 2"
+    },
+    {
+      "phase": "验装",
+      "name": "verify_install 在线 --base",
+      "passed": false,
+      "evidence": "通过 8 / 失败 1 / 跳过 2；FAIL=首页 200 bytes=193830 < 脚本阈值 200000（index.html 实际即 193830，误判）"
+    },
+    {
+      "phase": "验装",
+      "name": "版本号三处一致",
+      "passed": true,
+      "evidence": "config=0.1.174 api=0.1.174"
+    },
+    {
+      "phase": "验装",
+      "name": "内置模板齐全",
+      "passed": true,
+      "evidence": "121 个模板 + _table_index.json"
+    },
+    {
+      "phase": "验装",
+      "name": "数据目录/中文与空格路径",
+      "passed": true,
+      "evidence": "可写，中文文件名写入通过"
+    },
+    {
+      "phase": "业务链路",
+      "name": "建项目",
+      "passed": true,
+      "evidence": "id=3ec3d15f 实测_20261030_152124"
+    },
+    {
+      "phase": "业务链路",
+      "name": "台账上传解析（首次）",
+      "passed": false,
+      "evidence": "TimeoutError 180s；首次触发 embedding 模型 paraphrase-multilingual-MiniLM-L12-v2 下载"
+    },
+    {
+      "phase": "业务链路",
+      "name": "台账上传解析（模型已缓存）",
+      "passed": true,
+      "evidence": "22.84s status=parsed parser=excel entities=87"
+    },
+    {
+      "phase": "业务链路",
+      "name": "台账设备识别",
+      "passed": true,
+      "evidence": "device_count=186（台账 195 行）"
+    },
+    {
+      "phase": "业务链路",
+      "name": "设备→车间映射",
+      "passed": false,
+      "evidence": "device_workshop=0，台账「车间」列未用于归属"
+    },
+    {
+      "phase": "业务链路",
+      "name": "资料扫描",
+      "passed": true,
+      "evidence": "found=159 parsed=159 vectorized=79 failed=0 duplicate=0，入库 160"
+    },
+    {
+      "phase": "业务链路",
+      "name": "自动归车间",
+      "passed": false,
+      "evidence": "未归 154/160（96%）；误识别「熟料送存仓」「锂辉石库」"
+    },
+    {
+      "phase": "业务链路",
+      "name": "资料库检索",
+      "passed": true,
+      "evidence": "5 条 retrieval=vector"
+    },
+    {
+      "phase": "业务链路",
+      "name": "按车间预填",
+      "passed": false,
+      "evidence": "devices=0"
+    },
+    {
+      "phase": "业务链路",
+      "name": "生成 Word（HTTP）",
+      "passed": false,
+      "evidence": "客户端 180s 超时；服务端已落盘 繁工AI_施工方案_20261030_153053.docx"
+    },
+    {
+      "phase": "业务链路",
+      "name": "导入整编登记表",
+      "passed": true,
+      "evidence": "total=233 books={'（未标册）':233}"
+    },
+    {
+      "phase": "业务链路",
+      "name": "一键整卷（第一册）",
+      "passed": false,
+      "evidence": "生成 0；error=整编要求登记表中没有「第一册」这一册的条目；耗时 135s"
+    },
+    {
+      "phase": "业务链路",
+      "name": "一键整卷（未标册）",
+      "passed": false,
+      "evidence": "生成 0；available_books=[]；耗时 135s"
+    },
+    {
+      "phase": "业务链路",
+      "name": "一键竣工归档",
+      "passed": false,
+      "evidence": "服务端 TypeError @ app/completion_archive.py:246 req['type'] 收 str；客户端 fieldtest.py:681 AttributeError 崩溃"
+    },
+    {
+      "phase": "业务链路",
+      "name": "服务可用性",
+      "passed": false,
+      "evidence": "8756 LISTEN 但 GET / 与 /api/status 均 30s 无响应；upload_queue 96→160→357 增长"
+    },
+    {
+      "phase": "修复验证v0174",
+      "name": "全量内置模板空数据渲染",
+      "passed": true,
+      "evidence": "120 份模板 / 5452 个占位符；{{ 残留 0、}} 残留 0、【待补充】5452"
+    },
+    {
+      "phase": "修复验证v0174",
+      "name": "Word 真机打开成品",
+      "passed": true,
+      "evidence": "4 份 docx：残留 {{ 均为 0；标记 72/26/45/7；表格 9/1/9/1"
+    },
+    {
+      "phase": "修复验证v0174",
+      "name": "部分字段已填行为",
+      "passed": true,
+      "evidence": "施工单位/设备名称/规格型号 各替换 9 处；其余 5 字段转标记 45 处；残留 0"
+    },
+    {
+      "phase": "修复验证v0174",
+      "name": "跨 run 拆分覆盖",
+      "passed": true,
+      "evidence": "内置模板跨 run 拆分计数 0；代码按「拼接-替换-回写首 run」处理，结构上覆盖"
+    }
+  ]
+}

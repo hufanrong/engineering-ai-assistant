@@ -1,0 +1,95 @@
+{
+  "tool": "verify_install",
+  "generated_at": "2026-10-30 15:05:49",
+  "install_dir": "D:\\fangong-workbench-v0174\\fangong-workbench",
+  "python": "3.13.14 (main, Jun 11 2026, 04:04:46) [MSC v.1944 64 bit (AMD64)]",
+  "python_exe": "D:\\fangong-workbench-v0174\\fangong-workbench\\venv\\Scripts\\python.exe",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "version": "0.1.174",
+  "template_count": 121,
+  "missing_core_deps": [],
+  "summary": {
+    "passed": 8,
+    "failed": 1,
+    "skipped": 2
+  },
+  "checks": [
+    {
+      "step": "Python 版本",
+      "expected": ">= 3.9（推荐 3.10~3.12）",
+      "actual": "3.13.14",
+      "passed": true,
+      "evidence": "低于 3.9 的版本 chromadb / sentence-transformers 无可用轮子"
+    },
+    {
+      "step": "核心依赖完整",
+      "expected": "全部可 import",
+      "actual": "缺失 0 项",
+      "passed": true,
+      "evidence": "缺失核心依赖会让对应接口 500，必须装齐"
+    },
+    {
+      "step": "可选依赖",
+      "expected": "缺失不影响启动（仅降级对应能力）",
+      "actual": "缺失 3 项：['sentence_transformers(向量语义检索（不装则降级关键词检索）)', 'chromadb(向量库（不装则降级关键词检索）)', 'paddleocr(图片 OCR（不装则图片只登记）)']",
+      "passed": null,
+      "evidence": "降级是设计内的行为，不算失败"
+    },
+    {
+      "step": "版本号一致",
+      "expected": "config.APP_VERSION == FastAPI version",
+      "actual": "config=0.1.174 api=0.1.174",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "step": "内置模板齐全",
+      "expected": ">= 100 个 docx/xlsx 模板 + _table_index.json",
+      "actual": "121 个模板，_table_index.json 有",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "step": "数据目录可写",
+      "expected": "能在 data/ 下建文件",
+      "actual": "可写",
+      "passed": true,
+      "evidence": "常见原因：装在 C:\\Program Files 下无权限、或目录被只读挂载"
+    },
+    {
+      "step": "项目目录就绪",
+      "expected": "data/projects 存在",
+      "actual": "存在",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "step": "中文与空格路径",
+      "expected": "能建目录并写中文文件名",
+      "actual": "通过",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "step": "端口状态",
+      "expected": "端口 8756 可用 或 服务已在跑（都算正常）",
+      "actual": "已被占用/服务已在运行",
+      "passed": null,
+      "evidence": "被占用时确认是不是上一次没关掉的工作台；不是的话改 app/config.py 的 PORT"
+    },
+    {
+      "step": "在线健康检查",
+      "expected": "GET /api/status 200 且 version 非空",
+      "actual": "200 version=0.1.174",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "step": "首页可打开",
+      "expected": "200 且返回完整 HTML（>200KB，含关键模块）",
+      "actual": "200 bytes=193830",
+      "passed": false,
+      "evidence": "体积仅 193830 字节，可能是错误页"
+    }
+  ]
+}

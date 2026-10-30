@@ -1,0 +1,21 @@
+==============================================================
+繁工AI 本地实测（代替使用者走一遍真实操作）
+==============================================================
+
+=== 环境 ===
+  [PASS] 工作台可达: 200 version=0.1.174
+  [PASS] 版本号与代码一致: api=0.1.174 config=0.1.174
+  版本 0.1.174  数据目录 D:\fangong-workbench-v0174\fangong-workbench\data
+  解析开关 {'pdf': True, 'word': True, 'excel': True, 'text': True, 'ocr': False, 'cad': True, 'project': True}
+  [PASS] 输入材料: 台账=选矿厂设备台账20251028（表1清单样式）.xlsx (182481 字节)
+  [PASS] 登记表来源: 资料整编要求(1).xlsx
+
+=== 建项目并导入台账 ===
+  [PASS] 新建项目: 200 id=a55d20c0
+  [FAIL] 台账上传解析: -1 status=None parser=None err=None
+        证据：TimeoutError: timed out
+  台账解析不出来，后面的整卷没有意义，直接结束。
+
+结果：通过 5 / 失败 1 / 跳过 0
+报告：D:\fangong-workbench-v0174\fangong-workbench\tools\fieldtest_report.json
+      D:\fangong-workbench-v0174\fangong-workbench\tools\fieldtest_report.md
