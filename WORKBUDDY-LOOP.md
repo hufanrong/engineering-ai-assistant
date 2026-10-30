@@ -114,10 +114,28 @@ python3 ai_side.py --run <id> # 读指定轮次
    几十个窗口。手动 `run_workbench.bat` 启动时行为不变，照常自动开浏览器。
 3. **不会把上一轮的旧结论当本轮结果。** 每轮开跑前先清旧报告，跑完校验报告
    生成时间是否落在本轮窗口内，拿不到新报告就标 `error`，不会回传陈旧数据。
-4. **不会重复启动两个循环。** `reports/.wb_loop.lock` 有单实例锁，第二个会直接
-   拒绝启动；上一个异常退出留下的死锁会按 PID 自动接管。
+4. **不会重复启动两个循环。** 单实例锁在共享 git 目录（`.git/wb_loop.lock`），
+   主仓库和 worktree 共用同一把，第二个会直接拒绝启动；上一个异常退出留下的
+   死锁会按 PID 自动接管。
 5. **自测样本不进仓库。** `_samples/`、`selftest_report.*`、`service.log` 已加进
    `.gitignore`，仓库里只有 `reports/<run_id>/` 的正式报告。
+6. **worktree 里也能跑（v0.1.170）。** 你日常在 `D:\fangong-workbench` 的 worktree
+   里开发，`.git` 是指针文件不是目录，旧版用 `os.path.isdir` 判定仓库会直接退出
+   （rc=2）。现在改用 `git rev-parse --git-dir` 判定，worktree 正常识别；单实例锁
+   也移到共享 git 目录，主仓库与 worktree 共用同一把锁，不会各跑一份。
+7. **`--once` 单轮回传也完整（v0.1.170）。** 旧版 `report.json` / `report.md` 在
+   commit 之后才写，单轮跑完远端只有 `console.log`，AI 侧读不到结论。现在顺序是
+   「先落盘 → 再提交 → 最后记账」。
+8. **阶段④断言按真实返回取字段（v0.1.170）。** `/api/tools/dwg-cleaner/process`
+   返回的是 `{status,total,success,failed,results[],out_dir}`，`pdf` / `log_file`
+   在 `results[0]` 里、不在顶层。旧断言在顶层找，于是磁盘上明明产出了 PDF 和日志，
+   却被判成失败。现在从 `results[0]` 取（顶层兜底兼容旧接口），并且校验文件真实
+   存在且非 0 字节；`清稿执行` 也不再只看 `ok`（真实返回根本没这个键），改为同时
+   看 `status` 与 `failed` 条数。
+9. **环境不满足不算代码缺陷（v0.1.170）。** AutoCAD 没有 Linux/macOS 版，
+   非 Windows 平台 `ready` 必然为 False。旧版记成 `failed`，AI 侧每轮去追一个
+   不存在的 bug。现在非 Windows 记 `skipped`；Windows 上 `ready=false` 仍记
+   `failed`（那是真的缺依赖，要修）。
 
 ---
 
@@ -125,10 +143,12 @@ python3 ai_side.py --run <id> # 读指定轮次
 
 | 现象 | 先看 |
 |---|---|
-| 循环不启动 | 窗口里的报错；`reports/.wb_loop.lock` 是否残留 |
-| 一直 `error` 且提示拉取失败 | 本机 `git fetch` 能否连通（代理/防火墙） |
-| `status=error` 且报告没生成 | `reports/<run_id>/console.log` |
-| 服务起不来 | `reports/service.log` |
-| 报告没出现在 GitHub | 第一节准备步骤 1 的 push 凭据 |
+| 循环不启动，退出码 2 | 窗口里会打印「不是 git 仓库」；v0.1.170 起 worktree 也支持，若仍报错就跑 `git rev-parse --git-dir` 看本目录是否真被 git 认 |
+| 循环不启动，退出码 3 | 已有循环在跑（会打印持锁 PID）；确认没有残留进程后删掉窗口提示的那个 `.git/wb_loop.lock` |
+| 一直 `error` 且提示拉取失败 | 本机 `git fetch` 能否连通（代理/防火墙）；本地报告提交没丢，日志里能看到 `rebase 已中止` |
+| `status=error` 且报告没生成 | `reports/<run_id>/console.log`（重点看末尾有没有 `[SKIP] 进程内模式不可用`） |
+| 服务起不来 | `reports/service.log`；循环会自动降级为进程内模式继续测，不必中断 |
+| 报告没出现在 GitHub | 第一节准备步骤 1 的 push 凭据；`report.json` 里 `pushed` 是否为 false |
+| 阶段④在 Windows 上仍报 `ready=false` | `env.json` 的 `missing` 字段：`autocad` / `pywin32` / `pypdf` 各自对应一条安装提示 |
 
 报告目录里每个文件的作用见 `reports/README.md`。
