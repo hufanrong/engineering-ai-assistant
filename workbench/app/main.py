@@ -12,6 +12,7 @@ from fastapi import Request, FastAPI, HTTPException, UploadFile, File, Form, Bod
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 import datetime
@@ -480,6 +481,85 @@ def upload_log(limit: int = 100):
     return {"items": lines[-limit:]}
 
 
+def _upload_process_one(saved: str, name: str, sha: str, nbytes: int,
+                        idx: dict, rel_path: str, uploader: str) -> dict:
+    """单个上传文件的**同步**处理（v0.1.177）。
+
+    为什么必须放到线程池里：`upload_files` 是 `async def`，原来直接在里面
+    调 `parse_file()` 和 `_get_store().index_file()` —— 这两个都是 CPU/磁盘
+    密集型同步调用，会把整个事件循环堵住。实测事故：用户一次选几百个文件上传，
+    端口 8756 明明在 LISTEN，`/` 和 `/api/status` 却全部 30s 超时，整站假死，
+    连进度页都打不开。
+
+    另外索引改成**调用方整批读写一次**（idx 由外层传入并回写），
+    原来每处理一个文件就 `_load_index()`+`_save_index()` 全量 dump 一次，
+    几百个文件就是几百次全量重写。
+    """
+    rel_path = rel_path or ""
+    res = parse_file(saved)
+    out = {
+        "file": name,
+        "status": res.status,
+        "parser": res.parser,
+        "error": res.error,
+        "vec_ok": False,
+        "sha256": res.sha256,
+        "entities": len(res.entities),
+        "uploader": uploader,
+    }
+    if res.status == "parsed" or res.status == "partial":
+        # v0.1.129：向量化失败不降级为 failed（文件已解析成功），
+        # 记录到 error 提示信息，状态保持 parsed，避免前端误报上传失败
+        try:
+            _get_store().index_file(res)
+            out["vec_ok"] = True
+        except Exception as _vec_err:  # noqa: BLE001
+            res.error = (res.error or "") + f"; 向量化失败: {_vec_err}"
+            out["error"] = res.error
+        upload_queue.enqueue(res)
+        scanner._save_parsed_cache(res)
+        # v0.1.137：网页上传也登记文件版本（多版本对照+最新版，与扫描路径一致）
+        # 注意：必须用原始文件名 name（res.file_name 是带 sha 前缀的落盘名，
+        # 否则同名不同版本永远无法匹配成组）
+        try:
+            from . import version_manager
+            _dv, _dd, _mt = version_manager.extract_doc_meta(res.structure, saved)
+            version_manager.record_version(name, res.sha256,
+                                           ts=datetime.datetime.now().isoformat(),
+                                           size=nbytes, status=res.status,
+                                           doc_version=_dv, doc_date=_dd, mtime=_mt)
+        except Exception:  # noqa: BLE001
+            pass
+    # v0.1.139/0.1.143：网页上传同样自动归车间，传 rel_path 目录信号
+    # v0.1.177：解析失败/跳过的文件也走这条（原先 elif 分支漏掉了 sha 为空的场景）
+    try:
+        from . import workshop_assign as _wa2
+        _wa2.assign_workshop(res.sha256, name, res.text or "",
+                             res.structure or {}, file_path=rel_path)
+    except Exception:  # noqa: BLE001
+        pass
+    # v0.1.152：上传自动归集到整编 C 类归集目录（图纸/厂家资料/检测报告等）
+    try:
+        from . import supervision_integration as _si2
+        from . import project_manager as _pm2
+        _cur2 = _pm2.get_current_project()
+        if _cur2:
+            _si2.route_uploaded_file(_cur2.get('project_id', ''), name, res.sha256,
+                                     uploader=uploader,
+                                     workshop=_cur2.get('workshop', ''))
+    except Exception:  # noqa: BLE001
+        pass
+    idx[res.sha256] = {
+        "file_name": res.file_name, "file_path": saved,
+        "status": res.status, "parser": res.parser,
+        "error": res.error, "entities": len(res.entities),
+        "retry_count": 0, "uploader": uploader,
+        "orig_path": rel_path,
+        "ts": datetime.datetime.now().isoformat(),
+    }
+    return out
+
+
 @app.post("/api/upload-files")
 async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form(""),
                        paths: str = Form("")):
@@ -500,6 +580,11 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     save_dir = os.path.join(config.DATA_DIR, "uploads")
     os.makedirs(save_dir, exist_ok=True)
     results = []
+    # v0.1.177：索引**整批只读写一次**。
+    # 原实现每个文件都调一次 _load_index()+_save_index()，而 _save_index 是
+    # 全量 JSON dump —— 一次上传 300 个文件 = 300 次全量重写，磁盘 IO 直接吃满。
+    idx = scanner._load_index()
+    idx_dirty = False
     for fi, f in enumerate(files):
         try:
             name = os.path.basename(f.filename or "unnamed")
@@ -518,92 +603,24 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 continue
             sha = hashlib.sha256(raw).hexdigest()
             # 去重（v0.1.22）：与解析库 index 比对，已入库则跳过（断点重传/重复选文件夹安全）
-            if sha in scanner._load_index():
+            if sha in idx:
                 results.append({"file": name, "status": "duplicate", "parser": "",
                                 "error": "已入库，自动跳过", "sha256": sha, "uploader": uploader})
                 continue
             saved = os.path.join(save_dir, f"{sha[:12]}_{name}")
             with open(saved, "wb") as fh:
                 fh.write(raw)
-            res = parse_file(saved)
-            if res.status == "parsed" or res.status == "partial":
-                # v0.1.129：向量化失败不降级为 failed（文件已解析成功），
-                # 记录到 error 提示信息，状态保持 parsed，避免前端误报上传失败
-                try:
-                    _get_store().index_file(res)
-                    vec_ok = True
-                except Exception as _vec_err:  # noqa: BLE001
-                    vec_ok = False
-                    res.error = (res.error or "") + f"; 向量化失败: {_vec_err}"
-                upload_queue.enqueue(res)
-                scanner._save_parsed_cache(res)
-                # v0.1.137：网页上传也登记文件版本（多版本对照+最新版，与扫描路径一致）
-                # 注意：必须用原始文件名 name（res.file_name 是带 sha 前缀的落盘名，
-                # 否则同名不同版本永远无法匹配成组）
-                try:
-                    from . import version_manager
-                    _dv, _dd, _mt = version_manager.extract_doc_meta(res.structure, saved)
-                    version_manager.record_version(name, res.sha256,
-                                                    ts=datetime.datetime.now().isoformat(),
-                                                    size=len(raw), status=res.status,
-                                                    doc_version=_dv, doc_date=_dd, mtime=_mt)
-                except Exception:  # noqa: BLE001
-                    pass
-                # v0.1.139：网页上传同样自动归车间（与文件夹扫描一致），
-                # 未识别/多候选文件进入待确认（workshop=None）
-                # v0.1.143：传 orig_path 目录信号（用户按车间分文件夹上传时目录名优先）
-                try:
-                    from . import workshop_assign as _wa2
-                    _wa2.assign_workshop(res.sha256, name, res.text or "",
-                                         res.structure or {},
-                                         file_path=rel_paths[fi] if fi < len(rel_paths) else "")
-                except Exception:  # noqa: BLE001
-                    pass
-            # v0.1.141：解析失败/跳过的文件也按文件名自动归车间
-            # （0101-锂辉石库-xxx.dwg 即使 ezdxf 缺失也能归入锂辉石库，
-            #   不依赖解析成功；正文/structure 为空时仅用文件名识别）
-            elif getattr(res, "sha256", None):
-                try:
-                    from . import workshop_assign as _wa2
-                    _wa2.assign_workshop(res.sha256, name, res.text or "",
-                                         res.structure or {},
-                                         file_path=rel_paths[fi] if fi < len(rel_paths) else "")
-                except Exception:  # noqa: BLE001
-                    pass
-            # v0.1.152：上传自动归集到整编 C 类归集目录（图纸/厂家资料/检测报告等）
-            try:
-                from . import supervision_integration as _si2
-                from . import project_manager as _pm2
-                _cur2 = _pm2.get_current_project()
-                if _cur2:
-                    _si2.route_uploaded_file(_cur2.get('project_id', ''), name, res.sha256,
-                                             uploader=uploader,
-                                             workshop=_cur2.get('workshop', ''))
-            except Exception:  # noqa: BLE001
-                pass
-            # 登记索引（供去重/失败管理/统计共用，v0.1.22）
-            idx = scanner._load_index()
-            idx[res.sha256] = {
-                "file_name": res.file_name, "file_path": saved,
-                "status": res.status, "parser": res.parser,
-                "error": res.error, "entities": len(res.entities),
-                "retry_count": 0, "uploader": uploader,
-                "orig_path": rel_paths[fi] if fi < len(rel_paths) else "",
-                "ts": datetime.datetime.now().isoformat(),
-            }
-            scanner._save_index(idx)
-            results.append({
-                "file": name,
-                "status": res.status,
-                "parser": res.parser,
-                "error": res.error,
-                "vec_ok": vec_ok if (res.status == "parsed" or res.status == "partial") else False,
-                "sha256": res.sha256,
-                "entities": len(res.entities),
-                "uploader": uploader,
-            })
+            # v0.1.177：解析 + 向量化 + 入队全部丢到线程池，事件循环只负责收发字节。
+            # 不这么改，几百个文件的上传会把 / 和 /api/status 一起堵死 30s 以上。
+            out = await run_in_threadpool(
+                _upload_process_one, saved, name, sha, len(raw), idx,
+                rel_paths[fi] if fi < len(rel_paths) else "", uploader)
+            idx_dirty = True
+            results.append(out)
         except Exception as e:  # noqa: BLE001
             results.append({"file": f.filename or "unnamed", "status": "failed", "error": str(e)})
+    if idx_dirty:
+        scanner._save_index(idx)
     _refresh_project_stats()
     # v0.1.172：上传后同步设备台账到 index.json["devices"]
     # （原来这个字段没人写，监理确认表按车间出设备行永远为空）

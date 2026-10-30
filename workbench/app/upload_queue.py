@@ -37,26 +37,74 @@ def _ensure():
     os.makedirs(QUEUE_DIR, exist_ok=True)
 
 
+_IDX_FILE = "_sha_index.json"
+
+
+def _idx_path():
+    return os.path.join(QUEUE_DIR, _IDX_FILE)
+
+
+def _load_idx() -> dict:
+    """队列内 sha256 索引 {sha: 包名}（v0.1.177）。
+
+    实测事故：上传队列里已有 357 个包时，每上传 1 个文件都要把 357 个 JSON
+    全量打开读一遍比对（O(n²)）。用户一次选几百个文件，HTTP 请求就一直在
+    事件循环里做同步磁盘 IO —— 端口 8756 在 LISTEN，但 `/` 和 `/api/status`
+    全部 30s 超时，整站假死。
+    索引损坏/不存在时自动退回全量扫描并重建，不会因为索引丢了就重复入队。
+    """
+    try:
+        with open(_idx_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_idx(idx: dict) -> None:
+    try:
+        tmp = _idx_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+        os.replace(tmp, _idx_path())
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _rebuild_idx() -> dict:
+    """兜底：索引缺失时全量扫描一次并落盘（只在首次/索引损坏时发生）。"""
+    idx = {}
+    try:
+        for existing in os.listdir(QUEUE_DIR):
+            if not existing.endswith(".json") or existing == _IDX_FILE:
+                continue
+            try:
+                with open(os.path.join(QUEUE_DIR, existing), encoding="utf-8") as ef:
+                    ep = json.load(ef)
+                sha = (ep.get("payload") or {}).get("sha256")
+                if sha:
+                    idx[sha] = existing[:-5]
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    _save_idx(idx)
+    return idx
+
+
 def enqueue(parse_result) -> str:
     """把一个解析结果打包进上传队列，返回包文件名（不含扩展）。
     v0.1.138：payload 附带 project_id/project_name，云端按项目合并（同项目合并，不同项目不合并）。
     v0.1.144：按 sha256 去重——队列中已有相同内容的包时跳过（重复解析不重复入队）。"""
     _ensure()
-    # v0.1.144：sha256 去重（队列文件名格式 sha16_时间戳.json，遍历比对 payload.sha256）
-    try:
-        for existing in os.listdir(QUEUE_DIR):
-            if not existing.endswith(".json"):
-                continue
-            try:
-                with open(os.path.join(QUEUE_DIR, existing), encoding="utf-8") as _ef:
-                    _ep = json.load(_ef)
-                if _ep.get("payload", {}).get("sha256") == parse_result.sha256:
-                    _log("enqueue_skip", existing, parse_result.file_name, "duplicate", "队列中已存在相同 sha256")
-                    return existing[:-5]  # 去掉 .json
-            except Exception:  # noqa: BLE001
-                continue
-    except Exception:  # noqa: BLE001
-        pass
+    # v0.1.144 去重；v0.1.177 改为 O(1) 索引查表（原实现逐包打开读，队列到 357 个时整站假死）
+    idx = _load_idx()
+    if not idx and os.path.isdir(QUEUE_DIR):
+        idx = _rebuild_idx()
+    hit = idx.get(parse_result.sha256)
+    if hit:
+        _log("enqueue_skip", hit, parse_result.file_name, "duplicate", "队列中已存在相同 sha256")
+        return hit
     proj_id, proj_name = "", ""
     try:
         from . import project_manager as _pm
@@ -90,6 +138,8 @@ def enqueue(parse_result) -> str:
     }
     with open(os.path.join(QUEUE_DIR, f"{key}.json"), "w", encoding="utf-8") as f:
         json.dump(pkg, f, ensure_ascii=False)
+    idx[parse_result.sha256] = key
+    _save_idx(idx)
     _log("enqueue", key, parse_result.file_name, "ok", None)
     return key
 

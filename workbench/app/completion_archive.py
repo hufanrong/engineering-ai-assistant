@@ -183,16 +183,43 @@ DEFAULT_REQUIREMENTS = [
 ]
 
 
+def _normalize_requirements(reqs) -> list:
+    """把资料清单统一成 [{"type": str, "required": bool}]。
+
+    v0.1.177：实测事故 —— 矿山设备那批清单（_MINING_ARCHIVE_REQ）是
+    **纯字符串列表**，而 generate_device_archive_list 里按 `req["type"]` 取字段，
+    字符串下标一取就 TypeError: string indices must be integers，
+    整个「一键竣工归档」直接 500，连带 fieldtest 在收尾处崩掉、整轮报告都写不出来。
+    这里在出口处一次性归一，调用方不必再各自判断形状。
+    """
+    out = []
+    for r in (reqs or []):
+        if isinstance(r, str):
+            t = r.strip()
+            if t:
+                out.append({"type": t, "required": True})
+        elif isinstance(r, dict):
+            t = str(r.get("type") or r.get("名称") or "").strip()
+            if t:
+                out.append({"type": t, "required": bool(r.get("required", True))})
+        elif isinstance(r, (list, tuple)) and r:
+            t = str(r[0]).strip()
+            if t:
+                out.append({"type": t, "required": bool(r[1]) if len(r) > 1 else True})
+    return out
+
+
 def get_device_requirements(dev_type: str) -> list:
     """v0.1.67：获取设备类型需要的竣工资料清单。
-    
+
     Args:
         dev_type: 设备类型
-    
+
     Returns:
-        资料清单
+        资料清单（已归一为 [{"type","required"}]，可直接下标取值）
     """
-    return DEVICE_ARCHIVE_REQUIREMENTS.get(dev_type, DEFAULT_REQUIREMENTS)
+    return _normalize_requirements(
+        DEVICE_ARCHIVE_REQUIREMENTS.get(dev_type, DEFAULT_REQUIREMENTS))
 
 
 def generate_device_archive_list(tag: str) -> dict:
@@ -249,8 +276,13 @@ def generate_device_archive_list(tag: str) -> dict:
     missing_optional = []
     
     for req in requirements:
-        doc_type = req["type"]
-        required = req["required"]
+        # v0.1.177：即便上层将来又塞进一个未归一的清单，这里也不再硬下标崩掉整站
+        if not isinstance(req, dict):
+            req = {"type": str(req), "required": True}
+        doc_type = req.get("type")
+        if not doc_type:
+            continue
+        required = req.get("required", True)
         
         # 检查是否已有该类型资料
         has_doc = any(doc_type in doc for doc in existing_docs)
@@ -312,10 +344,29 @@ def generate_all_devices_archive() -> dict:
     devices = g.get("devices", [])
     
     all_archives = []
+    failed_tags = []
     for d in devices:
-        archive = generate_device_archive_list(d["tag"])
-        if "error" not in archive:
+        # v0.1.177：单台设备失败不得掀翻整个接口。
+        # 实测事故：矿山设备资料清单是纯字符串列表，req["type"] 抛 TypeError，
+        # 「一键竣工」整条 500 —— 一台设备的形状问题让 195 台设备的清单全都没了。
+        try:
+            _tag = (d or {}).get("tag", "") if isinstance(d, dict) else ""
+            if not _tag:
+                # 缺位号的记录必须显式记账，不能静默少一台
+                failed_tags.append({"tag": "", "error": "设备记录缺少 tag（位号）字段"})
+                continue
+            archive = generate_device_archive_list(_tag)
+            if "error" in archive:
+                # v0.1.177：**带 error 的也必须记账**。
+                # 实测事故：一台设备的位号取不到 → 返回 {"error": "设备不存在"} →
+                # 这里 `if "error" not in archive` 直接把它丢掉，4 台设备静默变 3 台。
+                # /api/completion-archive/all 报 4、一键竣工报 3，两个接口自相矛盾，
+                # 而失败设备清单是空的，用户完全看不出少的是哪一台。
+                failed_tags.append({"tag": _tag, "error": str(archive.get("error"))[:200]})
+                continue
             all_archives.append(archive)
+        except Exception as _e:  # noqa: BLE001
+            failed_tags.append({"tag": d.get("tag", ""), "error": f"{type(_e).__name__}: {_e}"})
     
     # 按车间分组
     by_workshop = {}
@@ -358,6 +409,9 @@ def generate_all_devices_archive() -> dict:
         "missing_summary": {doc_type: len(tags) for doc_type, tags in all_missing.items()},
         "missing_details": all_missing,
         "devices": all_archives,
+        # v0.1.177：失败的设备单独列出，不静默吞掉 —— 用户要能看到「哪台没算出来、因为什么」
+        "failed_devices": failed_tags,
+        "failed_count": len(failed_tags),
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

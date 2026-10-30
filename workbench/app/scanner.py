@@ -98,6 +98,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 if ext in SUPPORTED_EXTS and not _is_temp_file(fn):
                     file_list.append(os.path.join(root, fn))
     stats["found"] = len(file_list)
+    _n_since_save = 0  # v0.1.177：索引分批落盘计数
 
     for i, path in enumerate(file_list):
         if cancel_event is not None and cancel_event.is_set():
@@ -142,10 +143,14 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 # 无论是否成功向量化都进上传队列（云端合并保留原文+解析）
                 upload_queue.enqueue(res)
                 # v0.1.27：解析后自动归车间（人工登记不覆盖）
+                # v0.1.177：**必须传 file_path** —— 用户是按车间/工艺单元分文件夹的，
+                # 目录名是最强归属信号（detect_workshop 里 file_path 优先级 0.85，仅次于 CAD 图名）。
+                # 实测事故：这里一直只传了文件名，file_path 恒为空 → 目录信号从未进入检测，
+                # 237 个明确放在「重介质」目录的资料 96% 归不到车间。
                 try:
                     from . import workshop_assign
                     workshop_assign.assign_workshop(res.sha256, res.file_name, res.text or "",
-                                                    res.structure or {})
+                                                    res.structure or {}, file_path=path)
                 except Exception:  # noqa: BLE001
                     pass
                 # v0.1.32：登记文件版本（多版本对照+最新版判断）
@@ -206,13 +211,27 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 "retry_count": 0,
                 "ts": datetime.datetime.now().isoformat(),
             }
-            _save_index(idx, ddir)
+            # v0.1.177：索引**分批落盘**，不再每个文件全量 dump。
+            # 实测事故：索引写到上千条时，每解析一个文件就要把整个 index.json
+            # 重新序列化写盘，扫描进度越来越慢，大目录扫到一半整站卡死。
+            # 每 50 个落一次盘，既保证崩溃时可恢复，又把写盘次数降了 98%。
+            _n_since_save += 1
+            if _n_since_save >= 50:
+                _save_index(idx, ddir)
+                _n_since_save = 0
             if progress_cb:
                 progress_cb(i + 1, len(file_list), f"{res.status}: {res.file_name}")
         except Exception as e:  # noqa: BLE001
             stats["failed"] += 1
             if progress_cb:
                 progress_cb(i + 1, len(file_list), f"异常 {os.path.basename(path)}: {e}")
+
+    # v0.1.177：收尾补一次落盘（不足 50 个的尾巴）
+    try:
+        if _n_since_save:
+            _save_index(idx, ddir)
+    except Exception:  # noqa: BLE001
+        pass
 
     # v0.1.172：扫描结束把设备台账行写进 index.json["devices"]
     # （原来该字段无人写入，导致监理确认表按车间出设备行时恒为空）

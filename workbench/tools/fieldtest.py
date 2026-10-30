@@ -97,6 +97,21 @@ def metric(k, v):
     RESULT["metrics"][k] = v
 
 
+def jget(obj, key=None, default=None):
+    """安全取值：obj 可能是 dict，也可能是 call() 返回的非 JSON 字符串或 None。
+
+    v0.1.177：实测事故 —— 服务端 500 时 call() 返回的是 HTML/文本，
+    而脚本里到处写 `(ca or {}).get("total_devices")`，
+    对字符串调 .get 直接 AttributeError，**整个 fieldtest 崩在这一行**，
+    连本轮报告都写不出来。取值一律走这里，任何形状都不会中断整轮。
+    """
+    if key is None:
+        return obj if isinstance(obj, dict) else default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return default
+
+
 # ------------------------------------------------------------------ HTTP
 def call(method, path, payload=None, timeout=TIMEOUT):
     if _INPROC is not None:
@@ -374,7 +389,7 @@ def run(args):
 
     # 记住原项目，跑完切回去（不改变使用者原有的界面状态）
     _, cur, _ = call("GET", "/api/projects/current")
-    home = (((cur or {}).get("project") or {}).get("id")) or ""
+    home = (jget(jget(cur, "project"), "id")) or ""
     RESULT["env"]["home_project"] = bool(home)
 
     # ---------------- 建项目 + 导台账
@@ -382,7 +397,7 @@ def run(args):
     print("\n=== 建项目并导入台账 ===")
     pname = f"实测_{time.strftime('%Y%m%d_%H%M%S')}"
     code, body, err = call("POST", "/api/projects/create", {"name": pname})
-    test_pid = ((body or {}).get("project") or {}).get("id") or ""
+    test_pid = (jget(jget(body, "project"), "id")) or ""
     ok = code == 200 and bool(test_pid)
     rec("新建项目", "200 且返回 project id", f"{code} id={test_pid}", ok, err)
     if not ok:
@@ -393,7 +408,7 @@ def run(args):
     code, up, err = call_multipart("/api/upload-files", os.path.basename(inp["ledger"]),
                                    inp["ledger_bytes"], field="files",
                                    extra=[("uploader", "实测脚本")])
-    items = (up or {}).get("results") or (up or {}).get("files") or []
+    items = jget(up, "results") or jget(up, "files") or []
     item0 = items[0] if items else {}
     status0 = item0.get("status")
     ok = code == 200 and status0 in ("parsed", "partial")
@@ -409,16 +424,16 @@ def run(args):
     # 新项目没冲突时恒为 0，拿它当设备数会把正常情况误判成失败。
     # 正确来源是当前项目元数据里的 device_count（/api/projects/current 实时重算）。
     _, curp, _ = call("GET", "/api/projects/current")
-    n_dev_idx = ((curp or {}).get("project") or {}).get("device_count") or 0
+    n_dev_idx = jget(jget(curp, "project"), "device_count") or 0
     metric("devices_from_ledger_api", n_dev_idx)
     _, dwl, _ = call("GET", "/api/device-workshop/list")
-    dw_devices = (dwl or {}).get("devices") or {}
+    dw_devices = jget(dwl, "devices") or {}
     n_dw = len(dw_devices) if isinstance(dw_devices, dict) else len(dw_devices or [])
     metric("devices_device_workshop", n_dw)
     rec("台账设备识别", "解析后设备条数 > 0",
         f"project.device_count={n_dev_idx} device_workshop={n_dw}",
         n_dev_idx > 0 or n_dw > 0,
-        json.dumps(((curp or {}).get("project") or {}), ensure_ascii=False)[:300])
+        json.dumps(jget(curp, "project") or {}, ensure_ascii=False)[:300])
 
     # ---------------- 真实资料扫描（可选）
     if inp["docs"]:
@@ -434,7 +449,7 @@ def run(args):
             code == 200 and not stt.get("running"))
 
         code, fl, err = call("GET", "/api/files?limit=500")
-        files = (fl or {}).get("files") or []
+        files = jget(fl, "files") or []
         metric("files_in_library", len(files))
         rec("资料入库", "files 非空", f"{code} total={len(files)}", code == 200 and bool(files), err)
 
@@ -451,14 +466,14 @@ def run(args):
         # 返回的是 [{"name": "1号车间", "file_count": 1}, ...]，不是字符串列表。
         # 直接把它当字符串用会把 dict 塞进 workshop 参数（422 string_type），
         # 导致后面预填和整卷全部失败 —— 这是脚本自己的错，不是产品缺陷。
-        _raw_ws = (ws or {}).get("workshops") or []
+        _raw_ws = jget(ws, "workshops") or []
         wss = [str((w or {}).get("name") if isinstance(w, dict) else w) for w in _raw_ws]
         wss = [w for w in wss if w]
         metric("workshops", _raw_ws)
         rec("车间识别", "识别出至少 1 个车间", f"{len(wss)} 个 {wss[:6]}", bool(wss), err)
 
         code, wl, err = call("GET", "/api/workshop/list")
-        groups = (wl or {}).get("groups") or {}
+        groups = jget(wl, "groups") or {}
         pending = groups.get("未归车间") or []
         metric("unassigned_files", len(pending))
         rec("未归车间待确认", "未归文件数记录清楚（供人工确认）",
@@ -466,10 +481,10 @@ def run(args):
 
         # 检索：真问一句工程话，看能不能召回
         code, sr, err = call("POST", "/api/search", {"query": "设备安装检查记录", "top_k": 5})
-        hits = (sr or {}).get("results") or []
+        hits = jget(sr, "results") or []
         metric("search_hits", len(hits))
-        metric("search_retrieval", (sr or {}).get("retrieval"))
-        rec("资料库检索", "能召回结果", f"{len(hits)} 条 retrieval={ (sr or {}).get('retrieval')}",
+        metric("search_retrieval", jget(sr, "retrieval"))
+        rec("资料库检索", "能召回结果", f"{len(hits)} 条 retrieval={jget(sr, 'retrieval')}",
             code == 200 and bool(hits), err)
 
     # ---------------- 导出成品（阶段2）
@@ -478,7 +493,7 @@ def run(args):
     code, types, err = call("GET", "/api/docgen/types")
     # 返回是 [{"key":"施工方案","label":...,...}] 的列表，不是 {key: {...}} 字典。
     # 当字典用会把整个 dict 当 doc_type 传下去（422 string_type）。
-    _traw = (types or {}).get("types") or []
+    _traw = jget(types, "types") or []
     tlist = {}
     for _t in _traw:
         if isinstance(_t, dict) and _t.get("key"):
@@ -490,7 +505,7 @@ def run(args):
     ws_name = ""
     try:
         _, wss2, _ = call("GET", "/api/workshops")
-        _l = (wss2 or {}).get("workshops") or []
+        _l = jget(wss2, "workshops") or []
         # 同上：取 name 字段；"未归车间"不是真车间，不能拿去整卷
         _names = [str((w or {}).get("name") if isinstance(w, dict) else w) for w in _l]
         _real = [n for n in _names if n and n != "未归车间"]
@@ -499,7 +514,7 @@ def run(args):
         ws_name = ""
 
     code, pf, err = call("POST", "/api/docgen/prefill", {"workshop": ws_name, "doc_type": "施工方案"})
-    prefill_devs = (pf or {}).get("devices") or (pf or {}).get("设备清单") or []
+    prefill_devs = jget(pf, "devices") or jget(pf, "设备清单") or []
     metric("prefill_devices", len(prefill_devs) if isinstance(prefill_devs, list) else prefill_devs)
     rec("按车间预填", "预填结果里有设备（预填空=生成出来的方案没内容）",
         f"{code} devices={len(prefill_devs) if isinstance(prefill_devs,list) else prefill_devs}",
@@ -538,7 +553,7 @@ def run(args):
     else:
         rb_content, rb_name = minimal_registry_bytes(), "整编要求登记表_最小.json"
     code, rb, err = call_multipart("/api/supervision/registry", rb_name, rb_content, field="file")
-    reg = (rb or {}).get("registry") or {}
+    reg = jget(rb, "registry") or {}
     ready = bool(reg.get("ready"))
     metric("registry_total", reg.get("total"))
     metric("registry_books", reg.get("books"))
@@ -556,7 +571,7 @@ def run(args):
 
     code, vol, err = call("POST", "/api/supervision/volume",
                           {"project_id": test_pid, "book": book, "workshop": workshop})
-    vr = (vol or {}).get("result") or (vol or {})
+    vr = jget(vol, "result") or jget(vol) or {}
     gen = vr.get("generated") or []
     todo = vr.get("todo") or []
     collect = vr.get("collect_dir") or []
@@ -689,7 +704,14 @@ def run(args):
     _numeric = [int(x) for x in _seqs if x.isdigit()]
     _ordered = _numeric == sorted(_numeric) and len(_numeric) == len(_seqs)
     _uncalc = [r for r in _cat_rows if len(r) > 4 and ("未计算" in r[4])]
-    _pagecells = [r[4] for r in _cat_rows if len(r) > 4 and r[4] and "未计算" not in r[4]]
+    # v0.1.178：`—`（破折号）是**未生成/页次未计算**的占位符，不是有效页次。
+    # 实测事故：3 条登记里有 1 条 B 类没有模板文件，页次如实标 `—`，
+    # 判定却把它当成「有页次」，`all("-" in c for c in _pagecells)` 直接 False
+    # → 报「页次为渲染实测」FAIL。程序行为完全正确，是判定口径错了。
+    _PLACEHOLDER_PAGES = ("—", "-", "", "未计算", "未生成")
+    _pagecells = [r[4] for r in _cat_rows
+                  if len(r) > 4 and r[4] and str(r[4]).strip() not in _PLACEHOLDER_PAGES
+                  and "未计算" not in str(r[4])]
     metric("catalog_seq_order", _seqs)
     metric("catalog_pages_uncalculated", len(_uncalc))
     metric("catalog_page_cells", _pagecells[:8])
@@ -733,12 +755,12 @@ def run(args):
     PHASE = "竣工归档"
     print("\n=== 竣工归档 ===")
     code, ca, err = call("POST", "/api/completion-archive/all", {})
-    ndev = (ca or {}).get("total_devices") or 0
+    ndev = jget(ca, "total_devices") or 0
     metric("completion_total_devices", ndev)
     rec("一键竣工", "200 且 total_devices > 0", f"{code} total_devices={ndev}", code == 200 and ndev > 0, err)
 
     code, stats, err = call("GET", "/api/completion-archive/stats")
-    ndev2 = (stats or {}).get("total_devices") or 0
+    ndev2 = jget(stats, "total_devices") or 0
     rec("竣工统计自洽", "stats 与 一键竣工 数字一致（两接口不能自相矛盾）",
         f"stats={ndev2} vs all={ndev}", code == 200 and ndev2 == ndev, err)
 
@@ -760,7 +782,7 @@ def run(args):
     PHASE = "跨项目隔离"
     print("\n=== 跨项目隔离 ===")
     code, nb, err = call("POST", "/api/projects/create", {"name": f"实测隔离_{time.strftime('%H%M%S')}"})
-    new_id = ((nb or {}).get("project") or {}).get("id") or ""
+    new_id = (jget(jget(nb, "project"), "id")) or ""
     if new_id:
         RESULT["projects"].append({"role": "isolation", "id": new_id})
         call("POST", "/api/projects/switch", {"project_id": new_id})
@@ -777,7 +799,7 @@ def run(args):
         iso_all_zero = True
         for label, list_path, key, fname in iso_probe:
             _, lb, _e = call("GET", list_path)
-            n = len((lb or {}).get(key) or [])
+            n = len((jget(lb, key) or []))
             iso_detail.append(f"{label}={n}")
             metric(f"iso_{fname.replace('.json', '')}_count", n)
             if n != 0:
@@ -804,16 +826,16 @@ def run(args):
             ("本轮写入全局的：" + "、".join(stray)) if stray else "无", not stray)
 
         _, st_b, _ = call("GET", "/api/completion-archive/stats")
-        dev_b = (st_b or {}).get("total_devices")
+        dev_b = jget(st_b, "total_devices")
         _, rm_b, _ = call("GET", "/api/completion-archive/missing")
-        miss_b = len(((rm_b or {}).get("missing") or []))
+        miss_b = len((jget(rm_b, "missing") or []))
         rec("新项目不承接旧清单", "新项目里竣工设备数=0、缺件=0",
             f"total_devices={dev_b} missing={miss_b}（对照原项目 {ndev} 台）",
             dev_b == 0 and miss_b == 0)
         # 新项目里整卷不能写进别人目录
         code, vol2, err2 = call("POST", "/api/supervision/volume",
                                 {"project_id": new_id, "book": book, "workshop": workshop})
-        vr2 = (vol2 or {}).get("result") or {}
+        vr2 = jget(vol2, "result") or {}
         gen2 = vr2.get("generated") or []
         pdir2 = project_dir(new_id)
         landed2 = sum(1 for g in gen2 if find_in(pdir2, g.get("文件") or ""))
@@ -822,7 +844,7 @@ def run(args):
         # 切回去，数据要还在（隔离不等于丢数据）
         call("POST", "/api/projects/switch", {"project_id": test_pid})
         _, st_a, _ = call("GET", "/api/completion-archive/stats")
-        dev_a = (st_a or {}).get("total_devices")
+        dev_a = jget(st_a, "total_devices")
         rec("切回后数据仍在", "设备数恢复为原值", f"切回={dev_a}（应为 {ndev}）", dev_a == ndev)
         # 空 project_id 不许写到全局目录（旧缺陷）
         pjv = os.path.join(data_dir(), "projects", "volumes")

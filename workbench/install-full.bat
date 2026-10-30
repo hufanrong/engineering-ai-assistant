@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 title 繁工AI 本地解析工作台 - 全套安装（核心 + OCR + CAD）
 echo ============================================

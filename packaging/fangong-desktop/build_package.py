@@ -65,6 +65,51 @@ def should_skip(rel):
     return False
 
 
+BOM = b"\xef\xbb\xbf"
+
+
+def _bat_to_bom_crlf(path: str) -> bool:
+    """把 .bat 规整成 **UTF-8 BOM + CRLF**（v0.1.177）。
+
+    实测事故：用户双击 install.bat，cmd 报「'xxxxx' 不是内部或外部命令」、
+    中文全是乱码。根因是随包的 .bat 存成了「UTF-8 无 BOM + 纯 LF」：
+    ① 没有 BOM，cmd 按系统 ANSI 代码页解码，中文全成乱码，控制流语句被截断；
+    ② 纯 LF，cmd 对多行 call/if 块的续行判定失效，脚本执行到一半就散架。
+    同目录下本来正常的 install_optional.bat / open_or_start.bat 都是 BOM+CRLF，
+    说明只是打包时漏转，内容本身没问题 —— 所以**在打包这一步强制归一化**，
+    不论工作区里存成什么样，出厂一律合规；回读阶段再断言一次，防止回归。
+    返回 True 表示原文件不合规、已被修正。
+    """
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except Exception:
+        return False
+    body = raw
+    if body.startswith(BOM):
+        body = body[3:]
+    body = body.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    fixed = BOM + body.replace(b"\n", b"\r\n")
+    if fixed == raw:
+        return False
+    with open(path, "wb") as f:
+        f.write(fixed)
+    return True
+
+
+def _bat_noncompliant(data: bytes) -> str:
+    """回读断言用：返回不合规原因，合规返回空串。"""
+    if not data.startswith(BOM):
+        return "缺 UTF-8 BOM"
+    lf = data.count(b"\n")
+    crlf = data.count(b"\r\n")
+    if crlf == 0:
+        return "纯 LF 换行"
+    if crlf != lf:
+        return f"换行混杂 LF={lf} CRLF={crlf}"
+    return ""
+
+
 def collect(src):
     """收集要打包的文件（相对路径列表）。"""
     files = []
@@ -130,6 +175,17 @@ def main():
     files = collect(src)
     print(f"待打包文件：{len(files)} 个")
 
+    # v0.1.177：出厂前把每个 .bat 规整成 UTF-8 BOM + CRLF（cmd 才能正确执行）
+    _bat_fixed = []
+    for rel in files:
+        if rel.lower().endswith(".bat"):
+            if _bat_to_bom_crlf(os.path.join(src, rel)):
+                _bat_fixed.append(rel)
+    if _bat_fixed:
+        print(f"已修正 .bat 编码（UTF-8 BOM + CRLF）：{len(_bat_fixed)} 个 -> {_bat_fixed}")
+    else:
+        print("全部 .bat 编码已合规（UTF-8 BOM + CRLF）")
+
     os.makedirs(os.path.dirname(out), exist_ok=True)
     total_raw = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
@@ -183,6 +239,15 @@ def main():
             problems.append(f"包内混入项目业务数据 {len(leaked)} 个：{leaked[:3]}")
         tpl = [n for n in names if n.startswith(f"{args.root_name}/data/templates/")]
         tpl_files = len(tpl)
+        # v0.1.177：**断言包内每个 .bat 都是 UTF-8 BOM + CRLF**。
+        # 这一条是防回归的：用户端执行不了 .bat，整个安装流程就走不下去，
+        # 而这类问题在沙箱 Linux 上跑任何测试都发现不了，只有回读字节才能拦住。
+        _bats = [n for n in names if n.lower().endswith(".bat")]
+        for _b in sorted(_bats):
+            _why = _bat_noncompliant(zf.read(_b))
+            if _why:
+                problems.append(f".bat 编码不合规：{os.path.basename(_b)}（{_why}）")
+        print(f"  .bat 编码检查：{len(_bats)} 个文件")
 
     size = os.path.getsize(out)
     print(f"  ZIP：{out}")

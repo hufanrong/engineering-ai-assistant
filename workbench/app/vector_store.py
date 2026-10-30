@@ -27,6 +27,26 @@ class VectorStore:
             try:
                 self._model = SentenceTransformer(config.EMBED_MODEL, local_files_only=True)
             except Exception:  # noqa: BLE001
+                # v0.1.177：本地无缓存时**必须先提示**，不能静默去下 ~470MB。
+                # 实测事故：首次解析时程序卡住几分钟、界面无任何变化，
+                # 用户以为程序死了（端口在 LISTEN 但没有响应），实际在后台拉模型；
+                # 断网/内网环境更会直接卡到超时，用户完全不知道发生了什么。
+                import sys
+                import threading as _th
+                msg = (f"\n[繁工AI] 本地未找到语义模型「{config.EMBED_MODEL}」，"
+                       f"首次使用需要联网下载约 470MB，可能需要数分钟。\n"
+                       f"          如下载失败，可在「设置」里关闭语义检索，"
+                       f"关键词检索不受影响。\n")
+                sys.stderr.write(msg)
+                sys.stderr.flush()
+                try:
+                    from . import config as _cfg
+                    _log = os.path.join(_cfg.DATA_DIR, "logs", "model_download.log")
+                    os.makedirs(os.path.dirname(_log), exist_ok=True)
+                    with open(_log, "a", encoding="utf-8") as _lf:
+                        _lf.write(datetime.datetime.now().isoformat() + msg)
+                except Exception:  # noqa: BLE001
+                    pass
                 self._model = SentenceTransformer(config.EMBED_MODEL)
         return self._model
 

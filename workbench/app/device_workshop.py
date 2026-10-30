@@ -146,24 +146,55 @@ def list_by_workshop() -> dict:
 
 
 def rebuild_from_excel(docs: dict) -> int:
-    """从 relations 的 docs 中提取 excel_row 设备的 workshop_hint，批量登记。
-    docs: {sha: {file_name, equipments:[{tag, where, workshop_hint}], ...}}
-    返回新登记数量。"""
+    """从已解析台账重建设备→车间登记（台账行「车间」列优先，位号前缀兜底）。
+
+    docs 形状：{sha: {file_name, workshop, equipments? ...}}。
+    v0.1.177：**接受两种入参**——带 equipments 的（build_relations 产物），
+    以及**裸解析缓存**（rebuild 接口从 parsed_cache 直接读的那些）。
+    实测事故：接口把缓存文件原样塞进来，缓存里没有 "equipments" 键，
+    `d.get("equipments", [])` 恒为空 → 195 行台账、车间列齐全，
+    device_workshop 却是 0，按车间预填 devices=0、整卷取不到设备。
+    现在没有 equipments 时用 relations 的抽取器现场还原，形状问题由本模块自己兜住。
+    """
+    try:
+        from . import relations as _rel
+        _extract = _rel._equipment_from_cache
+    except Exception:  # noqa: BLE001
+        _extract = None
+
     n = 0
-    for sha, d in docs.items():
-        for e in d.get("equipments", []):
-            if e.get("where") != "excel_row":
+    for sha, d in (docs or {}).items():
+        if not isinstance(d, dict):
+            continue
+        eqs = d.get("equipments")
+        if eqs is None and _extract is not None:
+            try:
+                eqs = _extract(d)
+            except Exception:  # noqa: BLE001
+                eqs = []
+        for e in (eqs or []):
+            if not isinstance(e, dict) or e.get("where") != "excel_row":
                 continue
-            tag = e.get("tag", "").strip()
-            hint = e.get("workshop_hint", "")
+            tag = (e.get("tag") or "").strip()
+            hint = e.get("workshop_hint") or ""
             if not tag or not hint:
                 continue
             if assign_device(tag, hint, source="excel_row", confidence=0.8, file_sha=sha):
                 n += 1
     # 位号推断补充（仅对未登记的设备）
-    for sha, d in docs.items():
-        for e in d.get("equipments", []):
-            tag = e.get("tag", "").strip()
+    for sha, d in (docs or {}).items():
+        if not isinstance(d, dict):
+            continue
+        eqs = d.get("equipments")
+        if eqs is None and _extract is not None:
+            try:
+                eqs = _extract(d)
+            except Exception:  # noqa: BLE001
+                eqs = []
+        for e in (eqs or []):
+            if not isinstance(e, dict):
+                continue
+            tag = (e.get("tag") or "").strip()
             if not tag or get_workshop(tag):
                 continue
             inferred = infer_workshop_from_tag(tag)

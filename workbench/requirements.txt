@@ -1,31 +1,42 @@
 # 繁工AI 本地解析工作台 - 核心依赖（安装：pip install -r requirements.txt）
-# Python 版本组合（P3 说明）：
-#   Python 3.9~3.12（推荐）：按下方锁定版本安装即可
-#   Python 3.13（受管新环境）：chromadb 改用 >=1.5.9、sentence-transformers 改用 >=3.3.1（下方旧版无 py3.13 轮子，hnswlib 编译失败）；
-#                            paddlepaddle 需 >=3.0 + paddleocr 3.x（engines 已兼容 2.x/3.x 两版参数）
-fastapi==0.111.0
-uvicorn[standard]==0.30.1
-python-multipart==0.0.9
-requests==2.32.3
+#
+# 为什么用环境标记而不是让 install.bat 判断 Python 版本：
+#   同一份文件在 pip 里按 python_version 分流，3.9~3.12 与 3.13+ 各取各的解，
+#   安装脚本不需要分支、也不会因为某台机器跳过判断而装错组合。
+#   （实测 py3.13 上 chromadb==0.5.5 → chroma-hnswlib==0.7.6 → numpy 1.26.4
+#    无 cp313 轮子 → 源码构建 → metadata-generation-failed，整包装不上。）
+#
+# 版本口径：3.13 那一支的下限取自实测装成功的组合（chromadb 1.5.9 /
+#   sentence-transformers 6.2.0 / torch 2.15.0），不是凭估算填的。
+
+fastapi>=0.111.0,<0.116
+uvicorn[standard]>=0.30.1,<0.36
+python-multipart>=0.0.9
+requests>=2.32.3
 
 # 文档解析
-pypdf==4.2.0                 # PDF 文本提取（轻量）
-pdfplumber==0.11.2           # PDF 表格提取（增强，缺省自动降级）
-python-docx==1.1.2           # Word 文本+表格
-openpyxl==3.1.5              # Excel 表格结构化（台账）
+pypdf>=4.2.0
+pdfplumber>=0.11.2
+python-docx>=1.1.2
+openpyxl>=3.1.5
 
-# 向量化
-sentence-transformers==3.0.1 # 本地 embedding（首次运行自动下载模型）
-chromadb==0.5.5              # 向量库存储
+# 向量化（按 Python 版本分流）
+#   py<3.13：旧锁定版本久经验证
+#   py>=3.13：chromadb 0.5.5 依赖的 chroma-hnswlib 无 cp313 轮子，必须换新版
+sentence-transformers==3.0.1; python_version < "3.13"
+chromadb==0.5.5; python_version < "3.13"
+sentence-transformers>=6.2.0; python_version >= "3.13"
+chromadb>=1.5.9; python_version >= "3.13"
+# chromadb 1.x 在 3.13 上会拉 numpy>=2；旧版 numpy 没有 cp313 轮子，显式钉住下限
+numpy>=2.0.0; python_version >= "3.13"
 
 # 进度条/日志
-tqdm==4.66.4
+tqdm>=4.66.4
 
 # ===== DWG 竣工图清稿工具（仅 Windows 部署机需要） =====
-pywin32>=305
-pypdf>=4.0
+pywin32>=305; sys_platform == "win32"
 
 # ===== 可选增强依赖（不装则对应类型自动降级，装完重启工作台即启用）=====
 ezdxf>=1.3.1              # DWG/DXF 图纸深度解析（图框/标题栏/尺寸/设备块/空间结构）；DWG 另需 ODA File Converter
-# paddleocr                 # 图片 OCR 文字提取（体积大，按需安装）
+# paddleocr                 # 图片 OCR 文字提取（体积大，按需安装见 requirements-ocr.txt）
 # faster-whisper             # 手机语音本地转写（按需安装；或配置 AI 网关）

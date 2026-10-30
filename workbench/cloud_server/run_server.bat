@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 title 繁工AI 云端合并主库
 echo ========================================

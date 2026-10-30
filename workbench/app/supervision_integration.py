@@ -84,13 +84,45 @@ def registry_ready() -> bool:
     return all(isinstance(it, dict) and it.get("名称") for it in reg)
 
 
+# v0.1.177：登记表没有「册」列时的统一兜底名。
+# 实测事故：监理给的《资料整编要求》常常只有 序号/名称/表号/分类 四列，没有「册」列。
+# registry_info() 用 `or "（未标册）"` 展示成「（未标册）233 条」，
+# 而 _book_items() 直接用原始值比较 —— 条目根本没有 '册' 键，任何册名都匹配不上，
+# 于是界面告诉用户有一册，点「一键整卷」却永远报「没有这一册」，还白跑一百多秒。
+UNNAMED_BOOK = "（未标册）"
+
+
+def _book_of(it: dict) -> str:
+    """一条登记项的册名，**唯一口径**：空值一律落 UNNAMED_BOOK。
+
+    展示（registry_info）、过滤（_book_items）、可选册列表（available_books）
+    必须都走这一个函数，不能再各自写一遍兜底，否则又会分裂成两套。
+    """
+    return _clean_book(it.get('册')) or UNNAMED_BOOK
+
+
 def _book_items(book):
-    b = _clean_book(book)
-    return [it for it in load_registry() if _clean_book(it.get('册')) == b]
+    b = _clean_book(book) or UNNAMED_BOOK
+    return [it for it in load_registry() if _book_of(it) == b]
 
 
 def _item_category(it):
-    """项 → 模板类别（映射失败返回 None）"""
+    """项 → 模板类别（映射失败返回 None）。
+
+    v0.1.178 修了两条实测暴露的问题：
+
+    ① **国标表名认不出**。登记表里写的是国标/行业标准的正式表名，
+       比如「设备安装记录」（表号 SH/T3503-J302），而内置模板类别叫
+       「设备安装检查记录」—— `_categorize` 的关键词表里只有「安装检查」，
+       一个词差就把这条判成「无匹配模板」。用户在登记表里填得完全正确，
+       程序却说找不到表，这不能怪用户。
+       这里加一层**相似度回退**：关键词落空时，拿条目名和实际存在的模板类别名
+       做比对，唯一且相似度足够高才认（多个候选一律不猜，交人工）。
+
+    ② **B 类无模板不该算错误**。分类 B 的定义就是「生成 + 待补列清单」，
+       模板没建出来属于「等人补」的正常状态；把它记进 errors 会让
+       「一键整卷」的失败数和生成数一起失真。
+    """
     cls = it.get('分类')
     if cls == 'DUP':
         return None
@@ -98,7 +130,44 @@ def _item_category(it):
     if cls == 'C' or name in COLLECT_ONLY or any(k in name for k in ['监理旁站', '影像', '照片']):
         return 'C'
     cat = st._categorize(name)
-    return cat if cat != '其他' else None
+    if cat != '其他':
+        return cat
+    return _fuzzy_category(name)
+
+
+_FUZZY_MIN = 0.72
+_FUZZY_CACHE = {}
+
+
+def _fuzzy_category(name: str):
+    """表名相似度回退（v0.1.178）。
+
+    只在关键词匹配落空时用。规则：与实际存在的模板类别名逐一对齐，
+    取 SequenceMatcher 比值最高的一个；**比值 >= 0.72 且第二名与之差距
+    >= 0.06**（即"明显唯一"）才采用，否则返回 None 交人工判断。
+    不采用阈值很低的模糊匹配 —— 归错表比不归更糟。
+    """
+    if not name:
+        return None
+    if not _FUZZY_CACHE:
+        try:
+            for c, _kws in st.CATEGORY_KEYWORDS:
+                _FUZZY_CACHE[c] = None
+        except Exception:  # noqa: BLE001
+            return None
+    import difflib
+    scored = []
+    for c in _FUZZY_CACHE:
+        r = difflib.SequenceMatcher(None, name, c).ratio()
+        scored.append((r, c))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    best_r, best_c = scored[0]
+    second_r = scored[1][0] if len(scored) > 1 else 0.0
+    if best_r >= _FUZZY_MIN and (best_r - second_r) >= 0.06:
+        return best_c
+    return None
 
 
 def volume_status(project_id, book, workshop=''):
@@ -184,9 +253,72 @@ def _volume_dir(project_id, book, workshop):
     return vol
 
 
+def _project_workshops(project_id) -> list:
+    """本项目实际有设备的车间列表（v0.1.178）。"""
+    out = []
+    try:
+        from . import project_manager as _pm
+        idx_path = os.path.join(_pm.get_project_data_dir(project_id), "index.json")
+        if os.path.isfile(idx_path):
+            with open(idx_path, "r", encoding="utf-8") as f:
+                _idx = json.load(f)
+            for _d in (_idx.get("devices") or {}).values():
+                _ws = (_d.get("workshop") or "").strip()
+                if _ws and _ws not in out:
+                    out.append(_ws)
+    except Exception:  # noqa: BLE001
+        pass
+    return sorted(out)
+
+
 def generate_volume(project_id, book, workshop=''):
-    """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录"""
+    """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录
+
+    v0.1.178：**未指定车间时按项目实际车间逐个生成**。
+    实测事故：用户压根没选车间就点「一键整卷」，程序默认按「全厂」找设备，
+    而设备台账里设备都归在「1号车间」「2号车间」——「全厂」一台都没有，
+    于是每一条都被空壳闸门拦下：「『全厂』车间没有设备数据」
+    生成=0 / 错=2。用户明明已经上传了台账、设备也归好了车间，
+    程序却告诉他「请先上传设备台账」——这是最伤人的一类提示。
+    台账按车间分是常态，所以默认行为必须逐个真实车间出卷，而不是假设「全厂」。
+    """
     items = _book_items(book)
+    # v0.1.178：「全厂」在设备台账里通常不是真实车间（设备都归在具体车间），
+    # 把它等同于「未指定」，走下面的自动分卷。原来是显式传到相关车间参数里，
+    # 于是永远查不到设备、每条都被空壳闸门拦下。
+    if (workshop or "").strip() in ("", "全厂"):
+        _wss = _project_workshops(project_id)
+        if len(_wss) > 1:
+            # 多车间：分卷生成后合并计数（每个车间一卷，目录自然分开）
+            _merged = None
+            for _w in _wss:
+                _r = generate_volume(project_id, book, _w)
+                if _merged is None:
+                    _merged = _r
+                    _merged['by_workshop'] = {_w: {
+                        'generated': len(_r.get('generated') or []),
+                        'errors': len(_r.get('errors') or []),
+                        'todo': len(_r.get('todo') or []),
+                    }}
+                else:
+                    for _k in ('generated', 'todo', 'errors', 'collect_dir',
+                               'todo_fields', 'empty_shells'):
+                        if _r.get(_k):
+                            _merged.setdefault(_k, [])
+                            _merged[_k] = list(_merged.get(_k) or []) + list(_r[_k])
+                    _merged.setdefault('by_workshop', {})[_w] = {
+                        'generated': len(_r.get('generated') or []),
+                        'errors': len(_r.get('errors') or []),
+                        'todo': len(_r.get('todo') or []),
+                    }
+            if _merged is None:
+                _merged = generate_volume(project_id, book, '全厂')
+            _merged['workshops'] = _wss
+            _merged['multi_workshop'] = True
+            _merged['ok'] = not (_merged.get('errors') or [])
+            _merged['workshop_devices'] = len(st._get_workshop_devices('', project_id))
+            return _merged
+        workshop = _wss[0] if _wss else '全厂'
     # v0.1.173：先确认能定位到项目目录。原来 project_id 为空时 `_volume_dir` 会
     # 拼出 `data/projects/volumes/...`，产物落在「所有项目的上一层」，谁也找不到。
     try:
@@ -205,9 +337,9 @@ def generate_volume(project_id, book, workshop=''):
     if not items:
         return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                 'todo_fields': [],
-                'error': f'整编要求登记表中没有「{_clean_book(book)}」这一册的条目',
-                'book': _clean_book(book),
-                'available_books': sorted({_clean_book(it.get('册')) for it in load_registry() if it.get('册')})}
+                'error': f'整编要求登记表中没有「{_clean_book(book) or UNNAMED_BOOK}」这一册的条目',
+                'book': _clean_book(book) or UNNAMED_BOOK,
+                'available_books': sorted({_book_of(it) for it in load_registry() if isinstance(it, dict)})}
     # v0.1.172：设备台账前置校验。整卷的 A/B 类都是"按设备一行"的确认表，
     # 设备库为空时生成出来的必然是只有表头的空壳。先同步一次设备再把结果说清楚。
     _dev_info = {'devices': 0}
@@ -239,8 +371,14 @@ def generate_volume(project_id, book, workshop=''):
                 '序号': seq, '名称': name, '目录': d, '目录名': os.path.basename(d)})
             continue
         if not cat:
-            results['errors'].append({'序号': seq, '名称': name, '原因': '无匹配模板'})
-            results['todo'].append({'序号': seq, '名称': name, '原因': '模板未建，需人工处理'})
+            _why = '无匹配模板，需人工确认表类型'
+            if cls == 'B':
+                # v0.1.178：B 类本身就是「生成+待补列清单」，模板未建是正常待办，
+                # 不是错误。记进 errors 会让整卷的失败数虚高。
+                results['todo'].append({'序号': seq, '名称': name, '原因': _why})
+            else:
+                results['errors'].append({'序号': seq, '名称': name, '原因': _why})
+                results['todo'].append({'序号': seq, '名称': name, '原因': _why})
             continue
         r = st.generate_batch(category=cat, workshop=workshop or '全厂', project_id=project_id)
         if not r.get('ok'):
@@ -592,7 +730,7 @@ def registry_info() -> dict:
     for it in items:
         if not isinstance(it, dict):
             continue
-        b = _clean_book(it.get("册")) or "（未标册）"
+        b = _book_of(it)
         books[b] = books.get(b, 0) + 1
         if not it.get("名称") or not str(it.get("序号") or "").strip():
             incomplete += 1

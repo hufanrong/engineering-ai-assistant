@@ -205,9 +205,21 @@ def check_online(base):
     code, raw = get("/")
     html = raw.decode("utf-8", "replace") if code == 200 else ""
     # 页面必须是完整页面：有 <html>、有实际体积。空白页/错误页也是 200。
-    rec("首页可打开", "200 且返回完整 HTML（>200KB，含关键模块）",
-        f"{code} bytes={len(raw)}", code == 200 and len(raw) > 200_000 and "<html" in html.lower(),
-        f"体积仅 {len(raw)} 字节，可能是错误页" if len(raw) <= 200_000 else "")
+    # v0.1.177：阈值**按随包 web/index.html 的真实大小推导**，不再写死 200000。
+    # 实测事故：包里的 index.html 是 193830 字节，服务端返回的长度完全一致
+    # （说明首页完全正常），却被硬阈值判成「可能是错误页」→ 报告里多一条假 FAIL，
+    # 把真正的问题淹掉。取随包体积的 80% 作为下限，既容忍 gzip/压缩差异，
+    # 又能拦住返回空壳/错误页的情况。
+    try:
+        _home = os.path.join(WB_DIR, "web", "index.html")
+        _expect = os.path.getsize(_home)
+    except Exception:
+        _expect = 0
+    _floor = int(_expect * 0.8) if _expect else 20_000
+    rec("首页可打开", f"200 且返回完整 HTML（>= 随包 index.html 的 80%，下限 {_floor}）",
+        f"{code} bytes={len(raw)} 随包={_expect}",
+        code == 200 and len(raw) >= _floor and "<html" in html.lower(),
+        f"体积仅 {len(raw)} 字节（随包 {_expect}），可能是错误页" if code == 200 and len(raw) < _floor else "")
 
 
 def main():
