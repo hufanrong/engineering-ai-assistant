@@ -85,10 +85,19 @@ REPORT 把报告写进 reports/<时间戳>/ 并 commit + push 回仓库
 
 ## 四、我（AI 侧）会怎么用这些报告
 
-AI 侧每轮读 `reports/<最新>/report.json`：
+AI 侧用 `workbench/tools/ai_side.py` 读远端报告（凭据在沙箱内，不进公开仓库）：
+
+```
+python3 ai_side.py            # 最新一轮摘要 + 下一步该做什么
+python3 ai_side.py --list     # 列出所有轮次
+python3 ai_side.py --fails    # 只列最新一轮失败项
+python3 ai_side.py --run <id> # 读指定轮次
+```
+
+判定规则：
 
 - `status=passed` → 该阶段验收通过，推进下一阶段
-- `status=failed` → 从 `results` 里取失败项 + `console.log` 定位，改代码、再推
+- `status=failed` → 从 `--fails` + `console.log` 定位，改代码、再推
 - `status=error` → 先修通道本身（拉取/依赖/服务），不把它当成代码问题
 
 `env.json` 里有 Windows 版本、Python 版本、是否管理员、依赖是否安装 —— 阶段④
