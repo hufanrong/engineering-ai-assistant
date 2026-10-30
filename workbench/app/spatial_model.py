@@ -24,6 +24,38 @@ from . import config
 NEIGHBOR_RADIUS_METERS = 15.0
 
 
+# v0.1.167：设备名称 → 设备类型（竣工资料清单按类型取，如 泵/风机/储罐）
+# 与 supervision_templates._device_type_of 保持同一套关键词口径，
+# 但补齐 completion_archive.DEVICE_ARCHIVE_REQUIREMENTS 已支持的常见类型，
+# 避免「离心泵」被推断成空串而只拿到通用清单。
+_DEVICE_TYPE_KW = [
+    ("泵", ["泵"]),
+    ("风机", ["风机", "通风机"]),
+    ("压缩机", ["压缩机", "空压机"]),
+    ("储罐", ["储罐", "罐体", "储槽"]),
+    ("换热器", ["换热器", "冷却器", "冷凝器"]),
+    ("塔器", ["塔器", "吸收塔", "洗涤塔"]),
+    ("容器", ["容器", "反应釜", "分离器"]),
+    ("阀门", ["阀门", "闸阀", "球阀", "蝶阀", "截止阀"]),
+    ("电机", ["电机", "电动机", "变压器"]),
+    ("破碎机", ["破碎机", "颚式", "圆锥破", "反击破"]),
+    ("球磨机", ["球磨机", "磨机"]),
+    ("浮选机", ["浮选机"]),
+    ("起重机", ["起重机", "行车", "单梁"]),
+]
+
+
+def _infer_device_type(name: str) -> str:
+    """按设备名称关键词推断设备类型；无法匹配时返回空串（走通用清单）。"""
+    if not name:
+        return ""
+    for t, kws in _DEVICE_TYPE_KW:
+        for k in kws:
+            if k in name:
+                return t
+    return ""
+
+
 def build_spatial_model(relations_graph: dict, elevation_map: dict = None) -> dict:
     """从 relations 图谱构建设备空间结构模型（v0.1.38：含标高 z 坐标）。
     返回 {workshops: {ws: {devices: [...]}}, device_index: {tag: {...}}, stats: {...}}。"""
@@ -76,6 +108,12 @@ def build_spatial_model(relations_graph: dict, elevation_map: dict = None) -> di
         device_index[tag] = {
             "tag": tag,
             "workshop": workshop,
+            # v0.1.167：透传台账设备名称/型号，并按名称推断设备类型 ——
+            # 原来 spatial 不带 name/type，竣工资料只能用位号当设备名、
+            # 且 get_device_requirements("") 只能取通用清单（泵/风机等专项清单失效）
+            "name": dev.get("name", "") or tag,
+            "model": dev.get("model", ""),
+            "type": dev.get("type", "") or _infer_device_type(dev.get("name", "")),
             "x": primary_pos.get("x") if primary_pos else None,
             "y": primary_pos.get("y") if primary_pos else None,
             "z": elevation_map.get(tag, {}).get("elevation_m"),
@@ -148,6 +186,11 @@ def build_spatial_model(relations_graph: dict, elevation_map: dict = None) -> di
     return {
         "workshops": workshops,
         "device_index": device_index,
+        # v0.1.167：补顶层 devices 列表 —— 原来只返回 device_index，
+        # 而 completion_archive / docgen / construction_schedule / construction_log
+        # 等 12 处都在读 spatial.get("devices", [])，恒为空 dict，
+        # 导致竣工资料里设备名退化成位号、设备类型为空、只取通用清单。
+        "devices": [device_index[t] for t in sorted(device_index)],
         "stats": stats,
     }
 
