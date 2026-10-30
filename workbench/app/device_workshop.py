@@ -14,16 +14,28 @@ import datetime
 
 from . import config
 
-_STORE_PATH = os.path.join(config.DATA_DIR, "device_workshop.json")
+# v0.1.167：登记表改为按项目定位 —— 原来是全局 data/device_workshop.json，
+# 换项目后上一项目的设备车间登记仍然生效并覆盖新项目同名位号（如 T-301 被
+# 上一项目推成 3号车间，而本项目台账明确写的是配电室），属于跨项目串味。
+def _store_path() -> str:
+    try:
+        from . import project_manager as _pm
+        return os.path.join(_pm.get_project_data_dir(), "device_workshop.json")
+    except Exception:  # noqa: BLE001
+        return os.path.join(config.DATA_DIR, "device_workshop.json")
+
+
+_STORE_PATH = os.path.join(config.DATA_DIR, "device_workshop.json")  # 兼容旧引用（读写请走 _store_path()）
 
 # 位号前缀→车间的可配置映射（如 P-1xx→1号车间）；默认空，由人工/台账积累
 _TAG_PREFIX_MAP = {}
 
 
 def _load() -> dict:
-    if os.path.exists(_STORE_PATH):
+    p = _store_path()
+    if os.path.exists(p):
         try:
-            with open(_STORE_PATH, encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:  # noqa: BLE001
             return {}
@@ -31,8 +43,9 @@ def _load() -> dict:
 
 
 def _save(m: dict):
-    os.makedirs(os.path.dirname(_STORE_PATH), exist_ok=True)
-    with open(_STORE_PATH, "w", encoding="utf-8") as f:
+    p = _store_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(m, f, ensure_ascii=False, indent=2)
 
 
