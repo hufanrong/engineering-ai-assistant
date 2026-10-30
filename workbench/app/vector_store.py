@@ -99,6 +99,81 @@ class VectorStore:
             })
         return out
 
+    # ---------- 关键词降级检索 ----------
+    def search_keyword(self, query: str, top_k: int = 5, data_dir: str = None) -> list:
+        """embedding 模型不可用时的降级检索：直接对解析缓存做中文/英文关键词匹配。
+
+        设计动机：资料库的可用性不能被 '首次需联网下载 470MB 模型' 绑架。工地内网、
+        离线环境、模型下载失败时，检索仍须返回命中文件，否则资料库等于不可用。
+        返回结构与 search() 对齐（text/distance/meta），distance 用 0~1 的归一化失配度。
+        """
+        import glob
+        import re as _re
+
+        ddir = data_dir or os.path.join(
+            os.path.dirname(self._db_path.rstrip("/\\")), "parsed_cache")
+        files = sorted(glob.glob(os.path.join(ddir, "*.json")))
+        if not files:
+            return []
+
+        q = (query or "").strip()
+        if not q:
+            return []
+        # 中文按二元切分（避免整句匹配过严），英文/数字按词
+        terms = set()
+        for run in _re.findall(r"[A-Za-z0-9]+", q):
+            if len(run) >= 2:
+                terms.add(run.lower())
+        cjk = _re.findall(r"[一-鿿]+", q)
+        for seg in cjk:
+            if len(seg) == 1:
+                terms.add(seg)
+            else:
+                for i in range(len(seg) - 1):
+                    terms.add(seg[i:i + 2])
+        if not terms:
+            return []
+
+        scored = []
+        for fp in files:
+            try:
+                with open(fp, encoding="utf-8") as f:
+                    d = json.load(f)
+            except Exception:  # noqa: BLE001
+                continue
+            text = (d.get("text") or "")
+            name = (d.get("file_name") or "")
+            hay = (name + " " + text).lower()
+            if not hay.strip():
+                continue
+            hit = sum(1 for t in terms if t in hay)
+            if hit == 0:
+                continue
+            score = hit / len(terms)
+            # 命中词更多、文件更短者优先（贴近检索意图）
+            snippet = text
+            for t in sorted(terms, key=len, reverse=True):
+                p = text.lower().find(t)
+                if p >= 0:
+                    snippet = text[max(0, p - 60):p + 120]
+                    break
+            scored.append({
+                "text": snippet.strip(),
+                "distance": round(1.0 - score, 4),
+                "meta": {
+                    "file_name": name,
+                    "sha256": d.get("sha256", ""),
+                    "ext": d.get("ext", ""),
+                    "parser": d.get("parser", ""),
+                    "matched_terms": hit,
+                    "total_terms": len(terms),
+                    "file_path": d.get("file_path", ""),
+                    "retrieval": "keyword",
+                },
+            })
+        scored.sort(key=lambda x: (x["distance"], len(x["text"])))
+        return scored[:top_k]
+
     def stats(self) -> dict:
         try:
             col = self._get_collection()
