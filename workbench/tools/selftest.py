@@ -109,9 +109,20 @@ def call(method, path, payload=None, timeout=TIMEOUT):
 
 
 def record(phase, step, expected, actual, passed, evidence=""):
+    """记一条结果。passed 是三态：True 通过 / False 失败 / None 跳过。
+
+    v0.1.169：原来写 `"passed": bool(passed)` 把 None（跳过）压成 False，
+    明细里「环境不满足、跳过」的项看起来跟真失败一模一样。汇总按 None 正确
+    计成 skipped，明细却全成了 failed —— 实测阶段④在 Linux 上 1 失败 5 跳过，
+    明细读出来却是 6 项失败，AI 侧会按失败的严重度去排查 5 个根本不存在的
+    问题。改成 `passed` 保留 None，并用 skipped 字段明确标出来。
+    """
     RESULTS.append({
         "phase": phase, "step": step, "expected": expected,
-        "actual": actual, "passed": bool(passed), "evidence": evidence,
+        "actual": actual,
+        "passed": (True if passed is True else (None if passed is None else False)),
+        "skipped": passed is None,
+        "evidence": evidence,
     })
     s = PHASE_SUMMARY.setdefault(phase, {"passed": 0, "failed": 0, "skipped": 0})
     if passed is None:
