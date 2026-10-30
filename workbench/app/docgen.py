@@ -594,7 +594,13 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
         # 验收记录编号（从已生成文档获取）
         try:
             import os as _os
-            gen_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "data", "generated_docs")
+            # v0.1.168：改用项目级存档目录 —— 原来写死全局 data/generated_docs，
+            # 项目切换后「验收记录编号」会填进别的项目的文件名。
+            try:
+                from . import archive as _arch
+                gen_dir = _arch._gen_dir()
+            except Exception:  # noqa: BLE001
+                gen_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "data", "generated_docs")
             acceptance_records = []
             for dtype in ["开箱验收记录", "隐蔽工程验收记录"]:
                 dtype_dir = _os.path.join(gen_dir, dtype)
