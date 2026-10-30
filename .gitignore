@@ -84,5 +84,8 @@ workbench/data/operation_log.jsonl
 workbench/data/projects/
 **/telemetry_export*.json
 **/telemetry_bundle*.json
+# 例外：wb_loop 每轮回传的遥测包**要**进仓库，它是脱敏后的诊断数据，
+# 不脱敏的原始日志才禁止。这条必须在上面那条之后，git 规则是「后面的覆盖前面的」。
+!reports/*/telemetry_bundle.json
 **/__pycache__/
 *.pyc

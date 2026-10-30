@@ -568,6 +568,46 @@ def commit_and_push(run_id, out_dir, status, summary, err_msg=""):
     return rc == 0, steps
 
 
+def export_telemetry(out_dir):
+    """把程序自己的「脱敏使用诊断包」导出到本轮报告目录。
+
+    为什么放在循环里：自测用的是合成样本，永远测不到真实使用里的失败
+    （「上传 200 个、30 个没解析出来」）。用户只要正常用程序，遥测就在记；
+    每轮把这批增量带回去，AI 侧才有真实数据可优化，而不是靠猜。
+
+    安全：导出的是 /api/telemetry/export 的脱敏包（无项目名/客户/地点/文件名/
+    绝对路径），不是原始 requests.jsonl。原始日志带业务信息，且本仓库是 PUBLIC
+    的，绝不能进版本库（已在 .gitignore 挡住）。
+
+    返回 (ok, 说明)。失败不影响本轮判定 —— 遥测只是附加信息。
+    """
+    try:
+        import urllib.request
+        req = urllib.request.Request(BASE_URL + "/api/telemetry/export",
+                                     headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = json.loads(r.read().decode("utf-8", "replace"))
+        bundle = (body or {}).get("data")
+        if not isinstance(bundle, dict) or not bundle:
+            return False, "导出返回为空（可能是旧版本，无遥测接口）"
+        p = os.path.join(out_dir, "telemetry_bundle.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(bundle, f, ensure_ascii=False, indent=1)
+        req_n = (bundle.get("requests") or {}).get("total")
+        pf_n = (bundle.get("parse_failures") or {}).get("total_failed")
+        # 推进水位：下一轮只导新增，避免把同一批记录反复搬进仓库
+        try:
+            req2 = urllib.request.Request(
+                BASE_URL + "/api/telemetry/export?advance=true",
+                headers={"Accept": "application/json"})
+            urllib.request.urlopen(req2, timeout=30).read()
+        except Exception:  # noqa: BLE001
+            pass
+        return True, f"requests={req_n} parse_failed={pf_n} -> telemetry_bundle.json"
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+
+
 # ---------------------------------------------------------------- 一轮
 def one_round(args):
     os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -710,6 +750,15 @@ def one_round(args):
     rec["steps"].append({"step": "selftest", "rc": rc,
                          "out": json.dumps(summary, ensure_ascii=False)[:300] if summary else "",
                          "err": serr[:300]})
+
+    # ---- 3.5 真实使用遥测（v0.1.171）
+    # 自测造的是合成样本，覆盖不到「用户真实传了 200 个文件、其中 30 个没解析出来」
+    # 这种场景。所以每轮顺手把程序自己的脱敏诊断包也带回去：增量导出（水位机制），
+    # 只取上一轮之后的新增，不会每轮重复搬运同一批记录。
+    # 只有服务在线时才导（进程内模式的遥测落在临时库，带回来没有意义）。
+    if not inproc:
+        ok, msg = export_telemetry(out_dir)
+        rec["steps"].append({"step": "导出使用遥测", "rc": 0 if ok else 1, "out": msg})
 
     # 环境
     with open(os.path.join(out_dir, "env.json"), "w", encoding="utf-8") as f:
