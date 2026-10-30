@@ -177,15 +177,23 @@ def _load_cache(sha256: str, data_dir=None):
 
 # ---------------- 车间名归一 ----------------
 def _norm_workshop(raw: str) -> str:
-    """把 '1车间' / '二号车间' / '2号车间' 统一为 '1号车间'。"""
+    """把 '1车间' / '二号车间' / '2号车间' 统一为 '1号车间'。
+    v0.1.167：改走 workshop_assign._norm —— 原来只认「N号车间」正则，
+    台账里「配电室」「泵站」「磨浮车间」这类命名空间单元一律返回 None 被丢弃，
+    设备因此落到位号前缀猜测（T-301→3号车间）而不是台账写明的配电室。"""
     m = _WORKSHOP_RE.search(raw or "")
-    if not m:
+    if m:
+        num = m.group(1)
+        cn = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5",
+              "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"}
+        n = cn.get(num, num)
+        return f"{n}号车间"
+    # 命名空间单元（配电室/泵站/磨浮车间/锂辉石库…）走统一识别器
+    try:
+        from . import workshop_assign as _wa
+        return _wa._norm(raw or "")
+    except Exception:  # noqa: BLE001
         return None
-    num = m.group(1)
-    cn = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5",
-          "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"}
-    n = cn.get(num, num)
-    return f"{n}号车间"
 
 
 def _extract_workshops_from_text(text: str) -> list:
@@ -309,8 +317,32 @@ def _equipment_from_cache(cache: dict) -> list:
             out.append({"tag": t, "where": "cad_text"})
     elif parser in ("text", "ocr"):
         # 文本/OCR（现场照片铭牌识别）中的位号
+        # v0.1.167：按位置就近归属 —— 每个位号找同句（或前一句）内最近的车间名。
+        # 原来文本类设备一律不带 workshop_hint，整篇又按第一个车间归档，
+        # 「1号车间安装 P-101，2号车间设 V-201」会让 V-201 多出一张 1号车间票，
+        # 与台账行的 2号车间打成平票冲突。
+        _ws_hits = []
+        for _wm in re.finditer(r"(?:[\u4e00-\u9fa5]{0,6}?)(\d{1,2}|[一二三四五六七八九十]+)\s*号?\s*车间", text or ""):
+            _w = _norm_workshop(_wm.group(0))
+            if _w:
+                _ws_hits.append((_wm.start(), _w))
         for m in _TAG_RE.finditer(text):
-            out.append({"tag": m.group(1), "where": "ocr" if parser == "ocr" else "text"})
+            hint = None
+            # 就近优先：同句内前向最近 > 后向最近 > 前一句
+            _best = None
+            for _pos, _w in _ws_hits:
+                _gap = m.start() - _pos
+                if _gap >= 0:
+                    if _best is None or _gap < _best[0]:
+                        _best = (_gap, _w)
+            if _best is None:
+                for _pos, _w in _ws_hits:
+                    _gap = _pos - m.start()
+                    if _gap >= 0 and (_best is None or _gap < _best[0]):
+                        _best = (_gap, _w)
+            hint = _best[1] if _best else None
+            out.append({"tag": m.group(1), "where": "ocr" if parser == "ocr" else "text",
+                        "workshop_hint": hint})
     elif parser == "excel":
         ws = _norm_workshop(fname) or None
         for sheet in structure.get("sheets", [])[:10]:
@@ -320,6 +352,12 @@ def _equipment_from_cache(cache: dict) -> list:
                     # parse_excel 输出 dict 行 {表头: 值}
                     tag = str(row.get("位号") or row.get("设备位号") or row.get("设备编号") or row.get("编号") or "").strip()
                     ws_hint = str(row.get("车间") or row.get("所属车间") or row.get("区域") or row.get("装置") or "").strip()
+                    # v0.1.167：台账行的名称/型号/数量/重量一并带出 —— 原来只取位号，
+                    # 导致关系图谱 devices 无 name/model，竣工资料无法按设备类型选资料清单
+                    name = str(row.get("设备名称") or row.get("名称") or row.get("品名") or "").strip()
+                    model = str(row.get("型号") or row.get("规格型号") or row.get("规格") or "").strip()
+                    qty = str(row.get("数量") or "").strip()
+                    weight = str(row.get("重量") or row.get("设备重量") or "").strip()
                 else:
                     vals = [str(v or "").strip() for v in row]
                     tag = ""
@@ -332,10 +370,23 @@ def _equipment_from_cache(cache: dict) -> list:
                         if h in ("车间", "所属车间", "区域", "装置") and i < len(vals):
                             ws_hint = vals[i]
                             break
+                    name = model = qty = weight = ""
+                    for i, h in enumerate(header):
+                        if i >= len(vals):
+                            break
+                        if h in ("设备名称", "名称", "品名"):
+                            name = vals[i]
+                        elif h in ("型号", "规格型号", "规格"):
+                            model = vals[i]
+                        elif h == "数量":
+                            qty = vals[i]
+                        elif h in ("重量", "设备重量"):
+                            weight = vals[i]
                 if not tag or not _TAG_RE.fullmatch(tag):
                     continue
                 row_ws = _norm_workshop(ws_hint) or ws
-                out.append({"tag": tag, "where": "excel_row", "workshop_hint": row_ws})
+                out.append({"tag": tag, "where": "excel_row", "workshop_hint": row_ws,
+                            "name": name, "model": model, "quantity": qty, "weight": weight})
                 # v0.1.31：Excel 行同时有位号+厂家编号 → 提取映射对
                 try:
                     from . import tag_alias
@@ -428,6 +479,9 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
             doc_type_pre = _classify(fname, tb, text)
             if doc_type_pre != "台账/清单":
                 cands = _extract_workshops_from_text(text)
+                # v0.1.167：文件级归属仍取第一个车间（资料库按车间分组需要），
+                # 但多车间正文不再把这个车间摊到每台设备头上（详见 entry 构造处），
+                # 设备级归属交给该设备自己那句话/台账行/图纸。
                 ws = cands[0] if cands else None
 
         doc_type = _classify(fname, tb, text)
@@ -500,11 +554,21 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
                 "in_files": [],        # [{file, workshop, where, x, y}]
                 "workshops": [],       # 去重车间列表
                 "sources": {"cad": 0, "excel": 0, "text": 0, "ocr": 0},
+                "name": "", "model": "", "quantity": "", "weight": "",
             })
+            # v0.1.167：补全设备名称/型号等属性（台账行优先，首次非空即采用）
+            for _k in ("name", "model", "quantity", "weight"):
+                if not dev.get(_k) and e.get(_k):
+                    dev[_k] = e[_k]
             src_key = {"cad_block": "cad", "cad_text": "text", "excel_row": "excel", "text": "text", "ocr": "ocr"}.get(e["where"], "text")
             dev["sources"][src_key] = dev["sources"].get(src_key, 0) + 1
+            # v0.1.167：设备级车间证据 = 该设备自己的行/句车间；没有才回落到文件级。
+            # 原来两者都收，多车间正文（「1号车间安装 P-101，2号车间设 V-201」）
+            # 会给 V-201 凭空记一票 1号车间，与台账行的 2号车间打成平票冲突。
+            _hint = e.get("workshop_hint")
+            _dev_ws = _hint or d["workshop"]
             entry = {
-                "file": d["file_name"], "workshop": d["workshop"],
+                "file": d["file_name"], "workshop": _dev_ws,
                 "where": e["where"], "x": e.get("x"), "y": e.get("y"),
                 "workshop_hint": e.get("workshop_hint"),
                 "elevation_hint": e.get("elevation_hint"),
@@ -512,7 +576,7 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
             }
             if not any(f["file"] == entry["file"] and f["where"] == entry["where"] for f in dev["in_files"]):
                 dev["in_files"].append(entry)
-            for w in [d["workshop"], e.get("workshop_hint")]:
+            for w in [_dev_ws]:
                 if w and w not in dev["workshops"]:
                     dev["workshops"].append(w)
 
@@ -708,7 +772,14 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
         workshops[w]["doc_count"] = len(workshops[w]["docs"])
         workshops[w]["device_count"] = len(workshops[w]["tags"])
 
-    devices_out = [{"tag": t, "workshops": list(set(d["workshops"])), "files": [f["file"] for f in d["in_files"]],
+    devices_out = [{"tag": t,
+                    # v0.1.167：带上名称/型号/数量/重量与单一归属车间，
+                    # 竣工资料按设备名选清单类型、按车间组卷都要用到
+                    "name": d.get("name", ""), "model": d.get("model", ""),
+                    "quantity": d.get("quantity", ""), "weight": d.get("weight", ""),
+                    "workshops": list(set(d["workshops"])),
+                    "workshop": (list(set(d["workshops"]))[0] if len(set(d["workshops"])) == 1 else ""),
+                    "files": [f["file"] for f in d["in_files"]],
                     "sources": d["sources"],
                     "cad_positions": [{"x": f["x"], "y": f["y"], "file": f["file"],
                                        "elevation": f.get("elevation_hint"),
