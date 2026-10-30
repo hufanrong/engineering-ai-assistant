@@ -14,24 +14,57 @@ from typing import Optional
 _ARCHIVE_FILE = os.path.join("data", "completion_archive.json")
 
 
+def _archive_file() -> str:
+    """竣工归档清单的存储路径（按当前项目隔离）。
+
+    v0.1.173：原来写死成全局 data/completion_archive.json —— 全机器只有一份。
+    后果是建 A、B 两个项目，在 A 生成过竣工清单后切到从未生成过的 B，
+    B 的「竣工资料统计」直接返回 A 的设备数（实测 total_devices=0 却又能
+    从同一文件里列出别的项目的 EQ-101 缺件），导出会把别的项目的资料递出去。
+    竣工归档是交给监理的项目级交付物，必须跟着项目走。
+
+    取不到项目目录时（老版本无项目数据）回退旧的全局路径，保证已存在的老机器
+    升级后仍能读到原有清单，不会突然变成空。
+    """
+    try:
+        from . import project_manager as _pm
+        ddir = _pm.get_project_data_dir()
+        if ddir:
+            return os.path.join(ddir, "completion_archive.json")
+    except Exception:  # noqa: BLE001
+        pass
+    return _ARCHIVE_FILE
+
+
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    p = os.path.dirname(_archive_file())
+    if p:
+        os.makedirs(p, exist_ok=True)
 
 
 def _load_archive() -> dict:
-    if os.path.exists(_ARCHIVE_FILE):
-        try:
-            with open(_ARCHIVE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+    """读当前项目的竣工归档清单。
+
+    项目内没有这份文件时，只有「当前无项目、退回全局路径」的情况下才去读旧全局文件；
+    有项目但项目内还没有清单 → 返回 {}，不把别的项目的清单借过来。
+    """
+    path = _archive_file()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _save_archive(archive: dict):
     _ensure_dirs()
-    with open(_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+    path = _archive_file()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(archive, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 # 每类设备需要的竣工资料清单

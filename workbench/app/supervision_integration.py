@@ -9,8 +9,40 @@
 import os, json, re
 from . import supervision_templates as st
 
-REG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
-REG_FILE = os.path.join(REG_DIR, 'supervision_registry.json')
+# v0.1.173：整编要求登记表改为「按项目存放」。
+# 原来固定写在代码目录 app/data/supervision_registry.json —— 全机器只有一份，
+# 换项目后还在用上一个项目的监理登记表；而且 app/data 在 .gitignore 的 data/ 规则下，
+# 打包分发时这份「每项目各不相同」的业务数据会被各项目部互相覆盖。
+# 现在优先读当前项目目录，读不到再回退旧的全局路径（兼容已导入过登记表的老机器）。
+LEGACY_REG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'supervision_registry.json')
+
+
+def _project_reg_file() -> str:
+    """当前项目的登记表路径。取不到项目目录时回退到旧的全局路径。"""
+    try:
+        from . import project_manager as _pm
+        ddir = _pm.get_project_data_dir()
+        if ddir:
+            return os.path.join(ddir, 'supervision_registry.json')
+    except Exception:  # noqa: BLE001
+        pass
+    return LEGACY_REG_FILE
+
+
+def _reg_file() -> str:
+    """实际使用的登记表路径：项目内有就用项目的，没有才用旧的全局文件。"""
+    p = _project_reg_file()
+    if os.path.exists(p):
+        return p
+    if os.path.exists(LEGACY_REG_FILE) and p != LEGACY_REG_FILE:
+        return LEGACY_REG_FILE
+    return p
+
+
+# 兼容旧引用（模块级常量）。注意：这是「最后一次求值」的快照，
+# 运行期请用 _reg_file()，否则切换项目后仍会读旧文件。
+REG_DIR = os.path.dirname(_project_reg_file())
+REG_FILE = _project_reg_file()
 
 BOOK_ALIAS = {
     '变配电室/总降': '变配电',
@@ -30,10 +62,11 @@ def _clean_book(book):
 
 def load_registry():
     """读整编要求登记表。文件缺失/损坏时返回 []（调用方需自行判断并明确报错）。"""
-    if not os.path.exists(REG_FILE):
+    path = _reg_file()
+    if not os.path.exists(path):
         return []
     try:
-        with open(REG_FILE, encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
     except Exception:  # noqa: BLE001
@@ -73,6 +106,12 @@ def volume_status(project_id, book, workshop=''):
     items = _book_items(book)
     out = {'book': _clean_book(book), 'total': len(items), 'a': 0, 'b': 0, 'c': 0, 'dup': 0,
            'generated': [], 'missing': [], 'collect': [], 'dup_items': []}
+    # v0.1.173：项目定位不到时不要拿空路径去 listdir，直接说明「未选项目」
+    try:
+        _volume_dir(project_id, book, workshop)
+    except ValueError as _e:
+        out.update({'ok': False, 'error': str(_e), 'missing_project': True})
+        return out
     for it in items:
         cls = it.get('分类')
         cat = _item_category(it)
@@ -110,9 +149,34 @@ def _check_generated(project_id, book, workshop, it, cat):
 
 
 def _proj_root(project_id):
-    """项目数据根：由模板目录推导（workspace/fangong-workbench/templates_builtin → ../data/projects）"""
-    wb_root = os.path.dirname(st._te.TEMPLATES_DIR)
-    return os.path.join(wb_root, 'projects', project_id)
+    """项目数据根：由模板目录推导（workspace/fangong-workbench/templates_builtin → ../data/projects）
+
+    v0.1.173：原来直接 `os.path.join(wb_root, 'projects', project_id)`，
+    project_id 为空（前端没选项目、或调用方没传）时拼出来的路径是
+    `.../data/projects/` —— 卷直接写进「所有项目的上一层」，不属于任何项目：
+    实测整卷产物落在 `data/projects/volumes/第一册/1号车间/`，而当前项目目录下
+    一个文件都没有，用户在自己的项目里找不到刚生成的卷。
+
+    这里改成：project_id 为空时先取「当前项目」；仍取不到就抛 ValueError，
+    由上层返回明确错误，而不是静默写到一个谁都不认识的地方。
+    """
+    pid = (project_id or '').strip()
+    if not pid:
+        try:
+            from . import project_manager as _pm
+            cur = _pm.get_current_project()
+            if cur:
+                pid = cur.get('id') or cur.get('project_id') or ''
+        except Exception:  # noqa: BLE001
+            pid = ''
+    if not pid:
+        raise ValueError('未指定项目：整卷必须归属到某个项目，请先选择或创建项目')
+    return os.path.join(wb_root_projects(), pid)
+
+
+def wb_root_projects():
+    """所有项目目录的父目录（.../data/projects）。"""
+    return os.path.join(os.path.dirname(st._te.TEMPLATES_DIR), 'projects')
 
 
 def _volume_dir(project_id, book, workshop):
@@ -123,13 +187,21 @@ def _volume_dir(project_id, book, workshop):
 def generate_volume(project_id, book, workshop=''):
     """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录"""
     items = _book_items(book)
+    # v0.1.173：先确认能定位到项目目录。原来 project_id 为空时 `_volume_dir` 会
+    # 拼出 `data/projects/volumes/...`，产物落在「所有项目的上一层」，谁也找不到。
+    try:
+        _vol_preview = _volume_dir(project_id, book, workshop)
+    except ValueError as _e:
+        return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
+                'todo_fields': [], 'error': str(_e), 'missing_project': True,
+                'hint': '请在界面上先选择/创建一个项目，再点一键整卷'}
     # v0.1.167：登记表缺失时明确报错，不再返回「成功但什么都没生成」
     if not registry_ready():
         return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                 'todo_fields': [],
                 'error': '整编要求登记表不存在或为空，无法整卷',
-                'missing_registry': REG_FILE,
-                'hint': '请先把整编要求登记表放到该路径（字段：册/序号/名称/表号/分类/阶段）'}
+                'missing_registry': _reg_file(),
+                'hint': '请先把整编要求登记表导入到当前项目（字段：册/序号/名称/表号/分类/阶段）'}
     if not items:
         return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                 'todo_fields': [],
@@ -160,7 +232,11 @@ def generate_volume(project_id, book, workshop=''):
         if cat == 'C':
             d = os.path.join(vol, '_归集_' + seq + '_' + re.sub(r'[\\/:*?"<>|]', '', name)[:40])
             os.makedirs(d, exist_ok=True)
-            results['collect_dir'].append(d)
+            # v0.1.173：原来只往 collect_dir 里塞一个路径字符串，调用方无法把它
+            # 映射回登记表里的「序号/名称」，只能靠解析目录名反推 —— 目录名规则一改
+            # 就对不上。这里改成结构化条目（与 generated / todo 同一形状）。
+            results['collect_dir'].append({
+                '序号': seq, '名称': name, '目录': d, '目录名': os.path.basename(d)})
             continue
         if not cat:
             results['errors'].append({'序号': seq, '名称': name, '原因': '无匹配模板'})
@@ -255,7 +331,11 @@ def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=No
 
 def export_todo(project_id, book, workshop=''):
     """导出某册待办清单"""
-    vol = _volume_dir(project_id, book, workshop)
+    # v0.1.173：项目定位不到时回明确提示，不拼空路径去读文件
+    try:
+        vol = _volume_dir(project_id, book, workshop)
+    except ValueError as _e:
+        return f'（{_e}）'
     path = os.path.join(vol, '_待办清单.md')
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
@@ -359,6 +439,11 @@ def route_uploaded_file(project_id, file_name, sha256, uploader="", book=None, w
 def manual_collect(project_id, sha256, book, workshop="", note=""):
     """手动归集：把已入库文件（sha）关联到指定册×指定归集项。
     book 支持 '册|归集项名' 或直接册名（归集到该册通用目录）。"""
+    # v0.1.173：项目定位不到时不能建目录（原来会建到 data/projects/volumes 下）
+    try:
+        _volume_dir(project_id, book, workshop)
+    except ValueError as _e:
+        return {"matched": False, "error": str(_e), "missing_project": True}
     # 从全局解析索引找文件信息（与上传/扫描共用）
     file_name = sha256[:12] + '.bin'
     try:
@@ -462,8 +547,8 @@ def registry_info() -> dict:
             incomplete += 1
     return {
         "ready": registry_ready(),
-        "path": REG_FILE,
-        "exists": os.path.exists(REG_FILE),
+        "path": _reg_file(),
+        "exists": os.path.exists(_reg_file()),
         "total": len(items),
         "books": dict(sorted(books.items(), key=lambda kv: -kv[1])),
         "incomplete_items": incomplete,
@@ -478,15 +563,16 @@ def save_registry(items: list) -> dict:
     if not clean:
         return {"ok": False, "error": "登记表没有任何含「名称」的有效条目，已拒绝写入"}
     bad = [i for i, it in enumerate(clean) if not it["册"]]
-    os.makedirs(REG_DIR, exist_ok=True)
+    path = _reg_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     # 已有文件先备份，避免反复导入覆盖掉正确版本且无法回退
-    if os.path.exists(REG_FILE):
+    if os.path.exists(path):
         try:
             import shutil
-            shutil.copy2(REG_FILE, REG_FILE + ".bak")
+            shutil.copy2(path, path + ".bak")
         except Exception:  # noqa: BLE001
             pass
-    with open(REG_FILE, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(clean, f, ensure_ascii=False, indent=1)
     info = registry_info()
     info.update({"ok": True, "imported": len(clean), "items_without_book": len(bad)})

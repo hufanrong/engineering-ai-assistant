@@ -39,6 +39,11 @@ TIMEOUT = 60
 RESULTS = []          # 每步一条
 PHASE_SUMMARY = {}    # 阶段 -> {"passed":n,"failed":n,"skipped":n}
 
+# v0.1.173：自测建的测试项目 id。phase1 用完会切回原项目，但 phase3 的
+# 竣工/整卷断言必须在「有设备数据的那一个项目」上跑 —— 原来没记这个 id，
+# phase3 直接在用户的当前项目上跑，结果是 0。这里把 id 记下来，phase3 显式切过去。
+TEST_PROJECT_ID = ""
+
 
 # ---------------- 后端选择：进程内 TestClient / 真实 HTTP ----------------
 _INPROC = None
@@ -106,6 +111,98 @@ def call(method, path, payload=None, timeout=TIMEOUT):
             return e.code, body, body[:300]
     except Exception as e:
         return -1, None, f"{type(e).__name__}: {e}"
+
+
+def call_upload(path, filename, content, field="file", timeout=TIMEOUT):
+    """multipart 上传一个文件。返回 (http_code, body_json_or_text, error_str)。
+
+    v0.1.173：阶段③ 的整卷路径此前从未被测到 —— 自测从没导入过整编要求登记表，
+    接口永远回「登记表不存在」，于是整卷这条最关键的链路一次都没跑过。
+    这里按 UI 真实的 multipart 形态上传，才能覆盖到。
+    """
+    boundary = "----fangongselftest7f3a9c"
+    body = b"".join([
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'.encode(),
+        b"Content-Type: application/octet-stream\r\n\r\n",
+        content,
+        f"\r\n--{boundary}--\r\n".encode(),
+    ])
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if _INPROC is not None:
+        try:
+            r = _INPROC.request("POST", path, content=body, headers=headers)
+            raw = r.content
+            try:
+                return r.status_code, json.loads(raw), ("" if r.status_code < 400 else raw.decode("utf-8", "replace")[:300])
+            except Exception:
+                return r.status_code, raw.decode("utf-8", "replace"), ""
+        except Exception as e:
+            return -1, None, f"{type(e).__name__}: {e}"
+    url = BASE.rstrip("/") + path
+    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+            try:
+                return r.status, json.loads(raw), ""
+            except Exception:
+                return r.status, raw.decode("utf-8", "replace"), ""
+    except urllib.error.HTTPError as e:
+        b = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(b), b[:300]
+        except Exception:
+            return e.code, b, b[:300]
+    except Exception as e:
+        return -1, None, f"{type(e).__name__}: {e}"
+
+
+def call_bytes(path, timeout=TIMEOUT):
+    """取原始字节响应（下载类接口）。返回 (http_code, bytes_or_None, error_str)。
+
+    v0.1.173：call() 一律把响应当 JSON 先试、失败再按 UTF-8 解码，
+    ZIP/PDF 这类二进制会被解码成乱码，于是「导出」类用例只能断言状态码 200 —— 
+    正文是个空包、坏包、甚至 0 字节也照样 PASS。这里保留原始字节，让测试能真解压。
+    """
+    if _INPROC is not None:
+        try:
+            r = _INPROC.request("GET", path)
+            return r.status_code, r.content, ("" if r.status_code < 400 else str(r.content[:200]))
+        except Exception as e:
+            return -1, None, f"{type(e).__name__}: {e}"
+    url = BASE.rstrip("/") + path
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read(), ""
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), f"HTTP {e.code}"
+    except Exception as e:
+        return -1, None, f"{type(e).__name__}: {e}"
+
+
+def zip_summary(raw):
+    """核对 ZIP 二进制：能不能正常打开、里面有几个文件、解压后总字节数。
+    返回 dict；坏包时带 error，绝不把「打不开」当成功。"""
+    import io
+    import zipfile
+    if not raw:
+        return {"error": "空响应（0 字节）"}
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"不是合法 ZIP：{type(e).__name__}: {e}", "size": len(raw)}
+    bad = zf.testzip()
+    names = zf.namelist()
+    total = 0
+    for n in names:
+        try:
+            total += zf.getinfo(n).file_size
+        except Exception:  # noqa: BLE001
+            pass
+    return {"size": len(raw), "files": len(names), "uncompressed": total,
+            "bad_member": bad, "names": names[:8]}
 
 
 def record(phase, step, expected, actual, passed, evidence=""):
@@ -315,6 +412,11 @@ def phase1(samples_dir):
     code, body, err = call("POST", "/api/projects/create", {"name": proj_name})
     record(P, "项目创建", "200 且 ok=true", f"{code} {str(body)[:80]}",
            code == 200 and (body or {}).get("ok", True), err)
+    # v0.1.173：记住测试项目 id，供 phase3 显式切回去
+    global TEST_PROJECT_ID
+    _pj = (body or {}).get("project") or {}
+    if _pj.get("id"):
+        TEST_PROJECT_ID = _pj["id"]
 
     # 扫描
     t0 = time.time()
@@ -473,39 +575,231 @@ def phase3(samples_dir):
     P = 3
     print("\n=== 阶段 3：竣工资料自动生成 ===")
 
-    for path, step in (("/api/completeness/check", "完整性检查"),
-                       ("/api/completion-archive/requirements", "竣工资料要求"),
-                       ("/api/completion-archive/stats", "竣工资料统计"),
-                       ("/api/archive-enhanced/checklist", "组卷清单"),
-                       ("/api/archive/catalog", "案卷目录")):
-        code, body, err = call("GET", path)
-        record(P, step, "200", f"{code} {str(body)[:100]}", code == 200, err)
+    # v0.1.173：phase1 结束时切回了用户原项目，而竣工/整卷的数据都在自测项目里。
+    # 不切过去的话，「竣工资料统计」读到的是用户当前项目的清单（通常是 0），
+    # 这个 FAIL 是测试自己的上下文错了，不是产品缺陷。
+    if TEST_PROJECT_ID:
+        call("POST", "/api/projects/switch", {"project_id": TEST_PROJECT_ID})
+    # 数据根：不能拿 --inproc 传进来的那个目录去推（那只是 sys.path 入口，
+    # 代码实际所在目录可能不同）。进程内模式直接问产品自己的 config；
+    # HTTP 模式取脚本所在目录的上一级（tools/selftest.py → workbench/data）。
+    if _INPROC is not None:
+        try:
+            from app import config as _cfg
+            _data_dir = os.path.abspath(_cfg.DATA_DIR)
+        except Exception:  # noqa: BLE001
+            _data_dir = os.path.abspath(os.path.join(_INPROC_DIR, "data"))
+    else:
+        _data_dir = os.path.abspath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "data"))
+
+    # v0.1.172：这批检查原来只断言 HTTP 200。200 只代表路由没抛异常，
+    # 正文里写着「无设备数据」「error=登记表不存在」时照样 PASS —— 假绿灯就是这么来的。
+    # 现在每条都要求「正文里有真实内容」，把退化状态判成 FAIL。
+    def _has(body, *keys):
+        b = body or {}
+        return any(b.get(k) not in (None, "", [], {}) for k in keys)
+
+    code, body, err = call("GET", "/api/completeness/check")
+    phases = (body or {}).get("phases") or []
+    filled = [ph for ph in phases if ph.get("existing")]
+    record(P, "完整性检查", "200 且至少一个阶段有已存在的资料",
+           f"{code} phases={len(phases)} 有资料的阶段={len(filled)}", code == 200 and bool(filled), err)
+
+    code, body, err = call("GET", "/api/completion-archive/requirements")
+    reqs = (body or {}).get("requirements") or []
+    record(P, "竣工资料要求", "200 且 requirements 非空",
+           f"{code} requirements={len(reqs)}", code == 200 and bool(reqs), err)
+
+    # v0.1.173：这里是「统计」接口，它读的是已生成的竣工清单。
+    # 在一个刚建、还没跑过竣工生成的自测项目上，total_devices 必然是 0 ——
+    # 这不是缺陷，是顺序问题。真正该卡的是「同一个项目里两个接口的数字对不上」。
+    # 所以先在同一个项目里跑一次「一键竣工」，再比对 stats 与它的设备数。
+    code_ca0, _ca0, err_ca0 = call("POST", "/api/completion-archive/all", {})
+    _dev_all0 = (_ca0 or {}).get("total_devices") or 0
+    code, body, err = call("GET", "/api/completion-archive/stats")
+    devs = (body or {}).get("total_devices") or 0
+    _consistent = (code == 200 and devs > 0 and _dev_all0 > 0
+                   and devs == _dev_all0 and code_ca0 == 200)
+    record(P, "竣工资料统计", "200 且设备数>0，并与「一键竣工」结果一致（两接口不能自相矛盾）",
+           f"{code} total_devices={devs} ｜ 一键竣工 total_devices={_dev_all0}",
+           _consistent, err or err_ca0)
+
+    code, body, err = call("GET", "/api/archive-enhanced/checklist")
+    cl = (body or {}).get("checklist") or {}
+    # 空清单是真实缺陷（设备库空），不是通过
+    record(P, "组卷清单", "200 且 checklist 有内容（非『无设备数据』）",
+           f"{code} 卷数={len(cl)} error={(body or {}).get('error')}",
+           code == 200 and bool(cl), err)
+
+    code, body, err = call("GET", "/api/archive/catalog")
+    rows = (body or {}).get("rows") or []
+    record(P, "案卷目录", "200 且目录行 > 0",
+           f"{code} rows={len(rows)}", code == 200 and len(rows) > 0, err)
 
     code, org, err = call("GET", "/api/archive-enhanced/organize")
-    record(P, "按车间组卷", "200", f"{code} {str(org)[:100]}", code == 200, err)
+    record(P, "按车间组卷", "200 且真的有车间分组",
+           f"{code} error={(org or {}).get('error')}",
+           code == 200 and not (org or {}).get("error"), err)
+
+    # v0.1.173：原断言把「明确报错」也算 PASS —— 等于「我没做成但我说了没做成，就算过」。
+    # 先导入一份真实登记表，把整卷这条最关键的链路真正跑起来再判定。
+    # 表项名称取自内置监理模板（设备开箱检查记录 / 设备安装检查记录），
+    # 分类 A/B/C 分别对应自动生成 / 预填待补 / 归集目录。
+    _reg = [
+        {"册": "第一册", "序号": "1", "名称": "设备开箱检查记录", "表号": "JL-01",
+         "分类": "A", "阶段": "开箱"},
+        {"册": "第一册", "序号": "2", "名称": "设备安装检查记录", "表号": "JL-02",
+         "分类": "B", "阶段": "安装"},
+        {"册": "第一册", "序号": "3", "名称": "监理旁站记录", "表号": "JL-03",
+         "分类": "C", "阶段": "安装"},
+    ]
+    _reg_bytes = json.dumps(_reg, ensure_ascii=False).encode("utf-8")
+    code, rb, err = call_upload("/api/supervision/registry", "整编要求登记表.json",
+                                _reg_bytes, field="file")
+    _reg_ok = code == 200 and bool(((rb or {}).get("registry") or {}).get("ready"))
+    record(P, "导入整编要求登记表", "200 且登记表 ready=True",
+           f"{code} ready={((rb or {}).get('registry') or {}).get('ready')} "
+           f"total={((rb or {}).get('registry') or {}).get('total')} err={err}",
+           _reg_ok, err)
 
     code, vol, err = call("POST", "/api/supervision/volume",
-                          {"book": "第一册", "workshop": "1号车间"})
+                          {"project_id": TEST_PROJECT_ID, "book": "第一册", "workshop": "1号车间"})
     vr = (vol or {}).get("result") or (vol or {})
-    # v0.1.167：不能只断言 ok —— 登记表缺失时旧实现会返回 ok=True 但 generated/todo/collect_dir
-    # 全空（静默空转）。这里要求「真的产出了东西」，或者至少明确给出了失败原因。
-    produced = bool(vr.get("generated") or vr.get("todo") or vr.get("collect_dir"))
+    generated = vr.get("generated") or []
+    todo = vr.get("todo") or []
+    collect_dir = vr.get("collect_dir") or []
+    errors = vr.get("errors") or []
     reason = vr.get("error") or ""
-    ok = code == 200 and (vr.get("ok") is True and produced or (vr.get("ok") is False and bool(reason)))
-    detail = (f"{code} generated={len(vr.get('generated') or [])} "
-              f"todo={len(vr.get('todo') or [])} collect={len(vr.get('collect_dir') or [])} "
-              f"error={reason[:80]}")
-    record(P, "整卷生成", "有产出 或 明确报错（非静默空转）", detail, ok, err)
+    # v0.1.173：原断言把「明确报错」也算 PASS —— 等于「我没做成但我说了没做成，就算过」。
+    # 真正要卡的是「静默丢弃」：登记表里的每一项，要么生成出文件、要么进归集目录、
+    # 要么进待办清单。不允许哪一项悄悄消失。
+    _gen_seqs = {str(g.get("序号")) for g in generated}
+    _todo_seqs = {str(t.get("序号")) for t in todo}
+    _collect_seqs = {str(c.get("序号")) for c in collect_dir if isinstance(c, dict)}
+    _all_seqs = {str(i.get("序号")) for i in _reg}
+    _unaccounted = sorted(_all_seqs - _gen_seqs - _todo_seqs - _collect_seqs)
+    if generated and not _unaccounted:
+        ok = code == 200
+        expect_txt = ("真的组出卷且每一项都有交代（生成/归集/待办，不静默丢弃）")
+    elif generated and _unaccounted:
+        ok = False
+        expect_txt = "有产出但有登记项被静默丢弃"
+    elif reason and (todo or collect_dir):
+        ok = code == 200
+        expect_txt = "无产出但把缺失登记表转化为待办（非静默空转）"
+    else:
+        ok = False
+        expect_txt = "无产出且无待办 → 静默空转"
+    detail = (f"{code} generated={len(generated)} todo={len(todo)} "
+              f"collect={len(collect_dir)} errors={len(errors)} "
+              f"静默丢弃={_unaccounted} error={reason[:60]}")
+    record(P, "整卷生成", expect_txt, detail, ok, err)
+
+    # 整卷产出必须落到磁盘上 —— 只看接口返回的 generated 列表不够，
+    # 文件没落盘的话，用户去卷目录里找不到东西。
+    # v0.1.173：① 原来用相对路径 "data/projects" 走 os.walk，脚本被打包/换目录跑时
+    # 相对基准就变了，扫不到必然误报「找不到」；改成绝对路径。
+    # ② 必须落在「本测试项目」目录下，落到全局 data/projects/volumes 也算失败 ——
+    # 那正是 v0.1.173 修掉的旧缺陷（project_id 为空时写到所有项目的上一层）。
+    if generated:
+        _missing_files = []
+        _outside_project = []
+        _proj_dir = os.path.join(_data_dir, "projects", TEST_PROJECT_ID) if TEST_PROJECT_ID else ""
+        for gitem in generated:
+            _f = gitem.get("文件")
+            if not _f:
+                continue
+            # 只在「本项目」目录内找。原来在 data/projects 全库 os.walk，
+            # 上一次自测遗留在别的项目里的同名文件会先被命中，
+            # 于是这次明明落对了地方，却被判成「落到项目外」。
+            _hit = None
+            if _proj_dir and os.path.isdir(_proj_dir):
+                for _root, _dirs, _files in os.walk(_proj_dir):
+                    if _f in _files:
+                        _hit = os.path.join(_root, _f)
+                        break
+            if not _hit:
+                # 项目内没有 → 再看是不是落到了项目外（这才是真缺陷）
+                for _root, _dirs, _files in os.walk(os.path.join(_data_dir, "projects")):
+                    if _f in _files:
+                        _outside_project.append(os.path.join(_root, _f))
+                        break
+                if not _outside_project or not _proj_dir:
+                    _missing_files.append(_f)
+        _land_ok = not _missing_files and not _outside_project
+        record(P, "整卷文件落盘", "generated 列出的每个文件都在本项目目录内落盘",
+               f"generated={len(generated)} 找不到={len(_missing_files)} "
+               f"落到项目外={len(_outside_project)} 项目={TEST_PROJECT_ID}"
+               + (f" 缺:{_missing_files[:3]}" if _missing_files else "")
+               + (f" 越界:{[_p.split('projects')[-1] for _p in _outside_project[:2]]}" if _outside_project else ""),
+               _land_ok, err)
+    else:
+        record(P, "整卷文件落盘", "generated 列出的每个文件都能在磁盘上找到",
+               "无 generated 可核对", None, "")
 
     code, ca, err = call("POST", "/api/completion-archive/all", {})
-    ok = code == 200 and (ca or {}).get("ok", True) is not False
-    record(P, "一键竣工资料", "200 且 ok", f"{code} {str(ca)[:140]}", ok, err)
+    n_dev = (ca or {}).get("total_devices") or 0
+    ok = code == 200 and n_dev > 0
+    record(P, "一键竣工资料", "200 且真正处理了设备（total_devices>0）",
+           f"{code} total_devices={n_dev}", ok, err)
 
     code, miss, err = call("GET", "/api/completion-archive/missing")
-    record(P, "缺件清单", "200", f"{code} {str(miss)[:100]}", code == 200, err)
+    ms = (miss or {}).get("missing") or []
+    # 「没有缺件」和「根本没有数据可查」是两回事，后者判 FAIL
+    record(P, "缺件清单", "200 且 missing 非空（空列表=没数据可查，不是好结果）",
+           f"{code} missing={len(ms)}", code == 200 and bool(ms), err)
 
-    code, ex, err = call("GET", "/api/archive/export-enhanced")
-    record(P, "导出成套", "200", f"{code} {str(ex)[:100]}", code == 200, err)
+    # v0.1.173：导出接口返回 ZIP 二进制。原断言只看状态码，空包/坏包/0 字节都能 PASS。
+    # 现在真解压：必须是合法 ZIP、至少 1 个文件、无损坏成员。
+    code, raw, err = call_bytes("/api/archive/export-enhanced")
+    zs = zip_summary(raw) if code == 200 else {"error": err or f"HTTP {code}"}
+    ok = code == 200 and not zs.get("error") and zs.get("files", 0) > 0 and not zs.get("bad_member")
+    detail = (f"{code} size={zs.get('size', 0)} files={zs.get('files', 0)} "
+              f"uncompressed={zs.get('uncompressed', 0)} "
+              f"bad={zs.get('bad_member')} err={zs.get('error', '')}")
+    record(P, "导出成套", "合法 ZIP 且内含文件（真解压核对，不只看 200）", detail, ok, err)
+
+    # v0.1.173 回归：竣工归档必须跟着项目走。
+    # 原缺陷是清单写死在全局 data/completion_archive.json —— 建 A、B 两个项目，
+    # 在 A 生成后切到从未生成过的 B，B 会读到 A 的清单，导出会把 A 的资料递出去。
+    # 竣工归档是交监理的项目级交付物，串项目属于严重错误，必须有一条常驻断言盯着。
+    try:
+        _code_a = _dev_all0
+        # 在切走之前先记下「当前是哪个项目」——不能依赖 TEST_PROJECT_ID，
+        # 那是 phase1 才会赋值的；单独跑 `--phase 3` 时它是空的，
+        # 切回去的请求就会带着空 id 打过去，实际还停在新项目上，断言必然读到 0。
+        _, _cur_now, _ = call("GET", "/api/projects/current")
+        _home_id = (((_cur_now or {}).get("project") or {}).get("id")
+                    or TEST_PROJECT_ID or "")
+        code_new, nb, err_new = call("POST", "/api/projects/create",
+                                     {"name": f"自测隔离_{time.strftime('%H%M%S')}"})
+        _new_id = ((nb or {}).get("project") or {}).get("id") or ""
+        if _new_id:
+            call("POST", "/api/projects/switch", {"project_id": _new_id})
+            # 新项目里还没生成过任何竣工资料，设备数必须为 0
+            _, st_b, _ = call("GET", "/api/completion-archive/stats")
+            _dev_b = (st_b or {}).get("total_devices")
+            _, miss_b, _ = call("GET", "/api/completion-archive/missing")
+            _miss_b = len(((miss_b or {}).get("missing") or []))
+            _isolated = (_dev_b == 0 and _miss_b == 0)
+            record(P, "竣工归档跨项目隔离",
+                   "新建项目里竣工设备数=0、缺件=0（不承接上一个项目的清单）",
+                   f"新项目 total_devices={_dev_b} missing={_miss_b}（对照 A={_code_a} 台）",
+                   _isolated, "")
+            # 切回原项目，确认 A 的数据还在（隔离不是丢数据）
+            call("POST", "/api/projects/switch", {"project_id": _home_id})
+            _, st_a2, _ = call("GET", "/api/completion-archive/stats")
+            _dev_a2 = (st_a2 or {}).get("total_devices")
+            record(P, "切回原项目仍读到本项清单",
+                   "切回后设备数恢复为 A 的值（隔离不是丢数据）",
+                   f"切回后 total_devices={_dev_a2}（应为 {_code_a}）home={_home_id}",
+                   _dev_a2 == _code_a, "")
+        else:
+            record(P, "竣工归档跨项目隔离", "能建出第二个项目", "建项目未返回 id",
+                   False, err_new)
+    except Exception as _e:  # noqa: BLE001
+        record(P, "竣工归档跨项目隔离", "无异常", f"{type(_e).__name__}: {_e}", False, "")
 
 
 # ---------------- 阶段 4：竣工图纸清稿 ----------------

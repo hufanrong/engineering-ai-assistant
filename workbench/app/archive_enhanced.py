@@ -198,19 +198,30 @@ def get_archive_requirements(dev_type: str) -> list:
 
 
 def _get_all_devices_with_position() -> List[dict]:
-    """获取所有带位置信息的设备。"""
+    """获取所有设备（坐标能取就带上，取不到也照样返回这台设备）。
+
+    v0.1.173：原来这里是 `if "error" not in spatial:` —— 拿不到空间信息就把整台设备丢掉。
+    后果是「只导入了台账、图纸没标注坐标」的设备从竣工资料清单里整体消失，
+    接口回「无设备数据」，而同一轮竣工资料统计还能数出这些设备，自相矛盾。
+    有没有坐标，影响的应该是「能不能算相邻设备」，不该影响「这台设备存不存在」。
+    """
     from . import relations as _rel
     from . import installation_plan as _ip
-    
+
     g = _rel.load_relations()
     devices = g.get("devices", [])
-    
+
     result = []
     for device in devices:
         tag = device.get("tag", "")
-        spatial = _ip.get_device_spatial_info(tag)
-        if "error" not in spatial:
-            device_info = dict(device)
+        try:
+            spatial = _ip.get_device_spatial_info(tag)
+        except Exception:  # noqa: BLE001（空间信息算不出来，不该连设备一起丢）
+            spatial = {"error": "空间信息计算失败", "tag": tag}
+        has_spatial = "error" not in spatial
+
+        device_info = dict(device)
+        if has_spatial:
             device_info.update({
                 "workshop": spatial.get("workshop", ""),
                 "elevation": spatial.get("z"),
@@ -218,8 +229,23 @@ def _get_all_devices_with_position() -> List[dict]:
                 "y": spatial.get("y"),
                 "adjacent_devices": spatial.get("adjacent_devices", []),
             })
-            result.append(device_info)
-    
+            coord_status = "图纸标注" if spatial.get("x") is not None else "台账记录（图纸未标注）"
+        else:
+            # 无空间信息：车间取图谱里已有的归属，坐标置空，不假装有位置
+            ws_list = device.get("workshops") or []
+            device_info.update({
+                "workshop": ws_list[0] if ws_list else "",
+                "elevation": None,
+                "x": None,
+                "y": None,
+                "adjacent_devices": [],
+            })
+            coord_status = "台账记录（图纸未标注）"
+
+        device_info["has_position"] = device_info.get("x") is not None
+        device_info["coord_status"] = coord_status
+        result.append(device_info)
+
     return result
 
 

@@ -34,29 +34,52 @@ def _save_progress(progress: dict):
 
 
 def _get_all_devices_with_position() -> List[dict]:
-    """获取所有带位置信息的设备。"""
+    """获取所有设备（坐标能取就带上，取不到也照样返回这台设备）。
+
+    v0.1.173：与 archive_enhanced 同一处缺陷 —— 原来拿不到空间信息就把整台设备丢掉，
+    台账设备因此从进度统计里整体消失。设备存不存在，不该由「有没有坐标」决定。
+    """
     from . import relations as _rel
     from . import installation_plan as _ip
-    
+
     g = _rel.load_relations()
     devices = g.get("devices", [])
-    
+
     result = []
     for device in devices:
         tag = device.get("tag", "")
-        spatial = _ip.get_device_spatial_info(tag)
-        if "error" not in spatial:
-            device_info = dict(device)
+        try:
+            spatial = _ip.get_device_spatial_info(tag)
+        except Exception:  # noqa: BLE001（空间信息算不出来，不该连设备一起丢）
+            spatial = {"error": "空间信息计算失败", "tag": tag}
+        has_spatial = "error" not in spatial
+
+        device_info = dict(device)
+        if has_spatial:
             device_info.update({
                 "workshop": spatial.get("workshop", ""),
                 "elevation": spatial.get("z"),
                 "x": spatial.get("x"),
                 "y": spatial.get("y"),
                 "adjacent_devices": spatial.get("adjacent_devices", []),
-                "has_position": spatial.get("has_position", False),
+                "has_position": spatial.get("has_position", spatial.get("x") is not None),
             })
-            result.append(device_info)
-    
+            coord_status = "图纸标注" if spatial.get("x") is not None else "台账记录（图纸未标注）"
+        else:
+            ws_list = device.get("workshops") or []
+            device_info.update({
+                "workshop": ws_list[0] if ws_list else "",
+                "elevation": None,
+                "x": None,
+                "y": None,
+                "adjacent_devices": [],
+                "has_position": False,
+            })
+            coord_status = "台账记录（图纸未标注）"
+
+        device_info["coord_status"] = coord_status
+        result.append(device_info)
+
     return result
 
 

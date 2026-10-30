@@ -870,15 +870,113 @@ def _append_spatial_summary(graph: dict, docs: dict, idx: dict):
             pass
 
 
+def _blank_graph() -> dict:
+    return {"stats": {}, "workshops": [], "devices": [], "human_confirm": []}
+
+
+def _index_device_to_graph_entry(tag: str, rec: dict) -> dict:
+    """把 index.json 里的一条台账设备记录，转成 relations 图谱里 devices 条目的形状。
+
+    只是字段形状对齐，不臆造任何业务值：台账里没有的字段（坐标/图纸来源）一律留空，
+    由 spatial_model 按既有口径标成「台账记录（图纸未标注）」，不假装设备在图纸上标过。
+    """
+    ws = rec.get("workshop", "") or ""
+    return {
+        "tag": tag,
+        "name": rec.get("name", "") or "",
+        "model": rec.get("model", "") or "",
+        "quantity": rec.get("quantity", "") or "",
+        "weight": rec.get("weight", "") or "",
+        "workshops": [ws] if ws else [],
+        "sources": {"cad": 0, "excel": 1, "text": 0, "ocr": 0},
+        "in_files": ([{"file": rec["source_file"], "workshop": ws,
+                       "where": "excel_row", "x": None, "y": None}]
+                     if rec.get("source_file") else []),
+        "cad_positions": [],
+        # 标记来源，便于下游区分「图纸确认的设备」与「只在台账里的设备」
+        "_from_index_ledger": True,
+    }
+
+
+def _normalize_device_list(devs) -> list:
+    """把 devices 统一成 list。
+
+    v0.1.173：历史上这 18 个项目里 17 个的 relations.json["devices"] 是 dict（空 {}），
+    只有 1 个是 list。下游 60 余处都写 `for d in g.get("devices", [])` ——
+    遇到 dict 时遍历出来的是字符串键，`d.get(...)` 必然 AttributeError，
+    或者更糟：`d["tag"]` 直接抛异常被外层 try 吞掉，整段报表静默变空。
+    这里统一成 list，并把 dict 形态（{tag: {...}}）还原成列表。
+    """
+    if isinstance(devs, list):
+        return devs
+    if isinstance(devs, dict):
+        out = []
+        for tag, rec in devs.items():
+            if isinstance(rec, dict):
+                item = dict(rec)
+                item.setdefault("tag", tag)
+                out.append(item)
+            else:
+                out.append({"tag": tag})
+        return out
+    return []
+
+
+def _merge_index_devices(graph: dict, ledger: dict) -> dict:
+    """把台账（index.json["devices"]）里存在、但图谱里没有的设备补进 graph["devices"]。
+
+    背景（v0.1.173）：relations.json 的设备集合来自 build_relations()，而它的输入是
+    已解析的图纸/台账缓存。只导入台账、没跑关系图谱时，relations.json 是空的，
+    但 index.json["devices"] 里明明有设备。结果 archive_enhanced / progress_enhanced /
+    completion_archive / docgen 等 60 余处「设备清单」全被判成「无设备数据」，
+    而同一轮的竣工资料统计又能数出设备来 —— 自相矛盾的根源就在这里。
+
+    合并规则：图谱里已有的位号保持原样（图纸坐标、多来源证据更可信），只补缺失的位号。
+    """
+    devs = _normalize_device_list(graph.get("devices"))
+    graph["devices"] = devs
+    if not ledger:
+        return graph
+    have = {d.get("tag") for d in devs if isinstance(d, dict)}
+    added = 0
+    for tag, rec in ledger.items():
+        if not tag or tag in have or not isinstance(rec, dict):
+            continue
+        devs.append(_index_device_to_graph_entry(tag, rec))
+        have.add(tag)
+        added += 1
+    if added:
+        st = graph.get("stats")
+        if not isinstance(st, dict):
+            st = {}
+            graph["stats"] = st
+        # 只修正计数，不覆盖其它统计口径；统计里的 devices 应等于实际条数
+        st["devices"] = len(devs)
+        st["devices_from_ledger"] = st.get("devices_from_ledger", 0) + added
+    return graph
+
+
 def load_relations() -> dict:
+    """读取关系图谱。
+
+    v0.1.173：读的时候把台账设备并进来。只导入台账、未跑关系图谱的项目，
+    原来在这里读到的是空设备列表，导致下游全线「无设备数据」。
+    """
     _ensure()
+    graph = None
     if os.path.exists(RELATIONS_FILE):
         try:
             with open(RELATIONS_FILE, encoding="utf-8") as f:
-                return json.load(f)
+                graph = json.load(f)
         except Exception:  # noqa: BLE001
-            return {"stats": {}, "workshops": [], "devices": [], "human_confirm": []}
-    return {"stats": {}, "workshops": [], "devices": [], "human_confirm": []}
+            graph = None
+    if not isinstance(graph, dict):
+        graph = _blank_graph()
+    try:
+        ledger = _load_index().get("devices") or {}
+    except Exception:  # noqa: BLE001
+        ledger = {}
+    return _merge_index_devices(graph, ledger)
 
 
 def save_relations(relations: dict):
