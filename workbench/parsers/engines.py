@@ -103,6 +103,9 @@ def _pick_parser(ext: str):
         return parse_project
     if ext in config.EXT_EXCEL and config.PARSE_EXCEL:
         return parse_excel
+    if ext == ".csv" and config.PARSE_EXCEL:
+        # v0.1.167：CSV 台账按表格结构化解析（原归 EXT_TEXT 只出纯文本，设备台账全丢）
+        return parse_csv
     if ext in config.EXT_IMAGE and _effective(config.PARSE_IMAGE, "ocr"):
         return parse_image
     if ext in config.EXT_CAD and _effective(config.PARSE_CAD, "cad"):
@@ -225,11 +228,14 @@ def parse_word(res: ParseResult):
 
 # ============ Excel（台账结构化，v3.6 核心） ============
 def _normalize_header(cells):
-    """表头归一：合并单元格/多行表头 → 取首个非空作为列名；同名列自动加序号去重。"""
+    """表头归一：合并单元格/多行表头 → 取首个非空作为列名；同名列自动加序号去重。
+    v0.1.167：剥离 UTF-8 BOM 与零宽字符 —— BOM 前缀会让首列名变成 "\ufeff位号"，
+    与下游关键词表（位号/名称/规格…）对不上，导致 CSV/xlsx 台账首列（位号）整列丢失。"""
     out = []
     seen = {}
     for c in cells:
-        v = (c or "").strip()
+        v = (c or "").strip().lstrip("\ufeff").strip()
+        v = v.replace("\u200b", "").replace("\u3000", " ").strip()
         name = v if v else f"列{len(out)+1}"
         if name in seen:
             seen[name] += 1
@@ -274,6 +280,58 @@ def parse_excel(res: ParseResult):
     wb.close()
     res.text = "\n".join(text_parts)
     res.structure = {"sheets": sheets, "total_rows": sum(s["row_count"] for s in sheets)}
+
+
+# ============ CSV（台账结构化，v0.1.167 新增） ============
+def parse_csv(res: ParseResult):
+    """CSV 台账结构化解析。
+
+    v0.1.167：修复缺陷 —— .csv 原先归入 EXT_TEXT 走 parse_text，只产出纯文本、
+    没有 structure.sheets，导致 equipment_merge（按 parser=="excel" 逐行取
+    位号/名称）完全读不到 CSV 设备台账，台账里的设备全部丢失。
+    这里复用 excel 的行结构（structure.sheets），并把 parser 标为 "excel"，
+    使下游（设备归并 / 关系图 / 空间模型 / 标高）对台账文件的处理保持一致，
+    与 xlsx 行为对齐；解析失败时优雅回退到纯文本，不阻塞扫描。
+    """
+    import csv
+    res.parser = "excel"
+    text = _read_text_auto(res.file_path)
+    try:
+        # utf-8-sig 已在 _read_text_auto 里通过 utf-8 解码带 BOM 的情况兼容
+        lines = text.splitlines()
+        rows = list(csv.reader(lines))
+        rows = [[c.strip() for c in r] for r in rows if any(c.strip() for c in r)]
+        if not rows:
+            res.text = text
+            res.structure = {"chars": len(text), "sheets": [], "csv_fallback": "empty"}
+            return
+        header = _normalize_header(rows[0])
+        data_rows = []
+        for r in rows[1:]:
+            row = {}
+            for i, v in enumerate(r):
+                if i < len(header) and v:
+                    row[header[i]] = v
+            if row:
+                data_rows.append(row)
+        res.structure = {
+            "sheets": [{
+                "sheet": os.path.splitext(res.file_name)[0],
+                "header": header,
+                "row_count": len(data_rows),
+                "rows": data_rows[:500],
+            }],
+            "total_rows": len(data_rows),
+            "csv": True,
+        }
+        parts = [" | ".join(header)]
+        for row in data_rows:
+            parts.append(" | ".join(f"{k}={v}" for k, v in row.items()))
+        res.text = "\n".join(parts)
+    except Exception as e:  # noqa: BLE001
+        # CSV 格式异常不致命：退回纯文本，至少能进资料库被检索
+        res.text = text
+        res.structure = {"chars": len(text), "csv_error": f"{type(e).__name__}: {e}"[:200]}
 
 
 # ============ 文本 ============
