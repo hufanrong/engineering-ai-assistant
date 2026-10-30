@@ -1,16 +1,16 @@
 # 繁工AI 本地实测报告
 
-- 时间：2026-10-30 23:04:28
-- 版本：0.1.177
+- 时间：2026-10-30 23:18:08
+- 版本：0.1.178
 - 系统：Linux-6.6.95.bck.3-amd64-x86_64-with-glibc2.35
 - 输入：台账=设备台账_实测.xlsx 登记表=整编要求登记表_实测.xlsx 资料目录=未提供
 - 结果：通过 28 / 失败 0 / 跳过 2
 
 ## 关键数字
 
-- version：0.1.177
-- version_config_py：0.1.177
-- test_project_id：4ce6d3e6
+- version：0.1.178
+- version_config_py：0.1.178
+- test_project_id：6d3513cd
 - devices_from_ledger_api：3
 - devices_device_workshop：0
 - docgen_types：["施工方案", "吊装方案", "技术交底", "开箱验收记录", "隐蔽工程验收记录", "施工计划", "施工日志", "设计变更", "货损报告", "竣工资料"]
@@ -55,11 +55,11 @@
 
 ## 逐步结果
 
-- [PASS] **环境 / 工作台可达**：200 version=0.1.177
-- [PASS] **环境 / 版本号与代码一致**：api=0.1.177 config=0.1.177
+- [PASS] **环境 / 工作台可达**：200 version=0.1.178
+- [PASS] **环境 / 版本号与代码一致**：api=0.1.178 config=0.1.178
 - [PASS] **环境 / 输入材料**：台账=设备台账_实测.xlsx (5233 字节)
 - [PASS] **环境 / 登记表来源**：整编要求登记表_实测.xlsx
-- [PASS] **建项目并导入台账 / 新建项目**：200 id=4ce6d3e6
+- [PASS] **建项目并导入台账 / 新建项目**：200 id=6d3513cd
 - [PASS] **建项目并导入台账 / 台账上传解析**：200 status=parsed parser=excel err=; 向量化失败: No module named 'sentence_transformers'
 - [PASS] **建项目并导入台账 / 台账设备识别**：project.device_count=3 device_workshop=0
 - [PASS] **资料生成 / 可生成资料类型**：10 类 ['施工方案', '吊装方案', '技术交底', '开箱验收记录', '隐蔽工程验收记录']
@@ -78,7 +78,7 @@
 - [PASS] **整编登记表与整卷 / 待办清单**：volumes/设备安装/1号车间/_待办清单.md
 - [PASS] **竣工归档 / 一键竣工**：200 total_devices=3
 - [PASS] **竣工归档 / 竣工统计自洽**：stats=3 vs all=3
-- [PASS] **竣工归档 / 导出成套资料**：size=42124 files=4
+- [PASS] **竣工归档 / 导出成套资料**：size=42143 files=4
 - [PASS] **跨项目隔离 / 业务数据不承接其他项目**：施工日志=0；隐蔽验收=0；吊装方案=0；安装方案=0
 - [PASS] **跨项目隔离 / 业务数据不写全局 data**：无
 - [PASS] **跨项目隔离 / 新项目不承接旧清单**：total_devices=0 missing=0（对照原项目 3 台）

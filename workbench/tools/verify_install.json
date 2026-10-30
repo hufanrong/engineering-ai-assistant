@@ -1,11 +1,11 @@
 {
   "tool": "verify_install",
-  "generated_at": "2026-10-30 23:05:07",
+  "generated_at": "2026-10-30 23:18:16",
   "install_dir": "/home/gem/.aily/workdir/task_7702014996544277777/repo/workbench",
   "python": "3.10.12 (main, Jan 26 2026, 14:55:28) [GCC 11.4.0]",
   "python_exe": "/usr/bin/python3",
   "platform": "Linux-6.6.95.bck.3-amd64-x86_64-with-glibc2.35",
-  "version": "0.1.177",
+  "version": "0.1.178",
   "template_count": 121,
   "missing_core_deps": [],
   "summary": {
@@ -38,7 +38,7 @@
     {
       "step": "版本号一致",
       "expected": "config.APP_VERSION == FastAPI version",
-      "actual": "config=0.1.177 api=0.1.177",
+      "actual": "config=0.1.178 api=0.1.178",
       "passed": true,
       "evidence": ""
     },

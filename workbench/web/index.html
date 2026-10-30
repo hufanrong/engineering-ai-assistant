@@ -644,11 +644,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       <div style="font-size:13px;font-weight:700;color:#5B3EA8;margin-bottom:10px">📑 整编联动（整编要求 214 项）</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
         <select id="supBookSel" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:12px">
-          <option value="变配电室/总降">变配电册</option>
-          <option value="车间电气">车间电气册</option>
-          <option value="车间仪表">车间仪表册</option>
-          <option value="设备安装">设备安装册</option>
-          <option value="工艺管道">工艺管道册</option>
+          <option value="">（未导入登记表）</option>
         </select>
         <input id="supWorkshopInput" placeholder="车间名（留空=全厂）" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:160px">
         <button class="btn btn-sm" onclick="checkSupervision()">🔍 检查缺项</button>
@@ -2276,6 +2272,7 @@ function loadRegistryStatus() {
         .then(function(d){
             if (!d.ok) { el.innerHTML = '<span style="color:#c62828">登记表状态读取失败</span>'; return; }
             var g = d.registry || {};
+            fillBookSelect(g);
             if (g.ready) {
                 var books = g.books || {};
                 var parts = [];
@@ -2291,6 +2288,26 @@ function loadRegistryStatus() {
         })
         .catch(function(){ el.innerHTML = '<span style="color:#c62828">登记表状态读取失败</span>'; });
 }
+function fillBookSelect(g) {
+    var sel = document.getElementById('supBookSel');
+    if (!sel) return;
+    var list = (g && g.available_books && g.available_books.length) ? g.available_books
+             : Object.keys((g && g.books) || {});
+    sel.innerHTML = '';
+    if (!list.length) {
+        var o0 = document.createElement('option');
+        o0.value = ''; o0.textContent = '（未导入登记表）';
+        sel.appendChild(o0);
+        return;
+    }
+    list.forEach(function(b){
+        var o = document.createElement('option');
+        o.value = b;
+        o.textContent = b;
+        sel.appendChild(o);
+    });
+}
+
 function importRegistry() {
     var f = document.getElementById('supRegFile');
     var msg = document.getElementById('supRegMsg');

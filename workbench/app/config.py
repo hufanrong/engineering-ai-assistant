@@ -109,7 +109,7 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 # 生成的资料页脚要写工具版本，原来 docgen.py 里写死 v0.1.30，
 # 与实际版本差了一百多个小版本，交付的 Word 里版本号是错的。
 # 统一由 config 提供，main.py 的 FastAPI version 与本常量保持一致。
-APP_VERSION = "0.1.177"
+APP_VERSION = "0.1.178"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

@@ -561,7 +561,21 @@ def run(args):
     rec("导入整编要求登记表", "200 且 ready=true",
         f"{code} ready={ready} total={reg.get('total')} books={reg.get('books')}", ready, err)
 
-    book = args.book or "第一册"
+    # v0.1.178：**不再默认「第一册」**。
+    # 实测事故：手册让用户传 `--book 第一册`，而真实登记表里这一册叫「设备安装」，
+    # 于是 7 项检查全部报「没有『第一册』这一册的条目」——明明是人工读错了册名，
+    # 却表现得像是程序坏了。册名应当从登记表里自己取。
+    _books_src = (reg.get("books") or {})
+    if args.book:
+        book = args.book
+    elif len(_books_src) == 1:
+        book = next(iter(_books_src))
+    elif _books_src:
+        book = max(_books_src.items(), key=lambda kv: kv[1])[0]
+        print(f"[提示] 未指定 --book，登记表有 {len(_books_src)} 册，"
+              f"取条目最多的「{book}」；要测别的册请加 --book")
+    else:
+        book = ""
     workshop = args.workshop or ""
     if not workshop:
         # 没指定就取识别出来的第一个车间（真实资料里通常有）
@@ -577,6 +591,7 @@ def run(args):
     collect = vr.get("collect_dir") or []
     errors = vr.get("errors") or []
     empty_shells = vr.get("empty_shells") or []
+    RESULT["inputs"]["book_resolved"] = vr.get("book") or book
     metric("volume_generated", len(gen))
     metric("volume_todo", len(todo))
     metric("volume_collect", len(collect))
@@ -920,7 +935,7 @@ def main():
     ap.add_argument("--ledger", default="", help="设备台账 xlsx/csv（必填）")
     ap.add_argument("--registry", default="", help="整编要求登记表 xlsx/csv/json")
     ap.add_argument("--docs", default="", help="真实资料目录（可选）")
-    ap.add_argument("--book", default="", help="册名，默认第一册")
+    ap.add_argument("--book", default="", help="册名，留空=自动取登记表实际册名（唯一册直接用它，多册取条目最多的）")
     ap.add_argument("--workshop", default="", help="车间名，默认自动取识别到的第一个")
     ap.add_argument("--base", default="", help="服务地址，默认 http://127.0.0.1:8756")
     ap.add_argument("--inproc", action="store_true",

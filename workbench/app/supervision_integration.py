@@ -106,6 +106,49 @@ def _book_items(book):
     return [it for it in load_registry() if _book_of(it) == b]
 
 
+def available_books() -> list:
+    """登记表里实际存在的册名（按条目数从多到少）。前端下拉、错误提示都用这一个口径。"""
+    items = [it for it in load_registry() if isinstance(it, dict)]
+    cnt = {}
+    for it in items:
+        b = _book_of(it)
+        cnt[b] = cnt.get(b, 0) + 1
+    return [b for b, _ in sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+def _resolve_book(book, project_id=None):
+    """把传入的册名收敛成登记表里真实存在的那一册。
+
+    - 传了且能对上 -> 原样返回该册名（字符串）
+    - 没传 -> 登记表只有一册就直接用；多册则**不猜**，返回错误字典让用户选
+    - 传了但对不上 -> 返回错误字典，并附上 available_books
+    返回字典即表示「不能继续」，调用方直接把它当结果返回。
+    """
+    have = available_books()
+    b = _clean_book(book)
+    if b and b in have:
+        return b
+    if not b:
+        if len(have) == 1:
+            return have[0]
+        if not have:
+            return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
+                    'todo_fields': [],
+                    'error': '整编要求登记表不存在或为空，无法整卷',
+                    'missing_registry': _reg_file(),
+                    'hint': '请先把整编要求登记表导入到当前项目（字段：册/序号/名称/表号/分类/阶段）'}
+        return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
+                'todo_fields': [], 'multi_book': True,
+                'error': f'登记表里有 {len(have)} 册（{"、".join(have[:6])}），请先指定要整哪一册',
+                'available_books': have,
+                'hint': '在整编联动里选择册名后再点一键整卷；界面下拉已按登记表实际册名列出'}
+    return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
+            'todo_fields': [], 'book': b,
+            'error': f'登记表里没有「{b}」这一册，现有：{"、".join(have[:6])}',
+            'available_books': have,
+            'hint': '按登记表实际册名重新选择；界面下拉已按登记表实际册名列出'}
+
+
 def _item_category(it):
     """项 → 模板类别（映射失败返回 None）。
 
@@ -282,6 +325,14 @@ def generate_volume(project_id, book, workshop=''):
     程序却告诉他「请先上传设备台账」——这是最伤人的一类提示。
     台账按车间分是常态，所以默认行为必须逐个真实车间出卷，而不是假设「全厂」。
     """
+    # v0.1.178：**册名没传就自己认**。
+    # 实测事故：界面上册名下拉是写死的 5 个值，而监理给的登记表里册名可能叫别的
+    # （或干脆没有「册」列）。用户在界面上选了一个对不上的册名点「一键整卷」，
+    # 程序回一句「登记表里没有『XXX』这一册」，然后就什么都不生成。
+    # 登记表里只有一册时，用户根本不需要选——直接用它。
+    book = _resolve_book(book, project_id)
+    if isinstance(book, dict):
+        return book
     items = _book_items(book)
     # v0.1.178：「全厂」在设备台账里通常不是真实车间（设备都归在具体车间），
     # 把它等同于「未指定」，走下面的自动分卷。原来是显式传到相关车间参数里，
@@ -740,6 +791,7 @@ def registry_info() -> dict:
         "exists": os.path.exists(_reg_file()),
         "total": len(items),
         "books": dict(sorted(books.items(), key=lambda kv: -kv[1])),
+        "available_books": available_books(),
         "incomplete_items": incomplete,
         "fields": _REG_FIELDS,
     }

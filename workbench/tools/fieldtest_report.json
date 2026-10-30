@@ -1,6 +1,6 @@
 {
   "tool": "fieldtest",
-  "generated_at": "2026-10-30 23:04:28",
+  "generated_at": "2026-10-30 23:18:08",
   "env": {
     "platform": "Linux-6.6.95.bck.3-amd64-x86_64-with-glibc2.35",
     "python": "3.10.12",
@@ -26,14 +26,15 @@
     "registry_size": 5098,
     "registry_source": "user_file",
     "book": "设备安装",
-    "workshop": "全厂"
+    "workshop": "全厂",
+    "book_resolved": "设备安装"
   },
   "steps": [
     {
       "phase": "环境",
       "step": "工作台可达",
       "expected": "GET /api/status 200 且 version 非空",
-      "actual": "200 version=0.1.177",
+      "actual": "200 version=0.1.178",
       "passed": true,
       "evidence": ""
     },
@@ -41,7 +42,7 @@
       "phase": "环境",
       "step": "版本号与代码一致",
       "expected": "接口 version == app/config.py 的 APP_VERSION",
-      "actual": "api=0.1.177 config=0.1.177",
+      "actual": "api=0.1.178 config=0.1.178",
       "passed": true,
       "evidence": ""
     },
@@ -65,7 +66,7 @@
       "phase": "建项目并导入台账",
       "step": "新建项目",
       "expected": "200 且返回 project id",
-      "actual": "200 id=4ce6d3e6",
+      "actual": "200 id=6d3513cd",
       "passed": true,
       "evidence": ""
     },
@@ -83,7 +84,7 @@
       "expected": "解析后设备条数 > 0",
       "actual": "project.device_count=3 device_workshop=0",
       "passed": true,
-      "evidence": "{\"id\": \"4ce6d3e6\", \"name\": \"实测_20261030_230401\", \"description\": \"\", \"client\": \"\", \"location\": \"\", \"created_at\": \"2026-10-30 23:04:02\", \"updated_at\": \"2026-10-30 23:04:04\", \"file_count\": 1, \"device_count\": 3, \"workshop_count\": 0, \"status\": \"active\", \"pending_count\": 1}"
+      "evidence": "{\"id\": \"6d3513cd\", \"name\": \"实测_20261030_231742\", \"description\": \"\", \"client\": \"\", \"location\": \"\", \"created_at\": \"2026-10-30 23:17:43\", \"updated_at\": \"2026-10-30 23:17:45\", \"file_count\": 1, \"device_count\": 3, \"workshop_count\": 0, \"status\": \"active\", \"pending_count\": 1}"
     },
     {
       "phase": "资料生成",
@@ -217,7 +218,7 @@
       "phase": "竣工归档",
       "step": "导出成套资料",
       "expected": "合法 ZIP 且内含文件（真解压）",
-      "actual": "size=42124 files=4",
+      "actual": "size=42143 files=4",
       "passed": true,
       "evidence": ""
     },
@@ -271,9 +272,9 @@
     }
   ],
   "metrics": {
-    "version": "0.1.177",
-    "version_config_py": "0.1.177",
-    "test_project_id": "4ce6d3e6",
+    "version": "0.1.178",
+    "version_config_py": "0.1.178",
+    "test_project_id": "6d3513cd",
     "devices_from_ledger_api": 3,
     "devices_device_workshop": 0,
     "docgen_types": [
@@ -425,7 +426,7 @@
       {
         "dir": "generated_docs/施工方案",
         "files": [
-          "繁工AI_施工方案_20261030_230405.docx"
+          "繁工AI_施工方案_20261030_231746.docx"
         ],
         "n_files": 1
       },
@@ -440,7 +441,7 @@
         "dir": "upload_queue",
         "files": [
           "_sha_index.json",
-          "f9c7c0a752c0b2ff_1793372643213.json"
+          "f9c7c0a752c0b2ff_1793373464301.json"
         ],
         "n_files": 2
       },
@@ -472,17 +473,17 @@
   "projects": [
     {
       "role": "test",
-      "id": "4ce6d3e6",
-      "name": "实测_20261030_230401"
+      "id": "6d3513cd",
+      "name": "实测_20261030_231742"
     },
     {
       "role": "isolation",
-      "id": "41954c12"
+      "id": "a346d953"
     }
   ],
   "artifacts": [
     {
-      "project": "4ce6d3e6",
+      "project": "6d3513cd",
       "sample": {
         "file": "1_设备开箱检验记录.docx",
         "bytes": 7185,
@@ -494,7 +495,7 @@
     }
   ],
   "cleanup": {
-    "deleted_test_project": "4ce6d3e6"
+    "deleted_test_project": "6d3513cd"
   },
   "summary": {
     "passed": 28,
