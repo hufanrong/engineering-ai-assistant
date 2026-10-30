@@ -5,6 +5,7 @@
 import datetime
 import json
 import os
+import re  # v0.1.168：模块级导入（原文件顶部缺 re，只有函数内 import re as _re）
 
 from . import config
 
@@ -177,10 +178,20 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
             ws_devs = [d for d in all_devs if workshop in d.get("workshops", [])]
         else:
             ws_devs = all_devs
-        devices = [{"tag": d["tag"], "name": "见台账", "count": 1,
-                    "workshops": d.get("workshops", [])} for d in ws_devs[:60]]
+        # v0.1.168：带出真实设备名/型号/数量/重量 —— 原来 name 写死「见台账」，
+        # 台账里明明有「离心泵/变压器/储罐」和「0.35t/2.1t/6.5t」，全被丢弃，
+        # 于是生成的资料里设备只有一个光位号、设备重量还被评为「缺失需补」。
+        devices = [{
+            "tag": d.get("tag", ""),
+            "name": d.get("name", "") or d.get("tag", ""),
+            "model": d.get("model", ""),
+            "count": d.get("quantity", "") or 1,
+            "weight": d.get("weight", ""),
+            "workshops": list(d.get("workshops", [])),
+        } for d in ws_devs[:60] if d.get("tag")]
     except Exception:  # noqa: BLE001
         pass
+
 
     # 设备级车间归属补充（v0.1.29）
     try:
@@ -197,12 +208,26 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
     # 吊装方案专项：从设备台账/向量库检索重量等参数
     if doc_type == "吊装方案" and devices:
         first_dev = devices[0]
-        data["吊装设备名称"] = first_dev["tag"] + "（详见设备清单）"
-        # 尝试从向量库检索设备重量
+        # v0.1.168：带上台账里的真实设备名，并优先用台账重量。
+        # 原来名称为「位号（详见设备清单）」、重量只靠向量检索（向量库不可用时必然为空），
+        # 台账里已有的 0.35t / 2.1t / 6.5t 被完全忽略，于是「设备重量」永远落到「缺失需补」。
+        _dev_name = first_dev.get("name") or ""
+        _label = first_dev["tag"] + (" " + _dev_name if _dev_name and _dev_name != first_dev["tag"] else "")
+        data["吊装设备名称"] = _label + "（详见设备清单）"
+        _ledger_weight = str(first_dev.get("weight") or "").strip()
+        if _ledger_weight:
+            _wm = re.search(r"(\d+(?:\.\d+)?)", _ledger_weight)
+            if _wm:
+                _w = float(_wm.group(1))
+                if "kg" in _ledger_weight.lower() or "公斤" in _ledger_weight:
+                    _w = _w / 1000.0
+                data["设备重量"] = f"{_w:g} t"
+                data["_设备重量来源"] = "设备台账"
+        # 台账没有时，再退回向量库检索设备重量
         try:
             from . import vector_store
             store = vector_store.VectorStore()
-            hits = store.search(f"{first_dev['tag']} 重量 设备参数", top_k=3)
+            hits = store.search(f"{first_dev['tag']} 重量 设备参数", top_k=3) if "设备重量" not in data else []
             for h in hits:
                 txt = str(h.get("text", ""))
                 import re as _re
@@ -216,8 +241,8 @@ def prefill_from_db(doc_type: str, workshop: str = "") -> dict:
                     break
         except Exception:  # noqa: BLE001
             pass
-        if "设备重量" not in data:
-            missing.append("设备重量（需从设备铭牌/台账补充）")
+        # 重量缺失不再单独 append —— 末尾对 required 字段的检查会生成一条「设备重量」，
+        # 两处都加会出现重复条目（实测 missing 里「设备重量」出现过两次）。
         # 吊装参数默认建议
         if "吊装半径" not in data:
             missing.append("吊装半径（需现场测量）")
@@ -1198,9 +1223,35 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         r.font.name = "黑体"
         r._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
 
-    def add_h(text):
+    # v0.1.168：章节号原来各处写死（"一、基本信息" / "二、吊装参数" / "二、涉及设备清单"…），
+    # 一份吊装方案里出现两套「二」两套「三」，打印出来无法引用章节。
+    # 改为 add_h 自动顺序编号，调用方只管传标题、不再自己写序号。
+    _h_state = {"n": 0}
+    _CN_NUM = "一二三四五六七八九十"
+
+    def _cn_no(n):
+        if n <= 0:
+            return ""
+        if n <= 10:
+            return _CN_NUM[n - 1]
+        if n < 20:
+            return "十" + _CN_NUM[n - 11]
+        tens, ones = divmod(n, 10)
+        return _CN_NUM[tens - 1] + "十" + (_CN_NUM[ones - 1] if ones else "")
+
+    def add_h(text, numbered=True):
+        t = str(text)
+        # 去掉调用方原有的「一、」「十二、」这类序号前缀，避免与自动编号叠加
+        for i in range(1, 21):
+            pre = _cn_no(i) + "、"
+            if t.startswith(pre):
+                t = t[len(pre):]
+                break
+        if numbered:
+            _h_state["n"] += 1
+            t = _cn_no(_h_state["n"]) + "、" + t
         p = doc.add_paragraph()
-        r = p.add_run(text)
+        r = p.add_run(t)
         r.bold = True
         r.font.size = Pt(14)
         r.font.name = "黑体"
@@ -1216,16 +1267,31 @@ def fill_template(doc_type: str, data: dict) -> bytes:
             r.font.color.rgb = __import__("docx.shared", fromlist=["RGBColor"]).RGBColor(0xC0, 0x39, 0x2B)
         return v
 
+    # v0.1.168：以下字段下面已有专属章节，基本信息里再列一次就是同一句话出现两遍。
+    # 实测：施工计划「进度安排/资源配置/关键节点」各出现 2 次；隐蔽验收「隐蔽部位」出现 2 次；
+    # 竣工资料「交工范围/验收记录编号/隐蔽工程资料编号」各出现 2 次。
+    # 这里按资料类型登记，基本信息只做「字段 → 见第N章」的指引，不重复正文。
+    _SECTIONIZED = {
+        "施工计划": ["进度安排", "资源配置", "关键节点"],
+        "隐蔽工程验收记录": ["隐蔽部位", "检查情况"],
+        "竣工资料": ["交工范围", "验收记录编号", "隐蔽工程资料编号", "遗留问题及处理"],
+    }
+    _skip_in_brief = set(_SECTIONIZED.get(doc_type, []))
+
     missing = []
     add_title(f"{doc_type}")
-    add_h("一、基本信息")
+    add_h("基本信息")
     for k in t["required"]:
         v = data.get(k, "")
         if not str(v or "").strip():
             missing.append(k)
+            add_kv(k, v)
+            continue
+        if k in _skip_in_brief:
+            continue
         add_kv(k, v)
     for k in t["optional"]:
-        if data.get(k):
+        if data.get(k) and k not in _skip_in_brief:
             add_kv(k, data[k])
 
     # 技术交底专项（v0.1.51：设备数据联动章节）
@@ -1439,8 +1505,12 @@ def fill_template(doc_type: str, data: dict) -> bytes:
     if doc_type == "吊装方案":
         add_h("二、吊装参数")
         lifting_keys = ["吊装设备名称", "设备重量", "吊装半径", "吊装高度", "吊车型号", "吊车站位", "吊索具"]
+        # 已在「基本信息」出现过的字段不再重复罗列（原来 吊装设备名称/设备重量 在此出现第二次）
+        _shown = set(t["required"]) | {k for k in t["optional"] if data.get(k)}
         for k in lifting_keys:
-            if data.get(k) or k in t["required"]:
+            if k in _shown:
+                continue
+            if data.get(k):
                 add_kv(k, data.get(k, ""))
         # 吊装计算提示
         p = doc.add_paragraph()
@@ -1549,7 +1619,11 @@ def fill_template(doc_type: str, data: dict) -> bytes:
     for k, default in t["default_text"].items():
         if k == "编制依据":
             continue
-        add_h(f"四、{k}")
+        # 专项章节已经按设备/工期生成了更详细的同类内容时，不再追加通用模板段落
+        # （实测施工计划里「三、施工进度安排」与「八、进度安排」几乎是同一段文字的详细版与通用版）
+        if doc_type == "施工计划" and k == "进度安排" and data.get("进度安排"):
+            continue
+        add_h(k)
         doc.add_paragraph(default)
 
     add_h("五、签字栏")
@@ -1559,7 +1633,7 @@ def fill_template(doc_type: str, data: dict) -> bytes:
         tbl.rows[0].cells[i].text = h
     add_paragraph = doc.add_paragraph
     p = add_paragraph()
-    p.add_run(f"\n生成工具：繁工AI 本地解析工作台 v0.1.30 · 生成时间 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    p.add_run(f"\n生成工具：繁工AI 本地解析工作台 v{config.APP_VERSION} · 生成时间 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     import io
     buf = io.BytesIO()
