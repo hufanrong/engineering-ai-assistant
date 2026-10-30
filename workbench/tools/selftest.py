@@ -516,13 +516,24 @@ def phase4(samples_dir):
     code, st, err = call("GET", "/api/tools/dwg-cleaner/status")
     ready = (st or {}).get("env", {}).get("ready") if isinstance(st, dict) else None
     missing = (st or {}).get("env", {}).get("missing") if isinstance(st, dict) else None
-    record(P, "清稿环境自检", "ready=true", f"{code} ready={ready} missing={missing}",
-           bool(ready), str((st or {}).get("env", {}).get("hint"))[:200])
+    # v0.1.170：原来无条件 `bool(ready)` 判定。但 AutoCAD 没有 Linux/macOS 官方版本，
+    # 非 Windows 平台 ready 必然为 False —— 那是环境不满足、不是代码缺陷，记成 fail
+    # 会让 AI 侧每轮去追一个根本不存在的 bug（沙箱实测就是这样虚报 1 项失败）。
+    # 区分开：非 Windows → skip(None)；Windows 上 ready=False → 真 fail（部署缺依赖）。
+    on_windows = platform.system() == "Windows"
+    if on_windows:
+        env_pass = bool(ready)
+    else:
+        env_pass = None
+    record(P, "清稿环境自检",
+           "ready=true" if on_windows else "ready=true（非 Windows 平台不适用，跳过）",
+           f"{code} ready={ready} missing={missing} platform={platform.system()}",
+           env_pass, str((st or {}).get("env", {}).get("hint"))[:200])
 
     if not ready:
         print(f"  [SKIP] 环境不满足（missing={missing}）：清稿需 Windows + AutoCAD，"
               f"当前平台 {platform.system()}。以下步骤标记 skip。")
-        for s in ("图纸清单", "清稿执行", "MD5 原图不变", "处理日志", "成果 PDF"):
+        for s in ("待清稿图纸清单", "清稿执行", "原图 MD5 不变", "处理日志", "成果 PDF"):
             record(P, s, "-", f"环境不满足(missing={missing})", None)
         return
 
@@ -549,19 +560,48 @@ def phase4(samples_dir):
     before = md5(target)
     code, proc, err = call("POST", "/api/tools/dwg-cleaner/process",
                            {"file_paths": [target], "project_drawings": False}, timeout=300)
-    ok = code == 200 and (proc or {}).get("ok") is not False
-    record(P, "清稿执行", "200 且 ok", f"{code} {str(proc)[:160]}", ok, err)
+    # v0.1.170：原来判定是 `(proc or {}).get("ok") is not False` —— 但真实返回里
+    # 根本没有 ok 键，get 取到 None，`None is not False` 恒真。于是 AutoCAD 报错、
+    # 返回 {status:"failed", failed:1} 时这一项照样 PASS，真问题被测试吞掉。
+    # 改成同时看 status 与失败条数，三种失败态都要能被判出来。
+    resp = proc or {}
+    status_str = str(resp.get("status") or "").strip().lower()
+    n_failed = resp.get("failed")
+    hard_fail = (status_str in ("failed", "error")
+                 or (isinstance(n_failed, int) and n_failed > 0))
+    ok = code == 200 and resp.get("ok") is not False and not hard_fail
+    record(P, "清稿执行", "200 且 status 非失败、失败条数为 0",
+           f"{code} status={status_str or '(空)'} failed={n_failed} {str(proc)[:120]}", ok, err)
 
     after = md5(target)
     record(P, "原图 MD5 不变", before == after, f"{before[:12]} -> {after[:12]}", before == after,
            "设计目标质量底线：原文件 MD5 全程不变")
 
-    log = (proc or {}).get("log") or (proc or {}).get("logs") or []
-    record(P, "处理日志", "有逐图日志", f"{len(log) if isinstance(log,list) else 'n/a'} 条",
-           bool(log))
-    record(P, "成果 PDF", "生成合并 PDF",
-           str((proc or {}).get("pdf") or (proc or {}).get("output") or "")[:100],
-           bool((proc or {}).get("pdf") or (proc or {}).get("output")))
+    # v0.1.170：原来在 /process 响应顶层找 log/pdf. 实测（Windows + AutoCAD 2020）
+    # 这两个键根本不在顶层：路由返回 {status,total,success,failed,results[],out_dir}，
+    # pdf / log_file 在 results[0] 里（core.process_file 的返回结构）。字段取错，
+    # 于是「处理日志 0 条」「成果 PDF 空」被误判成失败 —— 而磁盘上 PDF、清稿 DXF、
+    # 处理日志都真实产出了。改成从 results[] 取，并保留顶层兜底兼容旧接口。
+    results = (proc or {}).get("results") or []
+    first = results[0] if isinstance(results, list) and results else {}
+    if not isinstance(first, dict):
+        first = {}
+
+    log_file = first.get("log_file") or (proc or {}).get("log_file") or ""
+    log_exists = bool(log_file) and os.path.isfile(log_file)
+    # 兼容：接口若直接返回日志数组，也算有日志
+    log_list = (proc or {}).get("log") or (proc or {}).get("logs") or []
+    record(P, "处理日志", "有逐图日志文件或日志条目",
+           f"log_file={log_file or '(空)'} exists={log_exists}; 顶层条目={len(log_list) if isinstance(log_list, list) else 'n/a'}",
+           log_exists or bool(log_list), log_file or "")
+
+    pdf_path = first.get("pdf") or (proc or {}).get("pdf") or (proc or {}).get("output") or ""
+    pdf_exists = bool(pdf_path) and os.path.isfile(pdf_path)
+    pdf_size = os.path.getsize(pdf_path) if pdf_exists else 0
+    pdf_pages = first.get("pdf_pages")
+    evidence = f"pdf={pdf_path or '(空)'} exists={pdf_exists} size={pdf_size}B pages={pdf_pages}"
+    record(P, "成果 PDF", "生成合并 PDF（文件存在且非空）",
+           f"{str(pdf_path)[:100]} ({pdf_size}B)", pdf_exists and pdf_size > 0, evidence)
 
 
 # ---------------- 报告 ----------------
