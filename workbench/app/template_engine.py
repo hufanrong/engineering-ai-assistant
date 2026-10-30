@@ -29,6 +29,9 @@ except ImportError:
     HAS_DOCX = False
 
 
+# 未填占位符的可见替身（v0.1.174）。成稿里不允许再出现 {{模板变量}}。
+UNFILLED_MARK = "【待补充】"
+
 # 模板存储目录（平台级，所有项目共享模板库）
 TEMPLATES_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -446,6 +449,8 @@ def render_template(template_id: str, equipment: str = "",
                 filled.add(field)
             else:
                 unfilled.add(field)
+                # v0.1.174：未填字段必须落成可见标记，不能把 {{模板变量}} 留在成稿里
+                replaced = replaced.replace(m.group(0), UNFILLED_MARK)
         if replaced == joined:
             return
         # 写回：首 run 承载全文，其余清空

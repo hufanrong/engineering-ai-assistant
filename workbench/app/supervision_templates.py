@@ -33,6 +33,9 @@ from lxml import etree
 from . import config
 from . import template_engine as _te
 
+# 未填占位符的可见替身。必须落进文档，不能留下 {{模板变量}}（v0.1.174）
+UNFILLED_MARK = "【待补充】"
+
 # 内置模板目录
 BUILTIN_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -542,8 +545,9 @@ def _fill_para_text(p, fill: Dict, unfilled: set):
             replaced = replaced.replace(m.group(0), str(fill[field]))
         else:
             unfilled.add(field)
-    if replaced == joined:
-        return
+            # v0.1.174：未填字段必须落成可见标记。旧逻辑只记账不替换，
+            # 实测结果是交给监理的 Word 里原样留着 {{施工单位}} 模板变量。
+            replaced = replaced.replace(m.group(0), UNFILLED_MARK)
     texts[0].text = replaced
     for t in texts[1:]:
         t.text = ''
@@ -946,6 +950,7 @@ def _render_xlsx(template_path: str, fill: Dict, devices: List[Dict],
                         filled.add(field)
                     else:
                         unfilled.add(field)
+                        replaced = replaced.replace(m.group(0), UNFILLED_MARK)
                 if replaced != orig:
                     c.value = replaced
 
