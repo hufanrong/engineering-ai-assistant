@@ -22,6 +22,10 @@ from app import config  # noqa: E402
 
 def _open_browser():
     import time
+    # v0.1.169：无人值守自测循环（tools/wb_loop.py）每次重启服务都会开一个
+    # 浏览器窗口，跑一夜就是几十个。允许用环境变量关掉；手动启动时默认仍然开。
+    if os.environ.get("FANGONG_NO_BROWSER", "").strip() in ("1", "true", "yes"):
+        return
     time.sleep(1.5)
     # v0.1.134：HOST=0.0.0.0/:: 时浏览器打不开，回退 127.0.0.1
     host = "127.0.0.1" if config.HOST in ("0.0.0.0", "::", "") else config.HOST
