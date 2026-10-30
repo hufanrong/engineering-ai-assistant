@@ -70,8 +70,16 @@ WORKSHOP_REQUIRED_DOCS = ["施工日志", "隐蔽工程验收记录"]
 
 
 def _load_generated_docs() -> dict:
-    """加载已生成的资料清单。返回 {doc_type: [file_names]}。"""
-    gen_dir = os.path.join(config.DATA_DIR, "generated_docs")
+    """加载已生成的资料清单。返回 {doc_type: [file_names]}。
+
+    v0.1.168：改用 archive._gen_dir() 取目录 —— 原来写死全局 DATA_DIR/generated_docs，
+    项目切换后仍读到别的项目的资料，完整性检查会给出错误的「已具备」结论。
+    """
+    try:
+        from . import archive as _ar
+        gen_dir = _ar._gen_dir()
+    except Exception:  # noqa: BLE001
+        gen_dir = os.path.join(config.DATA_DIR, "generated_docs")
     result = {}
     if not os.path.exists(gen_dir):
         return result
