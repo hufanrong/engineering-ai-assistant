@@ -37,7 +37,7 @@ from . import spatial_model
 from . import completeness_check
 from parsers.engines import parse_file
 
-app = FastAPI(title="繁工AI 本地解析工作台", version="0.1.166")
+app = FastAPI(title="繁工AI 本地解析工作台", version=config.APP_VERSION)
 
 # 允许跨域请求（手机端网页从本地file://加载时需要）
 # v0.1.129：allow_credentials=True 与 allow_origins=["*"] 组合非法（浏览器拒绝跨域响应）。
@@ -252,13 +252,28 @@ def results(status_filter: str = None, limit: int = 200):
 
 @app.get("/api/results/{sha256}")
 def result_detail(sha256: str):
-    """单个文件解析详情：从本地解析结果缓存读取。"""
-    cache_dir = os.path.join(config.DATA_DIR, "parsed_cache")
-    path = os.path.join(cache_dir, f"{sha256}.json")
-    if not os.path.exists(path):
-        raise HTTPException(404, "未找到缓存（重新扫描该文件生成）")
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    """单个文件解析详情：从本地解析结果缓存读取。
+
+    v0.1.167：修复 BUG —— scanner 在项目激活时把缓存写到
+    data/projects/{id}/parsed_cache/（见 scanner._get_data_dir），
+    而这里只查全局 data/parsed_cache/，导致详情接口对每个已解析文件都返回
+    404「未找到缓存」。现按「项目目录 → 全局目录」顺序查找，兼容旧数据。
+    """
+    candidates = []
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if cur and cur.get("id"):
+            candidates.append(os.path.join(_pm.get_project_data_dir(cur["id"]), "parsed_cache"))
+    except Exception:  # noqa: BLE001
+        pass
+    candidates.append(os.path.join(config.DATA_DIR, "parsed_cache"))
+    for cache_dir in candidates:
+        path = os.path.join(cache_dir, f"{sha256}.json")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+    raise HTTPException(404, "未找到缓存（重新扫描该文件生成）")
 
 
 # ---------- 向量检索 ----------
@@ -270,12 +285,23 @@ class SearchReq(BaseModel):
 
 @app.post("/api/search")
 def search(req: SearchReq):
+    retrieval = "vector"
+    vector_error = ""
     try:
         results = _get_store().search(req.query, top_k=req.top_k)
         for r in results:
             r["source"] = "project"
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, f"检索失败：{e}")
+        # 向量检索不可用（embedding 模型缺失/未下载/离线环境）时降级为关键词检索：
+        # 资料库的可查性优先于检索精度，必须让用户仍能查到已解析的文件。
+        vector_error = str(e)[:160]
+        try:
+            results = _get_store().search_keyword(req.query, top_k=req.top_k)
+            for r in results:
+                r["source"] = "project"
+            retrieval = "keyword"
+        except Exception as e2:  # noqa: BLE001
+            raise HTTPException(500, f"检索失败：{e}；降级检索亦失败：{e2}")
     if req.platform:
         try:
             plat = platform_store.search(req.query, top_k=req.top_k)
@@ -290,7 +316,8 @@ def search(req: SearchReq):
             results = results + plat
         except Exception as e:  # noqa: BLE001
             results.append({"source": "platform", "error": str(e)})
-    return {"query": req.query, "results": results}
+    return {"query": req.query, "results": results, "retrieval": retrieval,
+            "vector_error": vector_error}
 
 
 # ---------- AI 助手（v0.1.16） ----------
@@ -963,6 +990,31 @@ def supervision_collect(req: CollectReq):
         raise HTTPException(500, f"归集失败：{e}")
 
 
+# ---------- 整编要求登记表导入（v0.1.168） ----------
+# 整卷生成依赖这份登记表，但此前既没有随包提供、也没有导入入口。
+@app.get("/api/supervision/registry")
+def supervision_registry_info():
+    """登记表当前状态：是否可用、条目数、各册分布、字段完整度。"""
+    try:
+        return {"ok": True, "registry": si.registry_info()}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"读取登记表状态失败：{e}")
+
+
+@app.post("/api/supervision/registry")
+async def supervision_registry_import(file: UploadFile = File(...)):
+    """导入整编要求登记表（.json / .xlsx / .csv）。导入前自动备份已有文件。"""
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "上传内容为空")
+    r = si.import_registry_file(file.filename or "", content)
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error") or "导入失败")
+    return {"ok": True, "registry": r}
+
+
+
+
 
 # ---------- 库导出/合并（v0.1.9，多电脑解析合并打底） ----------
 @app.get("/api/library/export")
@@ -1387,25 +1439,35 @@ def spatial_device_confirm(tag: str, payload: dict = Body(default={})):
 
 @app.post("/api/equipment-merge/run")
 def equipment_merge_run():
-    """v0.1.45：执行设备台账多版本合并去重。"""
+    """v0.1.45：执行设备台账多版本合并去重。
+
+    v0.1.167：修复 BUG —— 原实现把 index/cache 路径硬编码为全局
+    data/index.json、data/parsed_cache/，项目激活时数据实际在
+    data/projects/{id}/ 下，导致设备合并恒为 0 条，进而使
+    设备清单 / 竣工资料 / 组卷全部拿不到设备（total_devices=0）。
+    """
     from . import relations as _rel
     from . import equipment_merge as _em
-    g = _rel.load_relations()
-    # 构建 docs 带 _cache
+    from . import project_manager as _pm
+    g = _rel.load_relations()  # noqa: F841 保留原调用（存在 side effect）
     docs = {}
     import os, json as _json
-    idx_file = os.path.join("data", "index.json")
+    data_dir = _pm.get_project_data_dir()
+    idx_file = os.path.join(data_dir, "index.json")
+    cache_dir = os.path.join(data_dir, "parsed_cache")
     if os.path.exists(idx_file):
         with open(idx_file, encoding="utf-8") as f:
             idx = _json.load(f)
         for sha, info in idx.items():
-            cache_file = os.path.join("data", "parsed_cache", f"{sha}.json")
+            if sha in scanner.INDEX_RESERVED_KEYS or not isinstance(info, dict):
+                continue
+            cache_file = os.path.join(cache_dir, f"{sha}.json")
             if os.path.exists(cache_file):
                 with open(cache_file, encoding="utf-8") as f:
                     cache = _json.load(f)
                 docs[sha] = {"_cache": cache, "file_name": info.get("file_name", "")}
     result = _em.run_merge(docs)
-    return {"ok": True, **result}
+    return {"ok": True, "data_dir": data_dir, **result}
 
 
 @app.get("/api/equipment-merge/list")
