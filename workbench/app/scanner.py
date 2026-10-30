@@ -128,7 +128,15 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
             res: ParseResult = parse_file(path)
             if res.status == "parsed" or res.status == "partial":
                 stats["parsed"] += 1
-                n = store.index_file(res)
+                # 向量化失败不得影响已解析文件的入库（原实现中 index_file 抛异常
+                # 会被外层 except 捕获并把整个文件判为 failed，导致解析成功的文件
+                # 全部无法进入资料库；embedding 模型缺失时这是必然触发路径）
+                try:
+                    n = store.index_file(res)
+                except Exception as _ve:  # noqa: BLE001
+                    n = 0
+                    res.structure = res.structure or {}
+                    res.structure["vector_error"] = str(_ve)[:200]
                 if n:
                     stats["vectorized"] += 1
                 # 无论是否成功向量化都进上传队列（云端合并保留原文+解析）
