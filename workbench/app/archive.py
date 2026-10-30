@@ -24,9 +24,75 @@ VOLUMES = [
 
 
 def _gen_dir() -> str:
+    """已生成资料的存档根目录。
+
+    v0.1.168：原来固定用全局 config.DATA_DIR/generated_docs，所有项目共用同一个
+    目录 —— 实测建 A/B 两个项目，A 生成 1 份施工方案后切到从未生成过资料的 B，
+    B 的 /api/archive/status 返回 generated_total=40、归档包里也打包了 A 的 40 个
+    docx（卷内目录全被标成「已归档」）。竣工归档是项目级交付物，必须跟项目走。
+
+    改法：有当前项目就落在 <项目目录>/generated_docs；没有当前项目时仍回落全局
+    目录（兼容「未建项目先试用」的场景）。历史全局目录的数据不自动搬移，避免动
+    线上已有文件；需要时用 migrate_legacy_generated() 显式迁移。
+    """
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if cur and cur.get("id"):
+            d = os.path.join(_pm.get_project_data_dir(cur["id"]), "generated_docs")
+            os.makedirs(d, exist_ok=True)
+            return d
+    except Exception:  # noqa: BLE001
+        pass
     d = os.path.join(config.DATA_DIR, "generated_docs")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def legacy_gen_dir() -> str:
+    """旧的全局存档目录（v0.1.24~v0.1.167 用的位置）。"""
+    return os.path.join(config.DATA_DIR, "generated_docs")
+
+
+def migrate_legacy_generated(project_id: str = None) -> dict:
+    """把旧全局 generated_docs 里的资料复制到指定项目目录（不删除源文件）。
+
+    只复制、不移动：旧目录可能仍被「未建项目」的会话使用，删除会破坏兼容。
+    同名文件已存在则跳过，不覆盖。
+    """
+    src_root = legacy_gen_dir()
+    if not os.path.isdir(src_root):
+        return {"ok": False, "error": "旧存档目录不存在", "src": src_root}
+    if project_id:
+        from . import project_manager as _pm
+        dst_root = os.path.join(_pm.get_project_data_dir(project_id), "generated_docs")
+    else:
+        dst_root = _gen_dir()
+    if os.path.abspath(src_root) == os.path.abspath(dst_root):
+        return {"ok": False, "error": "源与目标相同，无需迁移", "dir": src_root}
+    copied, skipped = [], []
+    for t in os.listdir(src_root):
+        tdir = os.path.join(src_root, t)
+        if not os.path.isdir(tdir):
+            continue
+        os.makedirs(os.path.join(dst_root, t), exist_ok=True)
+        for f in os.listdir(tdir):
+            if not f.endswith(".docx"):
+                continue
+            s = os.path.join(tdir, f)
+            d = os.path.join(dst_root, t, f)
+            if os.path.exists(d):
+                skipped.append(f"{t}/{f}")
+                continue
+            try:
+                import shutil
+                shutil.copy2(s, d)
+                copied.append(f"{t}/{f}")
+            except Exception as e:  # noqa: BLE001
+                skipped.append(f"{t}/{f}: {e}")
+    return {"ok": True, "copied": len(copied), "skipped": len(skipped),
+            "src": src_root, "dst": dst_root,
+            "copied_files": copied[:20], "skipped_files": skipped[:20]}
 
 
 def _save_generated(doc_type: str, content: bytes, devices: list = None, workshops: list = None) -> str:
