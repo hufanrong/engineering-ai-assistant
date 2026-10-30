@@ -241,11 +241,33 @@ def _categorize(name: str) -> str:
     return "其他"
 
 
+# v0.1.167：补充通用工艺设备类型 —— 原表只有矿山专用设备（胶带机/破碎机/渣浆泵…），
+# 离心泵/储罐/变压器等常规设备全部落到「通用」，与竣工资料链路按名称推断出的
+# 泵/储罐/电机不一致，同一台设备在两条链路上给出两种类型。
+COMMON_DEVICE_TYPE_KEYWORDS = [
+    ("泵", ["离心泵", "齿轮泵", "柱塞泵", "螺杆泵", "隔膜泵", "污水泵", "潜水泵", "泵"]),
+    ("风机", ["离心风机", "通风机", "风机"]),
+    ("压缩机", ["空压机", "压缩机"]),
+    ("换热器", ["换热器", "冷却器", "冷凝器", "再沸器", "空冷器"]),
+    ("储罐", ["储罐", "储槽", "罐"]),
+    ("塔器", ["塔器", "精馏塔", "吸收塔", "洗涤塔"]),
+    ("容器", ["反应釜", "反应器", "容器", "分离器"]),
+    ("电机", ["电动机", "电机", "变压器"]),
+    ("阀门", ["阀门", "闸阀", "球阀", "蝶阀", "截止阀"]),
+    ("起重机", ["起重机", "行车", "电动葫芦", "葫芦"]),
+]
+
+
 def _device_type_of(equipment: str) -> str:
     """从设备名称提取设备类型（用于模板表匹配）。"""
     if not equipment:
         return ""
+    # 先匹配矿山专用设备（更具体），再回落到通用工艺设备
     for t, kws in DEVICE_TYPE_KEYWORDS:
+        for k in kws:
+            if k in equipment:
+                return t
+    for t, kws in COMMON_DEVICE_TYPE_KEYWORDS:
         for k in kws:
             if k in equipment:
                 return t
@@ -650,14 +672,35 @@ def render_supervision_doc(category: str = "", workshop: str = "",
 
     # 找该表类型的车间级模板（docx 或 xlsx）
     chosen = None
+    cats = {}
     for t in index.get("templates", []):
         dt = t.get("doc_type", "")
-        if dt.startswith(DOC_TYPE + "|") and dt.split("|", 1)[1] == category:
-            chosen = t
-            break
+        if dt.startswith(DOC_TYPE + "|"):
+            cats.setdefault(dt.split("|", 1)[1], t)
+    # 精确匹配优先
+    if category in cats:
+        chosen = cats[category]
+    # v0.1.167：精确匹配不到时按关键词回退 —— 用户输入「仪表」这类常用简称，
+    # 原来一律报「未找到表类型」，而可用列表里的表类型是全名（仪表设备管件阀门进场检验记录）
+    if not chosen and category:
+        # v0.1.167：模糊输入（如「仪表」）不擅自挑一张表 —— 多个候选时返回候选清单，
+        # 由调用方明确选定。原来会静默命中第一张，生成的文件与用户意图不符。
+        _hits = [c for c in cats if category in c]
+        for c, kws in CATEGORY_KEYWORDS:
+            if c in cats and c not in _hits and any(k == category for k in kws):
+                _hits.append(c)
+        if len(_hits) == 1:
+            chosen = cats[_hits[0]]
+        elif len(_hits) > 1:
+            return {"ok": False,
+                    "error": f"表类型「{category}」不唯一，请从候选中明确指定",
+                    "ambiguous": True,
+                    "candidates": sorted(_hits, key=len),
+                    "available_categories": sorted(cats)}
     if not chosen:
         return {"ok": False, "error": f"未找到表类型「{category}」的模板",
-                "available": [c for c, _ in CATEGORY_KEYWORDS]}
+                "available": sorted(cats) or [c for c, _ in CATEGORY_KEYWORDS],
+                "available_categories": sorted(cats)}
 
     # 模板文件路径
     tpl_file = chosen.get("file_name", "")
