@@ -35,6 +35,24 @@
       "step": "判定",
       "rc": 0,
       "out": "status=passed rc=0"
+    },
+    {
+      "step": "git add reports",
+      "rc": 0,
+      "out": "",
+      "err": ""
+    },
+    {
+      "step": "git commit",
+      "rc": 0,
+      "out": "[main 259c848] test(workbuddy): 20261030_091044 status=passed P40/F0/S0\n 6 files changed, 521 insertions(+)\n create mode 100644 reports/20261030_091044/console.log\n create mode 100644 reports/20261030_091044/env.json\n create mode 100644 reports/20261030_091044/report.json\n create mode 100644 reports",
+      "err": ""
+    },
+    {
+      "step": "git push",
+      "rc": 1,
+      "out": "",
+      "err": "To https://github.com/hufanrong/engineering-ai-assistant\n ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs to 'https://github.com/hufanrong/engineering-ai-assistant'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally. This is usually caused by another repository pushing to\nhint: the same ref. If you want to integrate the re"
     }
   ],
   "summary": {
@@ -68,7 +86,8 @@
   "remote_head": "a7ebf667968480f52e478fa38992ac9506853512",
   "behind": 0,
   "ahead": 0,
-  "finished": "2026-10-30 09:13:59",
+  "finished": "2026-10-30 09:14:04",
   "commit_before": "a7ebf667968480f52e478fa38992ac9506853512",
-  "commit_after": "a7ebf667968480f52e478fa38992ac9506853512"
+  "commit_after": "259c84869e67c581495966b2153247853cc10972",
+  "pushed": false
 }
