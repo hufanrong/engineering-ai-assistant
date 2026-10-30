@@ -11,15 +11,20 @@ import hashlib
 import shutil
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_MERGE_LOG_FILE = os.path.join("data", "merge_log.json")
-_MERGE_PENDING_FILE = os.path.join("data", "merge_pending.json")
+def _merge_log_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("merge_log.json")
 
+def _merge_pending_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("merge_pending.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
-    os.makedirs(os.path.join("data", "generated_docs"), exist_ok=True)
+    _pp.data_dir()
+    os.makedirs(_pp.data_subdir("generated_docs"), exist_ok=True)
 
 
 def _file_hash(filepath: str) -> str:
@@ -35,10 +40,14 @@ def _file_hash(filepath: str) -> str:
 
 
 def _load_merge_log() -> list:
+    try:
+        _p = _merge_log_file_path()
+    except _pp.NoProjectError:
+        return {}
     """加载合并日志。"""
-    if os.path.exists(_MERGE_LOG_FILE):
+    if os.path.exists(_p):
         try:
-            with open(_MERGE_LOG_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return []
@@ -48,15 +57,15 @@ def _load_merge_log() -> list:
 def _save_merge_log(log: list):
     """保存合并日志。"""
     _ensure_dirs()
-    with open(_MERGE_LOG_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_log_file_path(), "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=2)
 
 
 def _load_pending() -> list:
     """加载待人工确认的冲突。"""
-    if os.path.exists(_MERGE_PENDING_FILE):
+    if os.path.exists(_merge_pending_file_path()):
         try:
-            with open(_MERGE_PENDING_FILE, "r", encoding="utf-8") as f:
+            with open(_merge_pending_file_path(), "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return []
@@ -66,7 +75,7 @@ def _load_pending() -> list:
 def _save_pending(pending: list):
     """保存待人工确认的冲突。"""
     _ensure_dirs()
-    with open(_MERGE_PENDING_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_pending_file_path(), "w", encoding="utf-8") as f:
         json.dump(pending, f, ensure_ascii=False, indent=2)
 
 
@@ -136,7 +145,7 @@ def merge_archive(source_path: str, node_name: str = "unknown",
         return scan_result
     
     source_files = scan_result["files"]
-    target_dir = os.path.join("data", "generated_docs")
+    target_dir = _pp.data_subdir("generated_docs")
     
     # 统计
     merged = 0
@@ -267,7 +276,7 @@ def resolve_pending(index: int, decision: str) -> dict:
     item = pending[index]
     
     if decision == "use_source":
-        target_path = os.path.join("data", "generated_docs", item["file"])
+        target_path = os.path.join(_pp.data_subdir("generated_docs"), item["file"])
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         shutil.copy2(item["source"], target_path)
         result = "已用源文件覆盖"
@@ -308,7 +317,7 @@ def merge_stats() -> dict:
     total_conflicts = sum(entry.get("conflicts", 0) for entry in log)
     
     # 统计当前资料库文件数
-    target_dir = os.path.join("data", "generated_docs")
+    target_dir = _pp.data_subdir("generated_docs")
     current_files = 0
     if os.path.exists(target_dir):
         for root, dirs, filenames in os.walk(target_dir):

@@ -8,19 +8,25 @@ import os
 import json
 import datetime
 from typing import Optional, List, Dict
+from . import project_paths as _pp
 
 
-_ENHANCED_FILE = os.path.join("data", "schedule_enhanced.json")
-
+def _enhanced_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("schedule_enhanced.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_enhanced() -> dict:
-    if os.path.exists(_ENHANCED_FILE):
+    try:
+        _p = _enhanced_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_ENHANCED_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -30,7 +36,7 @@ def _load_enhanced() -> dict:
 
 def _save_enhanced(enhanced: dict):
     _ensure_dirs()
-    with open(_ENHANCED_FILE, "w", encoding="utf-8") as f:
+    with open(_enhanced_file_path(), "w", encoding="utf-8") as f:
         json.dump(enhanced, f, ensure_ascii=False, indent=2)
 
 

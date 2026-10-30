@@ -10,19 +10,25 @@ import os
 import json
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_RECORD_FILE = os.path.join("data", "unboxing_records.json")
-
+def _record_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("unboxing_records.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_records() -> dict:
-    if os.path.exists(_RECORD_FILE):
+    try:
+        _p = _record_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_RECORD_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -31,7 +37,7 @@ def _load_records() -> dict:
 
 def _save_records(records: dict):
     _ensure_dirs()
-    with open(_RECORD_FILE, "w", encoding="utf-8") as f:
+    with open(_record_file_path(), "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
 
 

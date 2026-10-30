@@ -10,19 +10,25 @@ import json
 import hashlib
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_MERGE_FILE = os.path.join("data", "design_change_merge.json")
-
+def _merge_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("design_change_merge.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_merge() -> dict:
-    if os.path.exists(_MERGE_FILE):
+    try:
+        _p = _merge_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_MERGE_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -31,7 +37,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_MERGE_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_file_path(), "w", encoding="utf-8") as f:
         json.dump(merge, f, ensure_ascii=False, indent=2)
 
 
@@ -63,7 +69,7 @@ def load_changes_from_file(file_path: str) -> dict:
 
 def _get_current_changes() -> dict:
     """v0.1.80：获取当前设计变更数据。"""
-    change_file = os.path.join("data", "design_changes.json")
+    change_file = _pp.data_file_with_legacy("design_changes.json")
     if os.path.exists(change_file):
         try:
             with open(change_file, "r", encoding="utf-8") as f:
@@ -75,8 +81,8 @@ def _get_current_changes() -> dict:
 
 def _write_back_changes(changes: dict):
     """v0.1.80：将合并后的设计变更写回。"""
-    change_file = os.path.join("data", "design_changes.json")
-    os.makedirs("data", exist_ok=True)
+    change_file = _pp.data_file_with_legacy("design_changes.json")
+    _pp.data_dir()
     with open(change_file, "w", encoding="utf-8") as f:
         json.dump(changes, f, ensure_ascii=False, indent=2)
 

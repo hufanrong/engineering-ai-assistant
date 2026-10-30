@@ -8,19 +8,25 @@ import os
 import json
 import datetime
 from typing import Optional, List, Dict
+from . import project_paths as _pp
 
 
-_ARCHIVE_FILE = os.path.join("data", "archive_enhanced.json")
-
+def _archive_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("archive_enhanced.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_archive() -> dict:
-    if os.path.exists(_ARCHIVE_FILE):
+    try:
+        _p = _archive_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_ARCHIVE_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -29,7 +35,7 @@ def _load_archive() -> dict:
 
 def _save_archive(archive: dict):
     _ensure_dirs()
-    with open(_ARCHIVE_FILE, "w", encoding="utf-8") as f:
+    with open(_archive_file_path(), "w", encoding="utf-8") as f:
         json.dump(archive, f, ensure_ascii=False, indent=2)
 
 

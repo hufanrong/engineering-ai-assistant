@@ -10,19 +10,25 @@ import json
 import hashlib
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_MERGE_FILE = os.path.join("data", "archive_merge_enhanced.json")
-
+def _merge_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("archive_merge_enhanced.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_merge() -> dict:
-    if os.path.exists(_MERGE_FILE):
+    try:
+        _p = _merge_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_MERGE_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -31,7 +37,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_MERGE_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_file_path(), "w", encoding="utf-8") as f:
         json.dump(merge, f, ensure_ascii=False, indent=2)
 
 
@@ -56,7 +62,7 @@ def _get_current_archive() -> dict:
     from . import completion_archive as _ca
     try:
         # completion_archive的存档文件
-        archive_file = os.path.join("data", "completion_archive.json")
+        archive_file = _pp.data_file_with_legacy("completion_archive.json")
         if os.path.exists(archive_file):
             with open(archive_file, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -69,8 +75,8 @@ def _write_back_archive(archive: dict):
     """v0.1.72：将合并后的竣工资料写回。"""
     from . import completion_archive as _ca
     try:
-        archive_file = os.path.join("data", "completion_archive.json")
-        os.makedirs("data", exist_ok=True)
+        archive_file = _pp.data_file_with_legacy("completion_archive.json")
+        _pp.data_dir()
         with open(archive_file, "w", encoding="utf-8") as f:
             json.dump(archive, f, ensure_ascii=False, indent=2)
     except Exception:

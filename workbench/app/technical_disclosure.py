@@ -9,19 +9,25 @@ import os
 import json
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_DISCLOSURE_FILE = os.path.join("data", "technical_disclosures.json")
-
+def _disclosure_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("technical_disclosures.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_disclosures() -> dict:
-    if os.path.exists(_DISCLOSURE_FILE):
+    try:
+        _p = _disclosure_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_DISCLOSURE_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -30,7 +36,7 @@ def _load_disclosures() -> dict:
 
 def _save_disclosures(disclosures: dict):
     _ensure_dirs()
-    with open(_DISCLOSURE_FILE, "w", encoding="utf-8") as f:
+    with open(_disclosure_file_path(), "w", encoding="utf-8") as f:
         json.dump(disclosures, f, ensure_ascii=False, indent=2)
 
 

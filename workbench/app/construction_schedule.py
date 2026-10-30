@@ -9,20 +9,29 @@ import os
 import json
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_SCHEDULE_FILE = os.path.join("data", "construction_schedule.json")
-_DEVICE_STATUS_FILE = os.path.join("data", "device_status.json")
+def _schedule_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("construction_schedule.json")
 
+def _device_status_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("device_status.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_schedule() -> dict:
-    if os.path.exists(_SCHEDULE_FILE):
+    try:
+        _p = _schedule_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_SCHEDULE_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -31,14 +40,14 @@ def _load_schedule() -> dict:
 
 def _save_schedule(schedule: dict):
     _ensure_dirs()
-    with open(_SCHEDULE_FILE, "w", encoding="utf-8") as f:
+    with open(_schedule_file_path(), "w", encoding="utf-8") as f:
         json.dump(schedule, f, ensure_ascii=False, indent=2)
 
 
 def _load_device_status() -> dict:
-    if os.path.exists(_DEVICE_STATUS_FILE):
+    if os.path.exists(_device_status_file_path()):
         try:
-            with open(_DEVICE_STATUS_FILE, "r", encoding="utf-8") as f:
+            with open(_device_status_file_path(), "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -47,7 +56,7 @@ def _load_device_status() -> dict:
 
 def _save_device_status(status: dict):
     _ensure_dirs()
-    with open(_DEVICE_STATUS_FILE, "w", encoding="utf-8") as f:
+    with open(_device_status_file_path(), "w", encoding="utf-8") as f:
         json.dump(status, f, ensure_ascii=False, indent=2)
 
 

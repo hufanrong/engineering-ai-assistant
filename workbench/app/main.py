@@ -36,6 +36,7 @@ from . import field_record
 from . import chat_parser
 from . import spatial_model
 from . import completeness_check
+from . import project_paths as _pp
 from parsers.engines import parse_file
 
 app = FastAPI(title="繁工AI 本地解析工作台", version=config.APP_VERSION)
@@ -1673,12 +1674,13 @@ def piping_build():
     from . import piping_network as _pn
     import os, json as _json
     docs = {}
-    idx_file = os.path.join("data", "index.json")
+    idx_file = _pp.data_file("index.json")
+    search_dir = _pp.data_subdir("parsed_cache", create=False)
     if os.path.exists(idx_file):
         with open(idx_file, encoding="utf-8") as f:
             idx = _json.load(f)
         for sha, info in idx.items():
-            cache_file = os.path.join("data", "parsed_cache", sha + ".json")
+            cache_file = os.path.join(search_dir, sha + ".json")
             if os.path.exists(cache_file):
                 with open(cache_file, encoding="utf-8") as f:
                     cache = _json.load(f)

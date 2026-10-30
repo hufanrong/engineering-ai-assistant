@@ -9,10 +9,12 @@ import os
 import json
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_ARCHIVE_FILE = os.path.join("data", "completion_archive.json")
-
+def _archive_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("completion_archive.json")
 
 def _archive_file() -> str:
     """竣工归档清单的存储路径（按当前项目隔离）。
@@ -33,7 +35,7 @@ def _archive_file() -> str:
             return os.path.join(ddir, "completion_archive.json")
     except Exception:  # noqa: BLE001
         pass
-    return _ARCHIVE_FILE
+    return _archive_file_path()
 
 
 def _ensure_dirs():
@@ -43,6 +45,10 @@ def _ensure_dirs():
 
 
 def _load_archive() -> dict:
+    try:
+        _p = _archive_file_path()
+    except _pp.NoProjectError:
+        return {}
     """读当前项目的竣工归档清单。
 
     项目内没有这份文件时，只有「当前无项目、退回全局路径」的情况下才去读旧全局文件；
@@ -230,7 +236,7 @@ def generate_device_archive_list(tag: str) -> dict:
     
     # 检查已有的资料（从generated_docs目录扫描）
     existing_docs = []
-    docs_dir = os.path.join("data", "generated_docs")
+    docs_dir = _pp.data_subdir("generated_docs")
     if os.path.exists(docs_dir):
         for root, dirs, files in os.walk(docs_dir):
             for f in files:

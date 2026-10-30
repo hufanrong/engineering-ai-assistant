@@ -9,20 +9,29 @@ import os
 import json
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_MERGE_LOG_FILE = os.path.join("data", "spatial_merge_log.json")
-_MERGE_PENDING_FILE = os.path.join("data", "spatial_merge_pending.json")
+def _merge_log_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("spatial_merge_log.json")
 
+def _merge_pending_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("spatial_merge_pending.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_merge_log() -> list:
-    if os.path.exists(_MERGE_LOG_FILE):
+    try:
+        _p = _merge_log_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_MERGE_LOG_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return []
@@ -31,14 +40,14 @@ def _load_merge_log() -> list:
 
 def _save_merge_log(log: list):
     _ensure_dirs()
-    with open(_MERGE_LOG_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_log_file_path(), "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=2)
 
 
 def _load_pending() -> list:
-    if os.path.exists(_MERGE_PENDING_FILE):
+    if os.path.exists(_merge_pending_file_path()):
         try:
-            with open(_MERGE_PENDING_FILE, "r", encoding="utf-8") as f:
+            with open(_merge_pending_file_path(), "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return []
@@ -47,7 +56,7 @@ def _load_pending() -> list:
 
 def _save_pending(pending: list):
     _ensure_dirs()
-    with open(_MERGE_PENDING_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_pending_file_path(), "w", encoding="utf-8") as f:
         json.dump(pending, f, ensure_ascii=False, indent=2)
 
 

@@ -10,19 +10,25 @@ import json
 import hashlib
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_MERGE_FILE = os.path.join("data", "damage_report_merge.json")
-
+def _merge_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("damage_report_merge.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_merge() -> dict:
-    if os.path.exists(_MERGE_FILE):
+    try:
+        _p = _merge_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_MERGE_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -31,7 +37,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_MERGE_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_file_path(), "w", encoding="utf-8") as f:
         json.dump(merge, f, ensure_ascii=False, indent=2)
 
 
@@ -64,7 +70,7 @@ def load_reports_from_file(file_path: str) -> dict:
 
 def _get_current_reports() -> dict:
     """v0.1.81：获取当前货损报告数据。"""
-    report_file = os.path.join("data", "damage_reports.json")
+    report_file = _pp.data_file_with_legacy("damage_reports.json")
     if os.path.exists(report_file):
         try:
             with open(report_file, "r", encoding="utf-8") as f:
@@ -76,8 +82,8 @@ def _get_current_reports() -> dict:
 
 def _write_back_reports(reports: dict):
     """v0.1.81：将合并后的货损报告写回。"""
-    report_file = os.path.join("data", "damage_reports.json")
-    os.makedirs("data", exist_ok=True)
+    report_file = _pp.data_file_with_legacy("damage_reports.json")
+    _pp.data_dir()
     with open(report_file, "w", encoding="utf-8") as f:
         json.dump(reports, f, ensure_ascii=False, indent=2)
 

@@ -10,19 +10,25 @@ import json
 import hashlib
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_MERGE_FILE = os.path.join("data", "site_log_merge.json")
-
+def _merge_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("site_log_merge.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_merge() -> dict:
-    if os.path.exists(_MERGE_FILE):
+    try:
+        _p = _merge_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_MERGE_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -31,7 +37,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_MERGE_FILE, "w", encoding="utf-8") as f:
+    with open(_merge_file_path(), "w", encoding="utf-8") as f:
         json.dump(merge, f, ensure_ascii=False, indent=2)
 
 
@@ -63,7 +69,7 @@ def load_logs_from_file(file_path: str) -> dict:
 
 def _get_current_logs() -> dict:
     """v0.1.75：获取当前施工日志数据。"""
-    log_file = os.path.join("data", "site_logs.json")
+    log_file = _pp.data_file_with_legacy("site_logs.json")
     if os.path.exists(log_file):
         try:
             with open(log_file, "r", encoding="utf-8") as f:
@@ -75,8 +81,8 @@ def _get_current_logs() -> dict:
 
 def _write_back_logs(logs: dict):
     """v0.1.75：将合并后的施工日志写回。"""
-    log_file = os.path.join("data", "site_logs.json")
-    os.makedirs("data", exist_ok=True)
+    log_file = _pp.data_file_with_legacy("site_logs.json")
+    _pp.data_dir()
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump(logs, f, ensure_ascii=False, indent=2)
 

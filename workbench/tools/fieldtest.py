@@ -764,6 +764,45 @@ def run(args):
     if new_id:
         RESULT["projects"].append({"role": "isolation", "id": new_id})
         call("POST", "/api/projects/switch", {"project_id": new_id})
+        RUN_START_TS = time.time()
+        # v0.1.176：24 个模块的业务数据必须隔离到项目目录。
+        # 光看「文件路径不同」不算证据——要在新项目里真读一次，确认读不到别人的。
+        iso_probe = [
+            ("施工日志", "/api/site-log/list", "logs", "site_logs.json"),
+            ("隐蔽验收", "/api/concealment-record/list", "records", "concealment_records.json"),
+            ("吊装方案", "/api/lifting-plan/list", "plans", "lifting_plans.json"),
+            ("安装方案", "/api/installation-plan/list", "plans", "installation_plans.json"),
+        ]
+        iso_detail = []
+        iso_all_zero = True
+        for label, list_path, key, fname in iso_probe:
+            _, lb, _e = call("GET", list_path)
+            n = len((lb or {}).get(key) or [])
+            iso_detail.append(f"{label}={n}")
+            metric(f"iso_{fname.replace('.json', '')}_count", n)
+            if n != 0:
+                iso_all_zero = False
+            # 新项目里这个文件不应该存在（读的时候不能凭空建出来）
+            fp = os.path.join(project_dir(new_id), fname)
+            if os.path.exists(fp):
+                iso_detail.append(f"{label}文件已存在")
+        rec("业务数据不承接其他项目",
+            "新项目里施工日志/隐蔽/吊装/安装方案记录数均为 0（旧版会读到上个项目的）",
+            "；".join(iso_detail), iso_all_zero)
+
+        # 本轮不许再往全局 data/ 写这些文件
+        gdir = data_dir()
+        stray = []
+        for _, _, _, fname in iso_probe:
+            gp = os.path.join(gdir, fname)
+            try:
+                if os.path.exists(gp) and os.path.getmtime(gp) > RUN_START_TS:
+                    stray.append(fname)
+            except Exception:  # noqa: BLE001
+                pass
+        rec("业务数据不写全局 data", "本轮新写入不落全局 data/（旧版全部写这里）",
+            ("本轮写入全局的：" + "、".join(stray)) if stray else "无", not stray)
+
         _, st_b, _ = call("GET", "/api/completion-archive/stats")
         dev_b = (st_b or {}).get("total_devices")
         _, rm_b, _ = call("GET", "/api/completion-archive/missing")

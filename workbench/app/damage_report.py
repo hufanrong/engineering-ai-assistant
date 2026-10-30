@@ -10,19 +10,25 @@ import os
 import json
 import datetime
 from typing import Optional
+from . import project_paths as _pp
 
 
-_REPORT_FILE = os.path.join("data", "damage_reports.json")
-
+def _report_file_path() -> str:
+    """v0.1.176：当前项目内的数据文件路径（跨项目隔离）。"""
+    return _pp.data_file_with_legacy("damage_reports.json")
 
 def _ensure_dirs():
-    os.makedirs("data", exist_ok=True)
+    _pp.data_dir()
 
 
 def _load_reports() -> dict:
-    if os.path.exists(_REPORT_FILE):
+    try:
+        _p = _report_file_path()
+    except _pp.NoProjectError:
+        return {}
+    if os.path.exists(_p):
         try:
-            with open(_REPORT_FILE, "r", encoding="utf-8") as f:
+            with open(_p, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -31,7 +37,7 @@ def _load_reports() -> dict:
 
 def _save_reports(reports: dict):
     _ensure_dirs()
-    with open(_REPORT_FILE, "w", encoding="utf-8") as f:
+    with open(_report_file_path(), "w", encoding="utf-8") as f:
         json.dump(reports, f, ensure_ascii=False, indent=2)
 
 
