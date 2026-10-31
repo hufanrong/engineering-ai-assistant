@@ -182,6 +182,14 @@ def _item_category(it):
     name = (it.get('名称') or '').strip()
     if cls == 'C' or name in COLLECT_ONLY or any(k in name for k in ['监理旁站', '影像', '照片']):
         return 'C'
+    # v0.1.183（用户决策）：先查**显式别名表**。
+    # 实测「设备安装记录」（SH/T3503-J302）在 7 个真实项目里都认不出：
+    # 与「设备安装检查记录」「设备内件安装记录」的相似度都是 0.8571（并列第一、
+    # 差值为 0），相似度层按「多个候选一律不猜」必然拒绝。别名是人确认过的对应关系，
+    # 只查表、不猜。用户指示：没提供模板时就用现有的检查记录表。
+    _alias = st._gb.alias_category(name)
+    if _alias:
+        return _alias
     cat = st._categorize(name)
     if cat != '其他':
         return cat
@@ -416,11 +424,15 @@ def _write_boxing_list(project_id, book, results):
 # 整卷合并时要跨车间的列表键。顺序无关，只用于「先建空列表再追加」。
 MERGE_LIST_KEYS = ('generated', 'todo', 'errors', 'collect_dir',
                    'todo_fields', 'empty_shells', 'skipped_device_forms',
-                   'type_fallback')
+                   'type_fallback',
+                   # v0.1.183：别名复用 + 国标兜底两本新账，同样必须跨车间合并，
+                   # 否则整卷视图又会和逐车间合计对不上（v0.1.182 修过一次同类缺陷）。
+                   'gb_fallback', 'name_alias')
 
 # 「原因」之外的判别字段：不同列表的行形状不同，同车间同序号同名时
 # 只能靠这些字段区分到底是不是同一条。
-_ROW_SIG_FIELDS = ('文件', '待补字段', '借用情况', '未覆盖设备', '目录')
+_ROW_SIG_FIELDS = ('表号', '文件', '待补字段', '借用情况', '借用表',
+                   '未覆盖设备', '目录')
 
 
 def _row_sig(k, row):
@@ -606,7 +618,9 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
         _dev_info = {'devices': 0, 'error': str(e)}
     vol = _volume_dir(project_id, book, workshop)
     os.makedirs(vol, exist_ok=True)
-    results = {'ok': True, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': []}
+    results = {'ok': True, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
+               # v0.1.183：别名复用 / 国标兜底两本账（写进待办清单供人工复核）
+               'gb_fallback': [], 'name_alias': [], 'gb_blank': []}
     # v0.1.180：**材料车间跳过设备类表单**（用户决策）。
     # 实测依据：尾矿库 4 行全是复合土工膜 / HDPE管 / 长丝无纺土工布（单位 m2、米），
     # 它们不是设备，按设备逐台出「设备安装检查记录」监理不会收。
@@ -633,14 +647,50 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                 '序号': seq, '名称': name, '目录': d, '目录名': os.path.basename(d)})
             continue
         if not cat:
-            _why = '无匹配模板，需人工确认表类型'
-            if cls == 'B':
-                # v0.1.178：B 类本身就是「生成+待补列清单」，模板未建是正常待办，
-                # 不是错误。记进 errors 会让整卷的失败数虚高。
-                results['todo'].append({'序号': seq, '名称': name, '原因': _why})
-            else:
-                results['errors'].append({'序号': seq, '名称': name, '原因': _why})
-                results['todo'].append({'序号': seq, '名称': name, '原因': _why})
+            # v0.1.183（用户决策）：没有对应模板时，**统一按国标通用格式制作**，
+            # 不再只丢一句「无匹配模板」就把登记项挂起来。
+            # 材料车间照旧跳过设备类表单（前一轮决策），不在这里出表。
+            if results['material_workshop']:
+                _units = sorted({str(d.get('unit') or '').strip()
+                                 for d in _ws_devs if d.get('unit')})
+                _msg = (f"该车间台账 {len(_ws_devs)} 行全为材料"
+                        f"（单位：{'、'.join(_units) or '未知'}），非设备，已跳过设备类表单")
+                results['skipped_device_forms'].append(
+                    {'序号': seq, '名称': name, '原因': _msg})
+                results['todo'].append({'序号': seq, '名称': name, '原因': _msg,
+                                        '_skip_material': True})
+                continue
+            _no = str(it.get('表号') or '').strip()
+            _r = st.render_gb_fallback(
+                category=name, workshop=workshop or '全厂', project_id=project_id,
+                form_no=_no, display_name=name,
+                reason='模板库无对应模板，按国标通用格式生成')
+            if not _r.get('ok'):
+                _reason = _r.get('error') or '国标表生成失败'
+                results['errors'].append({'序号': seq, '名称': name, '原因': _reason})
+                results['todo'].append({'序号': seq, '名称': name, '原因': _reason})
+                continue
+            src_path = _r.get('output_path') or ''
+            _safe_name = re.sub(r'[\\/:*?"<>|]', '', name)[:50]
+            dst = os.path.join(vol, f'{seq}_{_safe_name}.docx')
+            if src_path and os.path.exists(src_path):
+                os.replace(src_path, dst)
+            results['gb_fallback'].append({
+                '序号': seq, '名称': name, '表号': _no,
+                '文件': os.path.basename(dst),
+                '设备数': _r.get('device_count', 0),
+                '检查项数': _r.get('check_item_count', 0),
+                '原表': '国标通用格式',
+                '原因': '模板库无对应模板',
+            })
+            results['generated'].append(
+                {'序号': seq, '名称': name, '文件': os.path.basename(dst)})
+            if _r.get('gb_blank'):
+                results.setdefault('gb_blank', []).append(
+                    {'序号': seq, '名称': name})
+            uf = _r.get('unfilled_fields') or []
+            if uf:
+                todo_fields.append({'序号': seq, '名称': name, '待补字段': uf})
             continue
         # v0.1.180：材料车间不出设备类记录 —— 记进待办清单（写明原因），不算错误
         if results['material_workshop'] and cat not in ('C',):
@@ -672,6 +722,24 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
         if r.get('type_fallback'):
             results.setdefault('type_fallback', []).append({
                 '序号': seq, '名称': name, '借用情况': r.get('type_fallback')})
+        # v0.1.183：类别认出来了、但模板库里没有这张表 → render_supervision_doc
+        # 已回落成国标通用格式。这里必须记账，否则人工复核看不出这张是兜底表。
+        if r.get('gb_fallback'):
+            results.setdefault('gb_fallback', []).append({
+                '序号': seq, '名称': name, '表号': str(it.get('表号') or '').strip(),
+                '文件': '',   # 下面按最终落盘名回填
+                '设备数': r.get('device_count', 0),
+                '检查项数': r.get('check_item_count', 0),
+                '原表': '国标通用格式',
+                '原因': (r.get('warning') or '模板库无对应模板'),
+                '_待回填': True,
+            })
+        # v0.1.183：别名复用 —— 用的是现有模板，但归档口径变了，待办清单要写明。
+        if not r.get('gb_fallback'):
+            _al = st._gb.alias_category(name)
+            if _al and _al != name:
+                results.setdefault('name_alias', []).append({
+                    '序号': seq, '名称': name, '借用表': _al})
         # 移动生成文件到卷目录
         src = os.path.join(_proj_root(project_id), 'exports', r['output_file'])
         _safe_name = re.sub(r'[\\/:*?"<>|]', '', name)[:50]
@@ -679,6 +747,10 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
         if os.path.exists(src):
             os.replace(src, dst)
         results['generated'].append({'序号': seq, '名称': name, '文件': os.path.basename(dst)})
+        for _g in (results.get('gb_fallback') or []):
+            if _g.get('_待回填') and _g.get('序号') == seq:
+                _g['文件'] = os.path.basename(dst)
+                _g.pop('_待回填', None)
         uf = r.get('unfilled_fields') or []
         if uf:
             todo_fields.append({'序号': seq, '名称': name, '待补字段': uf})
@@ -688,7 +760,9 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                            results.get('empty_shells', []), results.get('type_fallback', []),
                            workshop=workshop,
                            skipped_device_forms=results.get('skipped_device_forms'),
-                           material_workshop=results.get('material_workshop', False))
+                           material_workshop=results.get('material_workshop', False),
+                           gb_fallback=results.get('gb_fallback'),
+                           name_alias=results.get('name_alias'))
     todo_path = os.path.join(vol, '_待办清单.md')
     with open(todo_path, 'w', encoding='utf-8') as f:
         f.write(todo_md)
@@ -761,7 +835,8 @@ def is_material_workshop(devices) -> bool:
 
 
 def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=None, workshop='',
-                 skipped_device_forms=None, material_workshop=False):
+                 skipped_device_forms=None, material_workshop=False,
+                 gb_fallback=None, name_alias=None):
     lines = ['# 整编待办清单', '', f'生成时间：{__import__("datetime").datetime.now():%Y-%m-%d %H:%M}',
              f'车间：{workshop or "全厂"}', '']
     if empty_shells:
@@ -799,6 +874,25 @@ def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=No
                          f'不是设备，按用户决策跳过设备类表单')
         for t in skipped_device_forms:
             lines.append(f"- {t['序号']} {t['名称']}：{t.get('原因')}")
+    if name_alias:
+        # v0.1.183：登记表写的是国标正式表名，系统里没有同名模板，按用户决策
+        # 复用了现有的检查记录表。归档口径变了，人工复核必须能一眼看到。
+        lines.append('')
+        lines.append('## 〇之四、复用现有表（登记表表名与模板名不同，已按对应关系出表）')
+        for t in name_alias:
+            lines.append(f"- {t['序号']} {t['名称']}：用「{t.get('借用表')}」的表出记录"
+                         f"（没提供该表模板，按现有检查记录表制作）")
+    if gb_fallback:
+        lines.append('')
+        lines.append('## 〇之五、按国标通用格式生成（模板库无对应模板）')
+        for t in gb_fallback:
+            _no = f"表号 {t.get('表号')}" if t.get('表号') else '无表号'
+            _d = f"，{t.get('设备数')} 台" if t.get('设备数') else ''
+            lines.append(f"- {t['序号']} {t['名称']}：{_no}，已按国标通用格式出表"
+                         f"（检查项 {t.get('检查项数')} 条{_d}）；"
+                         f"需补专用表时再重新生成")
+            if t.get('文件'):
+                lines.append(f"  文件：{t['文件']}")
     if todo_fields:
         lines.append('## 一、B 类预填，待人工补充实测数据')
         for t in todo_fields:
@@ -814,7 +908,8 @@ def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=No
         lines.append('## 三、生成失败')
         for t in errors:
             lines.append(f"- {t['序号']} {t['名称']}：{t.get('原因')}")
-    if not todo_fields and not todos and not errors and not empty_shells and not type_fallback:
+    if (not todo_fields and not todos and not errors and not empty_shells
+            and not type_fallback and not gb_fallback and not name_alias):
         lines.append('（无待办项，全部完成）')
     return '\n'.join(lines)
 

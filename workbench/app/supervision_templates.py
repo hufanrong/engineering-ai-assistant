@@ -28,6 +28,7 @@ import copy
 from typing import Optional, Dict, List
 from zipfile import ZipFile
 import zipfile
+from . import gb_form as _gb
 from lxml import etree
 
 from . import config
@@ -876,6 +877,16 @@ def render_supervision_doc(category: str = "", workshop: str = "",
     _ensure_builtin_registered()
     index = _te._load_template_index()
 
+    # v0.1.183：入口先解别名。
+    # 实测缺陷：直接以「设备安装记录」调用时，下面的子串回退会命中外
+    # 「防爆电气设备安装记录」（它包含「设备安装记录」这六个字），
+    # 唯一候选 → 静默选中，出的表与用户要的完全不是一张。
+    # 别名是人确认过的对应关系，必须排在所有猜测规则之前。
+    req_category = category
+    _alias = _gb.alias_category(category) if category else None
+    if _alias:
+        category = _alias
+
     # 找该表类型的车间级模板（docx 或 xlsx）
     chosen = None
     cats = {}
@@ -904,9 +915,21 @@ def render_supervision_doc(category: str = "", workshop: str = "",
                     "candidates": sorted(_hits, key=len),
                     "available_categories": sorted(cats)}
     if not chosen:
-        return {"ok": False, "error": f"未找到表类型「{category}」的模板",
-                "available": sorted(cats) or [c for c, _ in CATEGORY_KEYWORDS],
-                "available_categories": sorted(cats)}
+        # v0.1.183（用户决策）：没有模板时按国标通用格式生成，不再一律报错。
+        # 原实现直接返回「未找到表类型」，用户在前端点了也拿不到文件，
+        # 而登记表里写的是国标正式表名，用户填得完全正确 —— 不能怪用户。
+        if not category:
+            return {"ok": False, "error": "未指定表类型",
+                    "available_categories": sorted(cats)}
+        _r = render_gb_fallback(category=category, workshop=workshop,
+                                project_id=project_id,
+                                display_name=category,
+                                reason=f"模板库无「{category}」的模板，按国标通用格式生成")
+        if _r.get('ok'):
+            _r['warning'] = (f"模板库无「{category}」的模板，已按国标通用格式生成；"
+                             f"如需专用表请补模板后重新生成")
+            _r['available_categories'] = sorted(cats)
+        return _r
 
     # 模板文件路径
     tpl_file = chosen.get("file_name", "")
@@ -983,7 +1006,7 @@ def render_supervision_doc(category: str = "", workshop: str = "",
         pass
 
     filled_fields = [k for k, v in fill.items() if v]
-    return {
+    _res = {
         "ok": True,
         "output_path": out_path,
         "output_file": out_name,
@@ -999,6 +1022,11 @@ def render_supervision_doc(category: str = "", workshop: str = "",
         "filled_fields": filled_fields,
         "unfilled_fields": result['unfilled_fields'],
     }
+    if _alias and _alias != (req_category or ''):
+        # 别名复用：调用方要能看出「要的是 A，实际用的是 B」，
+        # 否则待办清单与卷目录对不上账。
+        _res['name_alias'] = {"请求": req_category, "借用表": _alias}
+    return _res
 
 
 def _render_xlsx(template_path: str, fill: Dict, devices: List[Dict],
@@ -1132,6 +1160,72 @@ def _render_xlsx(template_path: str, fill: Dict, devices: List[Dict],
         "filled_fields": sorted(filled),
         "unfilled_fields": sorted(unfilled),
         "device_count": len(devices),
+    }
+
+
+def render_gb_fallback(category: str = "", workshop: str = "",
+                        project_id: str = None,
+                        form_no: str = "",
+                        display_name: str = "",
+                        reason: str = "") -> Dict:
+    """无模板时按国标通用格式生成表（v0.1.183，用户决策）。
+
+    与 render_supervision_doc 的区别：不依赖模板库，直接按国标表格式构建 docx。
+    返回结构与 render_supervision_doc 兼容，并额外带 `gb_fallback: True`，
+    调用方（整卷 / 待办清单）据此把钱花在哪张表上记清楚，人工复核能捞出来。
+
+    **一台设备一份表**；车间台账为空时出一份空白表交人工填写，
+    并在 `gb_blank` 里标记，不与「模板对不上设备」的空壳混为一谈。
+    """
+    from . import project_manager as _pm
+    fill = _load_project_config(project_id)
+    devices = _get_workshop_devices(workshop, project_id) if workshop else []
+    _ws = workshop or '全厂'
+    _sub = (fill.get('分部工程') or '').strip()
+
+    data_dir = _pm.get_project_data_dir(project_id)
+    exports_dir = os.path.join(data_dir, "exports")
+    os.makedirs(exports_dir, exist_ok=True)
+    _safe = re.sub(r'[\\/:*?"<>|]', '', (display_name or category or '国标表'))[:40]
+    out_name = (f"{_safe}_{_ws}_"
+                f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx")
+    out_path = os.path.join(exports_dir, out_name)
+
+    r = _gb.build_gb_form(
+        out_path,
+        form_name=display_name or category,
+        form_no=form_no,
+        unit_works=(fill.get('单位工程') or ''),
+        sub_works=_sub,
+        workshop=_ws,
+        devices=devices,
+        category=category,
+        standard=(fill.get('标准编号') or ''),
+    )
+    if not r.get('ok'):
+        return {"ok": False, "error": r.get('error') or '国标表生成失败'}
+
+    return {
+        "ok": True,
+        "output_path": out_path,
+        "output_file": out_name,
+        "category": category,
+        "workshop": _ws,
+        "device_count": len(devices),
+        "filled_tables": len(devices) or 1,
+        "skipped_tables": [],
+        "empty_tables": [],
+        "covered_devices": [d.get('tag') or d.get('name') for d in devices],
+        "uncovered_devices": [],
+        "type_fallback": [],
+        # v0.1.183 兜底标识：不是走模板库出的表
+        "gb_fallback": True,
+        "gb_form_no": form_no,
+        "gb_reason": reason,
+        "gb_blank": not devices,
+        "filled_fields": [k for k, v in fill.items() if v],
+        "unfilled_fields": ["设备位号", "检查情况", "检查结果"],
+        "check_item_count": r.get('check_item_count', 0),
     }
 
 

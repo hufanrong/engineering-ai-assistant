@@ -1113,10 +1113,10 @@ def supervision_collect(req: CollectReq):
 # ---------- 整编要求登记表导入（v0.1.168） ----------
 # 整卷生成依赖这份登记表，但此前既没有随包提供、也没有导入入口。
 @app.get("/api/supervision/registry")
-def supervision_registry_info():
+def supervision_registry_info(project_id: str = ""):
     """登记表当前状态：是否可用、条目数、各册分布、字段完整度。"""
     try:
-        return {"ok": True, "registry": si.registry_info()}
+        return {"ok": True, "registry": si.registry_info(project_id or None)}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"读取登记表状态失败：{e}")
 

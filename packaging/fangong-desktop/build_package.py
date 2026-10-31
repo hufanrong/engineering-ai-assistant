@@ -250,7 +250,10 @@ def main():
                  # v0.1.182 回归：整卷聚合计数 + 模板索引并发写。这两个测试是
                  # 本轮两个真实缺陷的守卫，必须随包分发，WORKbuddy 现场可复跑。
                  "tools/test_merge_agg.py", "tools/test_template_concurrency.py",
-                 "tools/test_ledger_units.py")]
+                 "tools/test_ledger_units.py",
+                 # v0.1.183 回归：表名别名（J302 借用检查记录表）+ 无模板时按国标
+                 # 通用格式兜底。这两个是监理登记表现场直接踩到的缺口，必须能现场复跑。
+                 "tools/test_gb_fallback.py")]
         for m in must:
             if m not in names:
                 problems.append(f"缺文件：{m}")

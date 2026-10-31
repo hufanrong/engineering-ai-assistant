@@ -1,87 +1,87 @@
 # 繁工AI 本地实测报告
 
-- 时间：2026-10-30 23:18:08
-- 版本：0.1.178
+- 时间：2026-10-31 21:47:57
+- 版本：0.1.183
 - 系统：Linux-6.6.95.bck.3-amd64-x86_64-with-glibc2.35
-- 输入：台账=设备台账_实测.xlsx 登记表=整编要求登记表_实测.xlsx 资料目录=未提供
-- 结果：通过 28 / 失败 0 / 跳过 2
+- 输入：台账=3b408663b2c0_设备台账_真实_选矿厂.xlsx 登记表=内置最小表 资料目录=未提供
+- 结果：通过 27 / 失败 0 / 跳过 2
 
 ## 关键数字
 
-- version：0.1.178
-- version_config_py：0.1.178
-- test_project_id：6d3513cd
-- devices_from_ledger_api：3
+- version：0.1.183
+- version_config_py：0.1.183
+- test_project_id：5b687099
+- devices_from_ledger_api：228
 - devices_device_workshop：0
 - docgen_types：["施工方案", "吊装方案", "技术交底", "开箱验收记录", "隐蔽工程验收记录", "施工计划", "施工日志", "设计变更", "货损报告", "竣工资料"]
-- prefill_devices：3
-- docgen_docx_bytes：37672
+- prefill_devices：0
+- docgen_docx_bytes：37675
 - docgen_has_placeholder：false
 - registry_total：3
-- registry_books：{"设备安装": 3}
+- registry_books：{"第一册": 3}
 - registry_class_counts：null
-- volume_generated：3
-- volume_todo：3
-- volume_collect：0
-- volume_errors：1
-- volume_empty_shells：1
-- volume_device_source：{"devices": 3, "with_workshop": 3, "sources": [], "workshops": ["1号车间", "2号车间"]}
+- volume_generated：36
+- volume_todo：2
+- volume_collect：19
+- volume_errors：0
+- volume_empty_shells：0
+- volume_device_source：{"devices": 228, "with_workshop": 228, "sources": [], "workshops": ["中矿堆", "其他辅助设备", "尾矿库", "尾矿输送", "总图", "水源取水", "矿浆缓存系统", "破碎车间", "磨浮车间", "筛分车间", "粉矿堆", "粗碎站", "精矿堆场", "脱水车间", "药剂制备车间", "辊磨筛分车间", "重介质选矿车间", "重选车间", "高压辊磨车间"], "skipped_rows": 20}
 - volume_error_text：
 - volume_accounted：3
-- volume_files_landed：3
+- volume_files_landed：36
 - volume_files_missing：0
 - volume_files_outside_project：0
-- volume_landed_paths：["volumes/设备安装/1号车间/1_设备开箱检验记录.docx", "volumes/设备安装/1号车间/2_单机无负荷试运转记录.docx", "volumes/设备安装/1号车间/1_设备开箱检验记录.docx"]
+- volume_landed_paths：["volumes/第一册/中矿堆/1_设备开箱检查记录.docx", "volumes/第一册/中矿堆/2_设备安装检查记录.docx", "volumes/第一册/中矿堆/1_设备开箱检查记录.docx", "volumes/第一册/中矿堆/2_设备安装检查记录.docx", "volumes/第一册/中矿堆/1_设备开箱检查记录.docx", "volumes/第一册/中矿堆/2_设备安装检查记录.docx", "volumes/第一册/中矿堆/1_设备开箱检查记录.docx", "volumes/第一册/中矿堆/2_设备安装检查记录.docx", "volumes/第一册/中矿堆/1_设备开箱检查记录.docx", "volumes/第一册/中矿堆/2_设备安装检查记录.docx"]
 - volume_openable_docx：3
 - volume_residual_placeholders：0
 - volume_residual_files：[]
-- volume_pending_marks：32
-- catalog_row_count：3
-- catalog_rows：[["1", "1_设备开箱检验记录.docx", "设备开箱检验记录", "SH/T3503-J301", "1-9", "【待补充】"], ["2", "2_单机无负荷试运转记录.docx", "单机无负荷试运转记录", "SH/T3503-J303", "10-24", "【待补充】"], ["3", "—", "设备安装记录", "SH/T3503-J302", "—", "尚未生成"]]
-- catalog_seq_order：["1", "2", "3"]
+- volume_pending_marks：1188
+- catalog_row_count：2
+- catalog_rows：[["1", "1_设备开箱检查记录.docx", "设备开箱检查记录", "JL-01", "1-15", "【待补充】"], ["2", "2_设备安装检查记录.docx", "设备安装检查记录", "JL-02", "16-30", "【待补充】"]]
+- catalog_seq_order：["1", "2"]
 - catalog_pages_uncalculated：0
-- catalog_page_cells：["1-9", "10-24"]
-- boxing_rows：2
-- boxing_sample：[["第1盒", "设备安装", "1号车间", 2, 24, "渲染实测", 0, "设备安装／1号车间／共2件", null], ["第2盒", "设备安装", "2号车间", 1, 9, "渲染实测", 0, "设备安装／2号车间／共1件", null]]
-- todo_md_chars：357
+- catalog_page_cells：["1-15", "16-30"]
+- boxing_rows：19
+- boxing_sample：[["第1盒", "第一册", "中矿堆", 2, 30, "渲染实测", 0, "第一册／中矿堆／共2件", null], ["第2盒", "第一册", "其他辅助设备", 2, 22, "渲染实测", 0, "第一册／其他辅助设备／共2件", null], ["第3盒", "第一册", "尾矿库", 0, "未计算", "未计算", 0, "第一册／尾矿库／共0件", "页数未计算时脊背标签先不印页数"]]
+- todo_md_chars：595
 - todo_md_has_counts：{"待补字段": 2, "错误": 0}
-- completion_total_devices：3
+- completion_total_devices：228
 - archive_zip_files：4
 - iso_site_logs_count：0
 - iso_concealment_records_count：0
 - iso_lifting_plans_count：0
 - iso_installation_plans_count：0
-- project_file_count：13
+- project_file_count：15
 
 ## 逐步结果
 
-- [PASS] **环境 / 工作台可达**：200 version=0.1.178
-- [PASS] **环境 / 版本号与代码一致**：api=0.1.178 config=0.1.178
-- [PASS] **环境 / 输入材料**：台账=设备台账_实测.xlsx (5233 字节)
-- [PASS] **环境 / 登记表来源**：整编要求登记表_实测.xlsx
-- [PASS] **建项目并导入台账 / 新建项目**：200 id=6d3513cd
+- [PASS] **环境 / 工作台可达**：200 version=0.1.183
+- [PASS] **环境 / 版本号与代码一致**：api=0.1.183 config=0.1.183
+- [PASS] **环境 / 输入材料**：台账=3b408663b2c0_设备台账_真实_选矿厂.xlsx (18031 字节)
+- [SKIP] **环境 / 登记表来源**：内置最小表
+  - 证据：这轮不能证明 214 项真实登记表的解析结果，只证明链路通
+- [PASS] **建项目并导入台账 / 新建项目**：200 id=5b687099
 - [PASS] **建项目并导入台账 / 台账上传解析**：200 status=parsed parser=excel err=; 向量化失败: No module named 'sentence_transformers'
-- [PASS] **建项目并导入台账 / 台账设备识别**：project.device_count=3 device_workshop=0
+- [PASS] **建项目并导入台账 / 台账设备识别**：project.device_count=228 device_workshop=0
 - [PASS] **资料生成 / 可生成资料类型**：10 类 ['施工方案', '吊装方案', '技术交底', '开箱验收记录', '隐蔽工程验收记录']
-- [PASS] **资料生成 / 按车间预填**：200 devices=3
-- [PASS] **资料生成 / 生成 Word 成品**：size=37672 entries=17 document.xml=4122 字节
-- [PASS] **整编登记表与整卷 / 导入整编要求登记表**：200 ready=True total=3 books={'设备安装': 3}
-- [PASS] **整编登记表与整卷 / 一键整卷**：200 生成=3 待办=3 归集=0 错=1 空壳=1
-- [SKIP] **整编登记表与整卷 / 空壳拦截**：1 项：[{"序号": "2", "名称": "单机无负荷试运转记录", "未覆盖设备": [{"位号": "P-101", "名称": "离心泵", "设备类型": "泵"}], "空表类型": ["平板闸门", "振动筛", "电动葫芦", "渣浆泵", "液下渣浆泵", "微雾抑尘"]}]
-- [PASS] **整编登记表与整卷 / 整卷文件落盘**：落盘 3/3，找不到 0，落在项目外 0
-- [PASS] **整编登记表与整卷 / 成品可打开**：3/3 个可读 样例 7185 字节
-- [PASS] **整编登记表与整卷 / 成稿无模板变量残留**：残留 0 处（0 个文件）；【待补充】标记 32 处
+- [PASS] **资料生成 / 按车间预填**：200 devices=0
+- [PASS] **资料生成 / 生成 Word 成品**：size=37675 entries=17 document.xml=4123 字节
+- [PASS] **整编登记表与整卷 / 导入整编要求登记表**：200 ready=True total=3 books={'第一册': 3}
+- [PASS] **整编登记表与整卷 / 一键整卷**：200 生成=36 待办=2 归集=19 错=0 空壳=0
+- [PASS] **整编登记表与整卷 / 整卷文件落盘**：落盘 36/36，找不到 0，落在项目外 0
+- [PASS] **整编登记表与整卷 / 成品可打开**：3/3 个可读 样例 9481 字节
+- [PASS] **整编登记表与整卷 / 成稿无模板变量残留**：残留 0 处（0 个文件）；【待补充】标记 1188 处
 - [PASS] **整编登记表与整卷 / 卷内目录与装盒成套**：找到 3/3：['_卷内目录.docx', '_案卷封面.docx', '_卷内备考表.docx']
-- [PASS] **整编登记表与整卷 / 卷内目录序号有序**：序号 ['1', '2', '3']
-- [PASS] **整编登记表与整卷 / 页次为渲染实测**：2 格有页次，0 格标未计算；样例 ['1-9', '10-24']
-- [PASS] **整编登记表与整卷 / 装盒清单**：2 行：[['第1盒', '设备安装', '1号车间', 2, 24, '渲染实测', 0, '设备安装／1号车间／共2件', None]]
-- [PASS] **整编登记表与整卷 / 待办清单**：volumes/设备安装/1号车间/_待办清单.md
-- [PASS] **竣工归档 / 一键竣工**：200 total_devices=3
-- [PASS] **竣工归档 / 竣工统计自洽**：stats=3 vs all=3
-- [PASS] **竣工归档 / 导出成套资料**：size=42143 files=4
+- [PASS] **整编登记表与整卷 / 卷内目录序号有序**：序号 ['1', '2']
+- [PASS] **整编登记表与整卷 / 页次为渲染实测**：2 格有页次，0 格标未计算；样例 ['1-15', '16-30']
+- [PASS] **整编登记表与整卷 / 装盒清单**：19 行：[['第1盒', '第一册', '中矿堆', 2, 30, '渲染实测', 0, '第一册／中矿堆／共2件', None]]
+- [PASS] **整编登记表与整卷 / 待办清单**：volumes/第一册/中矿堆/_待办清单.md
+- [PASS] **竣工归档 / 一键竣工**：200 total_devices=228
+- [PASS] **竣工归档 / 竣工统计自洽**：stats=228 vs all=228
+- [PASS] **竣工归档 / 导出成套资料**：size=47639 files=4
 - [PASS] **跨项目隔离 / 业务数据不承接其他项目**：施工日志=0；隐蔽验收=0；吊装方案=0；安装方案=0
 - [PASS] **跨项目隔离 / 业务数据不写全局 data**：无
-- [PASS] **跨项目隔离 / 新项目不承接旧清单**：total_devices=0 missing=0（对照原项目 3 台）
+- [PASS] **跨项目隔离 / 新项目不承接旧清单**：total_devices=0 missing=0（对照原项目 228 台）
 - [SKIP] **跨项目隔离 / 新项目整卷只写自己目录**：生成 0 落本项目 0
-- [PASS] **跨项目隔离 / 切回后数据仍在**：切回=3（应为 3）
+- [PASS] **跨项目隔离 / 切回后数据仍在**：切回=228（应为 228）
 - [PASS] **跨项目隔离 / 无项目时不写全局目录**：不存在

@@ -1,15 +1,15 @@
 {
   "tool": "verify_install",
-  "generated_at": "2026-10-30 23:18:16",
+  "generated_at": "2026-10-31 08:09:19",
   "install_dir": "/home/gem/.aily/workdir/task_7702014996544277777/repo/workbench",
   "python": "3.10.12 (main, Jan 26 2026, 14:55:28) [GCC 11.4.0]",
   "python_exe": "/usr/bin/python3",
   "platform": "Linux-6.6.95.bck.3-amd64-x86_64-with-glibc2.35",
-  "version": "0.1.178",
+  "version": "0.1.179",
   "template_count": 121,
   "missing_core_deps": [],
   "summary": {
-    "passed": 7,
+    "passed": 9,
     "failed": 0,
     "skipped": 2
   },
@@ -38,7 +38,7 @@
     {
       "step": "版本号一致",
       "expected": "config.APP_VERSION == FastAPI version",
-      "actual": "config=0.1.178 api=0.1.178",
+      "actual": "config=0.1.179 api=0.1.179",
       "passed": true,
       "evidence": ""
     },
@@ -73,9 +73,23 @@
     {
       "step": "端口状态",
       "expected": "端口 8756 可用 或 服务已在跑（都算正常）",
-      "actual": "空闲",
+      "actual": "已被占用/服务已在运行",
       "passed": null,
       "evidence": "被占用时确认是不是上一次没关掉的工作台；不是的话改 app/config.py 的 PORT"
+    },
+    {
+      "step": "在线健康检查",
+      "expected": "GET /api/status 200 且 version 非空",
+      "actual": "200 version=0.1.179",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "step": "首页可打开",
+      "expected": "200 且返回完整 HTML（>= 随包 index.html 的 80%，下限 155794）",
+      "actual": "200 bytes=194743 随包=194743",
+      "passed": true,
+      "evidence": ""
     }
   ]
 }
