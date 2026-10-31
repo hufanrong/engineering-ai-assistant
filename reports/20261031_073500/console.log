@@ -1,0 +1,20 @@
+===== 第 1 轮：带 PULL（20261031_071724），rc=1 无报告 =====
+[2026-10-31 07:17:24] ===== 本轮开始 20261031_071724，本地 a1a7b1fdb21c =====
+[2026-10-31 07:17:42] 远端有 3 个新提交，拉取
+
+===== 第 2 轮：--no-pull（20261031_072322），正常回传 79b4c39 =====
+[2026-10-31 07:23:22] ===== 本轮开始 20261031_072322，本地 a5238fe74d4e =====
+[2026-10-31 07:23:23] --no-pull：跳过拉取，直接用当前本地代码
+[2026-10-31 07:25:42] 本轮结束 status=failed 报告在 reports/20261031_072322/
+
+===== 受控探针：pull_latest() 对空目录的影响（第一次完整输出）=====
+probe exists before: True
+pull ok = True
+   git stash（保住本地改动） rc= 0  Saved working directory and index state On main: wb_loop auto-stash ...
+   git fetch                      rc= 0
+   快进到 origin/main             rc= 0  Already up to date.
+   git stash pop                  rc= 0  On branch main
+probe exists after : False        <- 空目录被清掉，pop 不恢复
+
+===== 第二次复跑同一探针（07:36），在 stash 阶段被沙箱保护终止 =====
+probe exists before: True
