@@ -290,7 +290,21 @@ def _device_type_of(equipment: str) -> str:
 # ---------------- 模板注册 ----------------
 
 def _ensure_builtin_registered() -> int:
-    """扫描 templates_builtin/ 把未注册的 docx/xlsx 注册进模板索引。幂等。"""
+    """扫描 templates_builtin/ 把未注册的 docx/xlsx 注册进模板索引。幂等。
+
+    v0.1.182：整段在 _te._INDEX_LOCK 内执行。原来它自己直接
+    `_load_template_index()` / `_save_template_index(index)` 做「读—改—写」，
+    与 upload_template 的写入互不互斥：整卷 3 路并发时每路都调这个函数，
+    后写的一路把先写的一路的注册结果整份覆盖掉 —— 索引里少了模板，
+    生成端随即报「未找到表类型 X 的模板」；同时同内容被判「不一致」而
+    重复复制，堆出上万个孤儿副本。
+    """
+    with _te._INDEX_LOCK:
+        return _ensure_builtin_registered_locked()
+
+
+def _ensure_builtin_registered_locked() -> int:
+    """实际实现，**调用方必须已持有 _te._INDEX_LOCK**。"""
     if not os.path.isdir(BUILTIN_DIR):
         return 0
     registered = 0

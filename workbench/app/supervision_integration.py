@@ -413,6 +413,88 @@ def _write_boxing_list(project_id, book, results):
     return {'装盒清单': os.path.basename(_box), '盒数': len(_vols)}
 
 
+# 整卷合并时要跨车间的列表键。顺序无关，只用于「先建空列表再追加」。
+MERGE_LIST_KEYS = ('generated', 'todo', 'errors', 'collect_dir',
+                   'todo_fields', 'empty_shells', 'skipped_device_forms',
+                   'type_fallback')
+
+# 「原因」之外的判别字段：不同列表的行形状不同，同车间同序号同名时
+# 只能靠这些字段区分到底是不是同一条。
+_ROW_SIG_FIELDS = ('文件', '待补字段', '借用情况', '未覆盖设备', '目录')
+
+
+def _row_sig(k, row):
+    """一行在「同列表同车间同序号同名」之后的二次判别键。
+
+    v0.1.182：**必须带二次判别**。todo_fields / type_fallback / generated /
+    collect_dir 这些行根本没有「原因」字段，只靠 (序号,名称,原因) 时它们
+    在同一个车间里会互相撞键 —— 实测 19 个车间有 18 个的 type_fallback
+    整批被当成重复丢掉（合计只报 2 条，逐车间其实是 36 条）。
+    """
+    if row.get('原因') is not None:
+        return ('原因', str(row.get('原因')))
+    for f in _ROW_SIG_FIELDS:
+        if f in row:
+            try:
+                return (f, json.dumps(row[f], ensure_ascii=False, sort_keys=True))
+            except Exception:  # noqa: BLE001
+                return (f, str(row[f]))
+    return ('', '')
+
+
+def _merge_workshop_results(ws_results, wss):
+    """把逐车间整卷结果合并成「整卷」视图（纯函数，便于单测）。
+
+    v0.1.182 修三个实测缺陷（整卷聚合计数与逐车间合计对不上）：
+
+    ① `_merged = _r` 直接引用第一个车间的结果对象：它的行从未进 `_seen_rows`，
+       而 `by_workshop` 被写进调用方对象里。改为从首车间结果**浅拷贝**出基线。
+    ② `_seen_rows` 跨列表共享、key 里没有列表名：`generated` 行与 `todo_fields` /
+       `type_fallback` 行在「车间+序号+名称」上完全相同且都没有 `原因`，
+       同一车间的这些列表于是整批被误判为重复而丢弃。
+       改为 key 带上列表名，并加 `_row_sig` 二次判别。
+    ③ `if not _r.get(_k): continue` 让「首车间该键为空」时后续车间的该键
+       永远建不出来 —— 尾矿库（第 5 个车间）的 skipped_device_forms 恒为 0。
+       改为先对所有键 setdefault，再逐车间追加。
+    """
+    ws_results = ws_results or {}
+    wss = list(wss or [])
+    base = dict(ws_results.get(wss[0]) or {}) if wss else {}
+    # catalog 等嵌套结构只读，但下游会往里写「装盒清单」，浅拷贝一层免得
+    # 把首个车间的原始结果对象改掉。
+    for _k, _v in list(base.items()):
+        if isinstance(_v, dict):
+            base[_k] = dict(_v)
+    merged = base
+    for _k in MERGE_LIST_KEYS:
+        merged[_k] = []
+
+    seen = set()
+    by_workshop = {}
+    for _w in wss:
+        r = ws_results.get(_w) or {}
+        for _k in MERGE_LIST_KEYS:
+            for _row in (r.get(_k) or []):
+                if not isinstance(_row, dict):
+                    # 非字典行无法打车间标签，原样保留（不参与去重）
+                    merged[_k].append(_row)
+                    continue
+                _row = dict(_row, _车间=_row.get('_车间') or _w)
+                key = (_k, _row['_车间'], _row.get('序号'), _row.get('名称')) \
+                    + _row_sig(_k, _row)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged[_k].append(_row)
+        by_workshop[_w] = {
+            'generated': len(r.get('generated') or []),
+            'errors': len(r.get('errors') or []),
+            'todo': len(r.get('todo') or []),
+        }
+    merged['by_workshop'] = by_workshop
+    return merged
+
+
 def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录
 
@@ -462,45 +544,12 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                                 {'序号': '', '名称': _w,
                                  '原因': f'该车间整卷异常：{type(_e4).__name__}: {_e4}'}],
                             'collect_dir': [], 'todo_fields': [], 'empty_shells': []}
-            for _w in _wss:
-                # v0.1.179：分卷时先不算装盒清单 —— 每个车间都算一遍等于
-                # 19 次全册扫描 + 19 轮重复渲染（实测整卷 300s+）。合并后算一次。
-                _r = _ws_results.get(_w) or {}
-                if _merged is None:
-                    _seen_rows = set()
-                    _merged = _r
-                    _merged['by_workshop'] = {_w: {
-                        'generated': len(_r.get('generated') or []),
-                        'errors': len(_r.get('errors') or []),
-                        'todo': len(_r.get('todo') or []),
-                    }}
-                else:
-                    for _k in ('generated', 'todo', 'errors', 'collect_dir',
-                               'todo_fields', 'empty_shells', 'skipped_device_forms',
-                               'type_fallback'):
-                        if not _r.get(_k):
-                            continue
-                        _merged.setdefault(_k, [])
-                        for _row in _r[_k]:
-                            # v0.1.180：**按车间维度去重**。
-                            # 各车间的条目形状完全一样（序号/名称/文件名都相同），
-                            # 整字典去重会把 19 个车间的产出压成 1 份（实测生成 36→2）。
-                            # 这里给每行打上来源车间，只在「同一车间 + 同一序号 + 同一名称」
-                            # 重复并入时才跳过（车间列表里出现重名才会发生）。
-                            if not isinstance(_row, dict):
-                                _merged[_k].append(_row)
-                                continue
-                            _row = dict(_row, _车间=_row.get('_车间') or _w)
-                            _dupkey = (_row.get('_车间'), _row.get('序号'),
-                                       _row.get('名称'), _row.get('原因'))
-                            if _dupkey not in _seen_rows:
-                                _seen_rows.add(_dupkey)
-                                _merged[_k].append(_row)
-                    _merged.setdefault('by_workshop', {})[_w] = {
-                        'generated': len(_r.get('generated') or []),
-                        'errors': len(_r.get('errors') or []),
-                        'todo': len(_r.get('todo') or []),
-                    }
+            # v0.1.179：分卷时先不算装盒清单 —— 每个车间都算一遍等于
+            # 19 次全册扫描 + 19 轮重复渲染（实测整卷 300s+）。合并后算一次。
+            # v0.1.182：合并逻辑抽到 _merge_workshop_results（纯函数、可单测），
+            # 原来内联版本有三个计数缺陷，见该函数 docstring。
+            if _ws_results:
+                _merged = _merge_workshop_results(_ws_results, _wss)
             if _merged is None:
                 _merged = generate_volume(project_id, book, '全厂')
             _merged['workshops'] = _wss

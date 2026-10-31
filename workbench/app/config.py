@@ -111,7 +111,12 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 # 统一由 config 提供，main.py 的 FastAPI version 与本常量保持一致。
 # v0.1.181：分发包不再带 data/templates（运行期派生目录，122 条绝对路径泄漏 + 60MB 冗余）。
 # 版本必须递增：包内容规则变了，WORKbuddy 要能按版本号区分「带模板库的旧包」与「首启重建的新包」。
-APP_VERSION = "0.1.181"
+# v0.1.182：修整卷聚合计数漏报 + 模板索引并发写丢失。
+# ① 整卷拆车间后 generated/todo/skipped/通用表批次与逐车间合计对不上
+#    （真实台账 19 车间：generated 36→33、skipped 2→0、tf_batch 36→2）；
+# ② 3 路并发出卷时模板索引被「读—改—写」覆盖，12 个车间报「未找到模板」，
+#    data/templates 堆出上万孤儿副本。
+APP_VERSION = "0.1.182"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

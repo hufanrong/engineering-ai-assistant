@@ -246,7 +246,11 @@ def main():
         must = [f"{args.root_name}/{x}" for x in
                 ("start.py", "app/config.py", "app/main.py", "web/index.html",
                  "requirements.txt", "install.bat", "run_workbench.bat",
-                 "tools/selftest.py", "tools/fieldtest.py", "tools/verify_install.py")]
+                 "tools/selftest.py", "tools/fieldtest.py", "tools/verify_install.py",
+                 # v0.1.182 回归：整卷聚合计数 + 模板索引并发写。这两个测试是
+                 # 本轮两个真实缺陷的守卫，必须随包分发，WORKbuddy 现场可复跑。
+                 "tools/test_merge_agg.py", "tools/test_template_concurrency.py",
+                 "tools/test_ledger_units.py")]
         for m in must:
             if m not in names:
                 problems.append(f"缺文件：{m}")

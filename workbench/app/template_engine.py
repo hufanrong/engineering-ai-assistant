@@ -18,6 +18,7 @@ import re
 import json
 import datetime
 import shutil
+import threading
 from typing import Optional, Dict, List, Tuple
 
 try:
@@ -46,6 +47,16 @@ def _ensure_templates_dir():
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 
+# v0.1.182：模板索引是**全进程共享的单个 JSON**，而整卷会 3 路并发出卷，
+# 每路都会调用 _ensure_builtin_registered()。原来的「读索引→append→整份写回」
+# 没有互斥、写也不是原子替换，实测后果：
+#   · 后写的线程覆盖先写的条目 → 索引条目丢失 → 「未找到表类型 X 的模板」
+#   · 同一批内置模板被重复注册 → data/templates 累积 10985 个孤儿副本
+# 锁必须是模块级单例（同一进程内所有线程共用），并且写盘要 tmp+rename。
+_INDEX_LOCK = threading.RLock()
+_SAVE_ERR = {}
+
+
 def _load_template_index() -> Dict:
     """加载模板索引。"""
     _ensure_templates_dir()
@@ -59,10 +70,27 @@ def _load_template_index() -> Dict:
 
 
 def _save_template_index(index: Dict):
-    """保存模板索引。"""
+    """保存模板索引。
+
+    v0.1.182：改为**原子替换**。原来直接 open(TEMPLATE_INDEX_FILE, 'w') 写，
+    进程在写一半时被杀 / 两个线程同时写，都会留下半截 JSON ——
+    下次 _load_template_index() 读失败就静默返回 {"templates": []}，
+    界面表现为「模板全没了」。tmp+os.replace 保证读到的永远是完整文件。
+    """
     _ensure_templates_dir()
-    with open(TEMPLATE_INDEX_FILE, "w", encoding="utf-8") as f:
-        json.dump(index, f, ensure_ascii=False, indent=2)
+    tmp = TEMPLATE_INDEX_FILE + f".tmp.{os.getpid()}.{threading.get_ident()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(index, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, TEMPLATE_INDEX_FILE)
+    except Exception as e:  # noqa: BLE001
+        _SAVE_ERR["last"] = f"{type(e).__name__}: {e}"
+        try:
+            if os.path.isfile(tmp):
+                os.remove(tmp)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
 
 
 # 支持的占位符字段定义
@@ -121,27 +149,32 @@ def upload_template(file_path: str, template_name: str = "",
                     doc_type: str = "", description: str = "") -> Dict:
     """
     上传并注册模板。
-    
-    Args:
-        file_path: 模板文件路径（Word .docx）
-        template_name: 模板名称
-        doc_type: 关联的文件类型（安全交底/技术交底/施工方案等）
-        description: 模板描述
-    
-    Returns:
-        上传结果，包含解析出的占位符列表
+
+    v0.1.182：整段在 _INDEX_LOCK 内执行。
+    原来「读索引 → append → 整份写回」散在三处、没有任何互斥：整卷 3 路并发时
+    每路都会触发 _ensure_builtin_registered()，后完成的那路把先完成的条目整份
+    覆盖掉，索引里就少了模板，生成端报「未找到表类型 X 的模板」。
+    加锁后「查重名 → 复制 → 解析 → 写索引」是一个不可分割的动作，
+    同名的内置模板也不会被重复复制成孤儿副本。
     """
     if not HAS_DOCX:
         return {"ok": False, "error": "python-docx 未安装，无法解析Word模板"}
-    
+
     if not os.path.isfile(file_path):
         return {"ok": False, "error": f"文件不存在：{file_path}"}
-    
+
     if not (file_path.endswith(".docx") or file_path.endswith(".xlsx")):
         return {"ok": False, "error": "仅支持 .docx / .xlsx 格式模板"}
-    
+
     _ensure_templates_dir()
-    
+
+    with _INDEX_LOCK:
+        return _upload_template_locked(file_path, template_name, doc_type, description)
+
+
+def _upload_template_locked(file_path: str, template_name: str,
+                            doc_type: str, description: str) -> Dict:
+    """upload_template 的实际实现，**调用方必须已持有 _INDEX_LOCK**。"""
     # 生成模板ID（毫秒级+pid+序号，避免同一秒注册多个模板时 ID 冲突）
     template_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3] + "_" + str(os.getpid())
     index0 = _load_template_index()
@@ -151,7 +184,34 @@ def upload_template(file_path: str, template_name: str = "",
     while template_id in existing_ids:
         seq += 1
         template_id = base_id + f"_{seq}"
-    
+
+    if not template_name:
+        template_name = os.path.splitext(os.path.basename(file_path))[0]
+
+    # v0.1.182：**同名已注册且内容一致就不要复制**。
+    # 原来每次都 shutil.copy2 一份新副本 —— 首启重建 121 个模板 × 每次启动 /
+    # 每次并发触发 _ensure_builtin_registered()，实测目录里堆了 10985 个孤儿副本
+    # （11 MB → 400 MB）。同名同内容时直接复用已有副本。
+    _prev = None
+    for t in index0.get("templates", []):
+        if t.get("name") == template_name:
+            _prev = t
+            break
+    if _prev:
+        _pf = os.path.join(TEMPLATES_DIR, _prev.get("file_name", "") or "")
+        try:
+            _same = (os.path.isfile(_pf)
+                     and open(file_path, 'rb').read() == open(_pf, 'rb').read())
+        except Exception:  # noqa: BLE001
+            _same = False
+        if _same:
+            if _prev.get("doc_type") != doc_type:
+                _prev["doc_type"] = doc_type
+                _save_template_index(index0)
+            return {"ok": True, "template": _prev, "reused": True,
+                    "placeholders": _prev.get("placeholders", []),
+                    "placeholder_count": _prev.get("placeholder_count", 0)}
+
     # 拷贝模板到模板库
     ext = os.path.splitext(file_path)[1]
     stored_name = f"{template_id}{ext}"
