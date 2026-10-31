@@ -1,5 +1,5 @@
 {
-  "last_tested_commit": "fc0b3412f0fe1bc45c2124056a845f0de78512f4",
+  "last_tested_commit": "fc0b341",
   "runs": [
     {
       "run_id": "20261030_084638",
@@ -74,6 +74,43 @@
       "run_id": "20261031_102306",
       "status": "failed",
       "commit": "fc0b3412f0fe1bc45c2124056a845f0de78512f4",
+      "summary": {
+        "passed": 52,
+        "failed": 1,
+        "skipped": 0,
+        "by_phase": {
+          "1": {
+            "passed": 15,
+            "failed": 0,
+            "skipped": 0
+          },
+          "2": {
+            "passed": 9,
+            "failed": 0,
+            "skipped": 0
+          },
+          "3": {
+            "passed": 13,
+            "failed": 1,
+            "skipped": 0
+          },
+          "4": {
+            "passed": 6,
+            "failed": 0,
+            "skipped": 0
+          },
+          "5": {
+            "passed": 9,
+            "failed": 0,
+            "skipped": 0
+          }
+        }
+      }
+    },
+    {
+      "run_id": "20261031_103112",
+      "status": "failed",
+      "commit": "6af63a36768b4fbe65479fb981419a0c1d85f6b5",
       "summary": {
         "passed": 52,
         "failed": 1,

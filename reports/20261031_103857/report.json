@@ -1,0 +1,50 @@
+{
+  "run_id": "20261031_103857",
+  "started": "2026-10-31 10:38:57",
+  "status": "error",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "6af63a36768b4fbe65479fb981419a0c1d85f6b5",
+      "err": ""
+    },
+    {
+      "step": "跳过拉取",
+      "rc": 0,
+      "out": "--no-pull"
+    },
+    {
+      "step": "启动服务",
+      "rc": 1,
+      "out": "服务 60 秒内未就绪（看 reports/service.log）"
+    },
+    {
+      "step": "服务不可用，转进程内模式",
+      "rc": 0,
+      "out": "原因：服务 60 秒内未就绪（看 reports/service.log）"
+    },
+    {
+      "step": "进程内自测",
+      "rc": 0,
+      "out": "服务不在线，用 FastAPI TestClient 跑真实路由"
+    },
+    {
+      "step": "selftest",
+      "rc": 2,
+      "out": "",
+      "err": "缺少 python-multipart（进程内模式需要；pip install python-multipart）"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=error rc=2"
+    }
+  ],
+  "summary": {},
+  "error": "",
+  "remote_head": "6af63a36768b4fbe65479fb981419a0c1d85f6b5",
+  "finished": "2026-10-31 10:41:11",
+  "commit_before": "6af63a36768b4fbe65479fb981419a0c1d85f6b5",
+  "commit_after": "6af63a36768b4fbe65479fb981419a0c1d85f6b5"
+}
