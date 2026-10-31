@@ -732,6 +732,7 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                 '检查项数': r.get('check_item_count', 0),
                 '原表': '国标通用格式',
                 '原因': (r.get('warning') or '模板库无对应模板'),
+                '_车间': workshop or '全厂',
                 '_待回填': True,
             })
         # v0.1.183：别名复用 —— 用的是现有模板，但归档口径变了，待办清单要写明。
@@ -739,7 +740,8 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
             _al = st._gb.alias_category(name)
             if _al and _al != name:
                 results.setdefault('name_alias', []).append({
-                    '序号': seq, '名称': name, '借用表': _al})
+                    '序号': seq, '名称': name, '借用表': _al,
+                    '_车间': workshop or '全厂'})
         # 移动生成文件到卷目录
         src = os.path.join(_proj_root(project_id), 'exports', r['output_file'])
         _safe_name = re.sub(r'[\\/:*?"<>|]', '', name)[:50]

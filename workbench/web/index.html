@@ -2160,12 +2160,30 @@ function supResultHtml(data, title) {
     var results = data.results || [data];
     results.forEach(function(item) {
         var ok = item.ok;
-        var status = ok ? '<span style="color:#52C41A">✅ 成功</span>' : '<span style="color:#EA6668">❌ 失败</span>';
-        html += '<div style="padding:8px;background:#fff;border-radius:6px;margin-bottom:8px;border-left:3px solid ' + (ok ? '#52C41A' : '#EA6668') + '">';
+        // v0.1.184：兜底表与借用表必须让用户看出来 —— 否则拿到文件却不知道
+        // 这是按国标通用格式凑出来的、也不知道借用了哪张表，监理问起来说不清。
+        var isGb = item.gb_fallback === true;
+        var status = ok ? (isGb
+            ? '<span style="color:#FAAD14">⚠ 成功（国标通用格式）</span>'
+            : '<span style="color:#52C41A">✅ 成功</span>')
+            : '<span style="color:#EA6668">❌ 失败</span>';
+        var barColor = ok ? (isGb ? '#FAAD14' : '#52C41A') : '#EA6668';
+        html += '<div style="padding:8px;background:#fff;border-radius:6px;margin-bottom:8px;border-left:3px solid ' + barColor + '">';
         html += '<div>' + status + ' <strong>' + (item.workshop || '') + '</strong></div>';
         if (ok) {
             if (item.output_file) html += '<div style="color:#555;font-size:12px">文件：' + item.output_file + '</div>';
             if (item.output_path) html += '<div style="color:#555;font-size:12px">位置：' + item.output_path + '</div>';
+            if (isGb) {
+                html += '<div style="color:#FAAD14;font-size:12px">⚠ 模板库没有这张表的专用模板，已按国标通用格式生成'
+                     + (item.gb_form_no ? '（表号 ' + item.gb_form_no + '）' : '（登记表未写表号）') + '</div>';
+                if (item.check_item_count !== undefined) html += '<div style="color:#555;font-size:12px">检查/试验条款：' + item.check_item_count + ' 条</div>';
+                if (item.gb_blank) html += '<div style="color:#FAAD14;font-size:12px">本车间无对应设备数据，出的是空白表，需人工填写</div>';
+                html += '<div style="color:#888;font-size:12px">如需专用表：把该表的模板上传到模板库后重新生成。</div>';
+            }
+            if (item.name_alias && item.name_alias['借用表']) {
+                html += '<div style="color:#1E5AA8;font-size:12px">ℹ 登记表写的是「' + item.name_alias['请求']
+                     + '」，没有这张表的模板，已借用「' + item.name_alias['借用表'] + '」的表出记录。</div>';
+            }
             if (item.filled_tables !== undefined) html += '<div style="color:#555;font-size:12px">已填设备表：' + item.filled_tables + ' 张' + (item.skipped_tables && item.skipped_tables.length ? '；跳过（该车间无此类型设备）：' + item.skipped_tables.join('、') : '') + '</div>';
             if (item.device_count !== undefined) html += '<div style="color:#555;font-size:12px">车间设备数：' + item.device_count + '</div>';
         }
@@ -2403,6 +2421,48 @@ function runVolume() {
             r.todo_fields.slice(0, 10).forEach(function(t){
                 html += '<br> &nbsp;&nbsp;- ' + t['序号'] + ' ' + t['名称'] + '：' + t['待补字段'].slice(0, 8).join('、') + (t['待补字段'].length > 8 ? ' 等' : '');
             });
+        }
+        // v0.1.184：整卷里两类需要用户知道的表，原来一行都不显示：
+        // 「按国标通用格式生成的」和「借用别的表的」。不显示的话用户以为都是专用表。
+        // 按「序号+名称」聚合成一项，否则一个登记项会按车间刷 18 行同样的内容。
+        function supGroupByItem(list, tipFn) {
+            var map = {};
+            (list || []).forEach(function(t) {
+                var k = (t['序号'] || '') + '|' + (t['名称'] || '');
+                if (!map[k]) { map[k] = {n: 0, row: t, ws: []}; }
+                map[k].n += 1;
+                if (t['_车间']) map[k].ws.push(t['_车间']);
+            });
+            return Object.keys(map).map(function(k) {
+                var v = map[k];
+                return {tip: tipFn(v.row, v.n, v.ws), n: v.n};
+            });
+        }
+        if (r.name_alias && r.name_alias.length) {
+            var _al = supGroupByItem(r.name_alias, function(t, n) {
+                return t['序号'] + ' ' + t['名称'] + '：借用「' + t['借用表'] + '」的表（' + n + ' 个车间）';
+            });
+            html += '<br>ℹ 复用现有表 <b>' + _al.length + '</b> 项（登记表表名与模板名不同）：';
+            _al.forEach(function(x) {
+                html += '<br> &nbsp;&nbsp;- ' + x.tip;
+            });
+            html += '<br> &nbsp;&nbsp;<span style="color:#888">没提供该表的模板，按现有检查记录表制作，共出在 ' + r.name_alias.length + ' 个车间。</span>';
+        }
+        if (r.gb_fallback && r.gb_fallback.length) {
+            var _gb = supGroupByItem(r.gb_fallback, function(t, n, ws) {
+                return t['序号'] + ' ' + t['名称']
+                     + (t['表号'] ? '（表号 ' + t['表号'] + '）' : '（登记表未写表号）')
+                     + '：' + (t['检查项数'] || 0) + ' 条条款，出在 ' + n + ' 个车间'
+                     + (t['设备数'] ? '，' + t['设备数'] + ' 台设备' : '');
+            });
+            html += '<br>⚠ 按国标通用格式生成 <b>' + _gb.length + '</b> 项（模板库无专用模板）：';
+            _gb.forEach(function(x) {
+                html += '<br> &nbsp;&nbsp;- ' + x.tip;
+            });
+            html += '<br> &nbsp;&nbsp;<span style="color:#888">要换成专用表：上传该表模板后重新整卷即可。</span>';
+        }
+        if (r.gb_blank && r.gb_blank.length) {
+            html += '<br>⚠ 其中 <b>' + r.gb_blank.length + '</b> 项因本车间无对应设备数据，出的是空白表';
         }
         if (r.errors.length) {
             html += '<br>⚠️ 失败 ' + r.errors.length + ' 项：' + r.errors.map(function(e){ return e['名称']; }).join('、');
