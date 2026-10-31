@@ -472,6 +472,8 @@ def _get_workshop_devices(workshop: str = "", project_id: str = None) -> List[Di
                     "workshop": dev_ws or workshop,
                     "quantity": d.get("quantity", ""),
                     "weight": d.get("weight", "") or d.get("single_weight", ""),
+                    # v0.1.180：单位（台/套=设备，m2/米/kg=材料）—— 材料车间不该出设备记录
+                    "unit": d.get("unit", ""),
                     "drawing_no": d.get("drawing_no", ""),
                     "dev_type": _device_type_of(name),
                 })
@@ -678,6 +680,23 @@ def _render_docx_by_workshop(template_path: str, fill_base: Dict,
     borrow_types = [t for t in present_types if t not in declared_types]
 
     emitted = set()  # (表格指纹, 设备key) —— 同一份表 + 同一台设备只出一次，避免重复打印
+    # v0.1.180：**选定"承接表"** —— 模板未声明类型的设备（真实台账 13 类 55 台：
+    # 泵、电动单梁起重机、搅拌设备、除尘设备、浮选设备…）需要一张通用格式的表来出记录。
+    # 旧实现在借用分支前置了 `len(sig_types[sig]) >= 2`（"同一份表被至少 2 种类型共用
+    # 才算与类型无关"），而实测模板 9 张表里同指纹的几张**全被登记成同一类**（胶带输送机×3），
+    # 条件永远不成立 → 一台都借不进去 → filled_count=0 → 整份文件被空壳闸门拦掉。
+    # 现在改为：在整个模板里挑一张"最通用"的表（指纹被最多类型共用者；都不共用则取第一张），
+    # 未覆盖类型的设备**只在这一张表里各出一份**，并在 type_fallback 记账供人工复核。
+    _sig_type_count = {}
+    for _s in slot_sig:
+        _sig_type_count[_s] = _sig_type_count.get(_s, 0) + 1
+    _carry_seq = 0
+    _best = -1
+    for _i, _s in enumerate(slot_sig):
+        _cnt = len(sig_types.get(_s, ())) * 100 + _sig_type_count.get(_s, 0)
+        if _cnt > _best:
+            _best = _cnt
+            _carry_seq = _i
 
     def _dev_key(dev):
         if not dev:
@@ -701,17 +720,25 @@ def _render_docx_by_workshop(template_path: str, fill_base: Dict,
             if key not in emitted:
                 emitted.add(key)
                 queue.append(None)
-        # ③ 该表与设备类型无关（同一份表被多种类型共用）→ 借给模板未覆盖的类型
-        if not queue and dev_type != '通用' and len(sig_types.get(sig, ())) >= 2:
+        # ③ 承接表：模板没声明类型的设备，统一在选定的那张通用表里各出一份
+        # v0.1.180 修：**不能再加 `not queue` 前置**。
+        # 承接表同时也是某个已声明类型的表（实测是「胶带输送机」，9 张表里占 3 张），
+        # 而真实台账绝大多数车间都有胶带输送机 —— 只要 queue 里有一台本类型设备，
+        # 这个条件就不成立，未声明类型的设备一台都承接不进来。
+        # 实测：脱水车间 19 台里 15 台落空、重介质选矿车间 39 台里 28 台落空。
+        # 承接设备只是往同一张表的队列里追加，每台仍各自复制一份，不会少也不会重复。
+        if dev_type != '通用' and seq == _carry_seq:
             for other_type in list(borrow_types):
                 for dev in present_types.get(other_type, []):
-                    key = (sig, _dev_key(dev))
+                    # key 用固定标记而不是指纹 —— 承接只发生在唯一一张表上，
+                    # 一台设备任何时候都只出一份（防重复出表的关键）
+                    key = ('carry', _dev_key(dev))
                     if key in emitted:
                         continue
                     emitted.add(key)
                     queue.append(dev)
                     type_fallback.append({'设备类型': other_type, '设备': dev.get('name', ''),
-                                          '借用表': dev_type})
+                                          '借用表': dev_type, '方式': '通用表承接'})
         if not queue:
             # 两种完全不同的情况，记账必须分开，否则用户看到「模板内空表类型」
             # 里列着一个明明有设备的类型，会误判成模板缺表：

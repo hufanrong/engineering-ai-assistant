@@ -17,11 +17,17 @@ from . import supervision_templates as st
 LEGACY_REG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'supervision_registry.json')
 
 
-def _project_reg_file() -> str:
-    """当前项目的登记表路径。取不到项目目录时回退到旧的全局路径。"""
+def _project_reg_file(project_id=None) -> str:
+    """指定项目的登记表路径。project_id 为空 = 当前项目。
+
+    v0.1.180：**必须接受 project_id**。原来这里无参，永远走 `get_project_data_dir()`
+    （= 当前项目），而 generate_volume(project_id=A) 内部读登记表时用的还是「当前项目」B。
+    实测后果：A 的册名/条目数/归集数全被 B 覆盖 —— 归集 19→0、待办 4→23、
+    册名「第一册」→「设备安装」，全都是跨项目串数据。
+    """
     try:
         from . import project_manager as _pm
-        ddir = _pm.get_project_data_dir()
+        ddir = _pm.get_project_data_dir(project_id)
         if ddir:
             return os.path.join(ddir, 'supervision_registry.json')
     except Exception:  # noqa: BLE001
@@ -29,9 +35,9 @@ def _project_reg_file() -> str:
     return LEGACY_REG_FILE
 
 
-def _reg_file() -> str:
+def _reg_file(project_id=None) -> str:
     """实际使用的登记表路径：项目内有就用项目的，没有才用旧的全局文件。"""
-    p = _project_reg_file()
+    p = _project_reg_file(project_id)
     if os.path.exists(p):
         return p
     if os.path.exists(LEGACY_REG_FILE) and p != LEGACY_REG_FILE:
@@ -60,9 +66,13 @@ def _clean_book(book):
     return BOOK_ALIAS.get(b, b)
 
 
-def load_registry():
-    """读整编要求登记表。文件缺失/损坏时返回 []（调用方需自行判断并明确报错）。"""
-    path = _reg_file()
+def load_registry(project_id=None):
+    """读整编要求登记表。project_id 为空 = 当前项目。
+
+    v0.1.180：加 project_id —— 整卷按 A 项目跑时必须读 A 的登记表。
+    文件缺失/损坏时返回 []（调用方需自行判断并明确报错）。
+    """
+    path = _reg_file(project_id)
     if not os.path.exists(path):
         return []
     try:
@@ -76,9 +86,9 @@ def load_registry():
 # v0.1.167：登记表缺失时的统一判定 —— 原来 load_registry() 静默返回 []，
 # generate_volume 拿到空清单后仍然 ok=True / generated=[] / todo=[]，
 # 用户点「一键整卷」看到成功却什么都没产出；route_uploaded_file 同样是静默空转。
-def registry_ready() -> bool:
+def registry_ready(project_id=None) -> bool:
     """整编要求登记表是否可用（非空且条目结构完整）。"""
-    reg = load_registry()
+    reg = load_registry(project_id)
     if not reg:
         return False
     return all(isinstance(it, dict) and it.get("名称") for it in reg)
@@ -101,14 +111,14 @@ def _book_of(it: dict) -> str:
     return _clean_book(it.get('册')) or UNNAMED_BOOK
 
 
-def _book_items(book):
+def _book_items(book, project_id=None):
     b = _clean_book(book) or UNNAMED_BOOK
-    return [it for it in load_registry() if _book_of(it) == b]
+    return [it for it in load_registry(project_id) if _book_of(it) == b]
 
 
-def available_books() -> list:
+def available_books(project_id=None) -> list:
     """登记表里实际存在的册名（按条目数从多到少）。前端下拉、错误提示都用这一个口径。"""
-    items = [it for it in load_registry() if isinstance(it, dict)]
+    items = [it for it in load_registry(project_id) if isinstance(it, dict)]
     cnt = {}
     for it in items:
         b = _book_of(it)
@@ -124,7 +134,7 @@ def _resolve_book(book, project_id=None):
     - 传了但对不上 -> 返回错误字典，并附上 available_books
     返回字典即表示「不能继续」，调用方直接把它当结果返回。
     """
-    have = available_books()
+    have = available_books(project_id)
     b = _clean_book(book)
     if b and b in have:
         return b
@@ -135,7 +145,7 @@ def _resolve_book(book, project_id=None):
             return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                     'todo_fields': [],
                     'error': '整编要求登记表不存在或为空，无法整卷',
-                    'missing_registry': _reg_file(),
+                    'missing_registry': _reg_file(project_id),
                     'hint': '请先把整编要求登记表导入到当前项目（字段：册/序号/名称/表号/分类/阶段）'}
         return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                 'todo_fields': [], 'multi_book': True,
@@ -215,7 +225,7 @@ def _fuzzy_category(name: str):
 
 def volume_status(project_id, book, workshop=''):
     """检查某册整编完成度"""
-    items = _book_items(book)
+    items = _book_items(book, project_id)
     out = {'book': _clean_book(book), 'total': len(items), 'a': 0, 'b': 0, 'c': 0, 'dup': 0,
            'generated': [], 'missing': [], 'collect': [], 'dup_items': []}
     # v0.1.173：项目定位不到时不要拿空路径去 listdir，直接说明「未选项目」
@@ -422,7 +432,7 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     book = _resolve_book(book, project_id)
     if isinstance(book, dict):
         return book
-    items = _book_items(book)
+    items = _book_items(book, project_id)
     # v0.1.179：车间名同样「不猜、按台账实际来」（与册名同一套原则）。
     # v0.1.178 只把「全厂」当成未指定，但界面默认填的是 /api/workshops 推出来的
     # 「选矿厂」——名字看着像车间、台账里却不存在，于是 19 个车间的设备全部落空。
@@ -457,6 +467,7 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                 # 19 次全册扫描 + 19 轮重复渲染（实测整卷 300s+）。合并后算一次。
                 _r = _ws_results.get(_w) or {}
                 if _merged is None:
+                    _seen_rows = set()
                     _merged = _r
                     _merged['by_workshop'] = {_w: {
                         'generated': len(_r.get('generated') or []),
@@ -465,10 +476,26 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                     }}
                 else:
                     for _k in ('generated', 'todo', 'errors', 'collect_dir',
-                               'todo_fields', 'empty_shells'):
-                        if _r.get(_k):
-                            _merged.setdefault(_k, [])
-                            _merged[_k] = list(_merged.get(_k) or []) + list(_r[_k])
+                               'todo_fields', 'empty_shells', 'skipped_device_forms',
+                               'type_fallback'):
+                        if not _r.get(_k):
+                            continue
+                        _merged.setdefault(_k, [])
+                        for _row in _r[_k]:
+                            # v0.1.180：**按车间维度去重**。
+                            # 各车间的条目形状完全一样（序号/名称/文件名都相同），
+                            # 整字典去重会把 19 个车间的产出压成 1 份（实测生成 36→2）。
+                            # 这里给每行打上来源车间，只在「同一车间 + 同一序号 + 同一名称」
+                            # 重复并入时才跳过（车间列表里出现重名才会发生）。
+                            if not isinstance(_row, dict):
+                                _merged[_k].append(_row)
+                                continue
+                            _row = dict(_row, _车间=_row.get('_车间') or _w)
+                            _dupkey = (_row.get('_车间'), _row.get('序号'),
+                                       _row.get('名称'), _row.get('原因'))
+                            if _dupkey not in _seen_rows:
+                                _seen_rows.add(_dupkey)
+                                _merged[_k].append(_row)
                     _merged.setdefault('by_workshop', {})[_w] = {
                         'generated': len(_r.get('generated') or []),
                         'errors': len(_r.get('errors') or []),
@@ -505,18 +532,19 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                 'todo_fields': [], 'error': str(_e), 'missing_project': True,
                 'hint': '请在界面上先选择/创建一个项目，再点一键整卷'}
     # v0.1.167：登记表缺失时明确报错，不再返回「成功但什么都没生成」
-    if not registry_ready():
+    if not registry_ready(project_id):
         return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                 'todo_fields': [],
                 'error': '整编要求登记表不存在或为空，无法整卷',
-                'missing_registry': _reg_file(),
+                'missing_registry': _reg_file(project_id),
                 'hint': '请先把整编要求登记表导入到当前项目（字段：册/序号/名称/表号/分类/阶段）'}
     if not items:
         return {'ok': False, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                 'todo_fields': [],
                 'error': f'整编要求登记表中没有「{_clean_book(book) or UNNAMED_BOOK}」这一册的条目',
                 'book': _clean_book(book) or UNNAMED_BOOK,
-                'available_books': sorted({_book_of(it) for it in load_registry() if isinstance(it, dict)})}
+                'available_books': sorted({_book_of(it) for it in load_registry(project_id)
+                                           if isinstance(it, dict)})}
     # v0.1.172：设备台账前置校验。整卷的 A/B 类都是"按设备一行"的确认表，
     # 设备库为空时生成出来的必然是只有表头的空壳。先同步一次设备再把结果说清楚。
     _dev_info = {'devices': 0}
@@ -530,6 +558,14 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     vol = _volume_dir(project_id, book, workshop)
     os.makedirs(vol, exist_ok=True)
     results = {'ok': True, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': []}
+    # v0.1.180：**材料车间跳过设备类表单**（用户决策）。
+    # 实测依据：尾矿库 4 行全是复合土工膜 / HDPE管 / 长丝无纺土工布（单位 m2、米），
+    # 它们不是设备，按设备逐台出「设备安装检查记录」监理不会收。
+    # 判据只看台账「单位」字段（见 is_material_workshop），不猜设备名称。
+    _ws_devs = st._get_workshop_devices(workshop, project_id) if workshop else []
+    results['material_workshop'] = is_material_workshop(_ws_devs)
+    results['workshop_device_rows'] = len(_ws_devs)
+    results['skipped_device_forms'] = []
     todo_fields = []
     for it in items:
         cls = it.get('分类')
@@ -556,6 +592,18 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
             else:
                 results['errors'].append({'序号': seq, '名称': name, '原因': _why})
                 results['todo'].append({'序号': seq, '名称': name, '原因': _why})
+            continue
+        # v0.1.180：材料车间不出设备类记录 —— 记进待办清单（写明原因），不算错误
+        if results['material_workshop'] and cat not in ('C',):
+            _units = sorted({str(d.get('unit') or '').strip() for d in _ws_devs if d.get('unit')})
+            _msg = (f"该车间台账 {len(_ws_devs)} 行全为材料（单位：{'、'.join(_units) or '未知'}），"
+                    f"非设备，已跳过设备类表单")
+            results['skipped_device_forms'].append({
+                '序号': seq, '名称': name, '原因': _msg})
+            # 仍记进 todo 是为了「每个登记项都有交代」的账目完整（fieldtest 会核），
+            # 但打上标记，待办清单里只在「材料车间」段落出现一次，不再在「无模板」段重复。
+            results['todo'].append({'序号': seq, '名称': name, '原因': _msg,
+                                    '_skip_material': True})
             continue
         r = st.generate_batch(category=cat, workshop=workshop or '全厂', project_id=project_id)
         if not r.get('ok'):
@@ -589,7 +637,9 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     # 写待办清单
     todo_md = _render_todo(todo_fields, results['todo'], results['errors'],
                            results.get('empty_shells', []), results.get('type_fallback', []),
-                           workshop=workshop)
+                           workshop=workshop,
+                           skipped_device_forms=results.get('skipped_device_forms'),
+                           material_workshop=results.get('material_workshop', False))
     todo_path = os.path.join(vol, '_待办清单.md')
     with open(todo_path, 'w', encoding='utf-8') as f:
         f.write(todo_md)
@@ -635,7 +685,34 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     return results
 
 
-def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=None, workshop=''):
+# 设备台账里「单位」出现这些值，才说明这一行是**设备**；其余（m2/米/kg/㎡/吨…）是**材料**。
+# 实测依据（紫金选矿厂真实台账 248 行）：193 行单位=台、5 行=套、其余 39 空 + 米/m2/kg 零星。
+# 尾矿库 4 行全是复合土工膜 / HDPE管 / 长丝无纺土工布，单位 m2/米 —— 按设备出「设备安装
+# 检查记录」是错的，监理不会收，用户也明确要求这类车间跳过设备类表单。
+DEVICE_UNITS = ('台', '套', '个', '组', '件', '座')
+
+
+def is_material_workshop(devices) -> bool:
+    """判定某车间的台账行是否全是「材料」而非设备（用于跳过设备类表单）。
+
+    判据只看单位字段，不猜名称 —— 名称判定已经证明不可靠（「金属探测器」「打包机」
+    这些都是设备但名称里没有设备关键词）。规则：
+      - 一条记录都没有 → 不算材料车间（无从判断，交给后续空壳闸门如实报）
+      - 单位字段**全都填了**且**没有一个**落在 DEVICE_UNITS → 材料车间
+      - 只要有任一单位的值为空或属于设备单位 → 按设备车间处理（宁可多出表，
+        也不能因为个别行缺单位就把整个车间的设备记录悄悄丢掉）
+    """
+    rows = list(devices or [])
+    if not rows:
+        return False
+    units = [(str(r.get('unit') or r.get('单位') or '').strip()) for r in rows]
+    if any(u == '' for u in units):
+        return False
+    return all(u not in DEVICE_UNITS for u in units)
+
+
+def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=None, workshop='',
+                 skipped_device_forms=None, material_workshop=False):
     lines = ['# 整编待办清单', '', f'生成时间：{__import__("datetime").datetime.now():%Y-%m-%d %H:%M}',
              f'车间：{workshop or "全厂"}', '']
     if empty_shells:
@@ -651,20 +728,39 @@ def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=No
             if _et:
                 lines.append(f"  该车间无此类型设备、模板内已删表：{'、'.join(_et)}")
     if type_fallback:
-        lines.append('## 〇之二、借用通用表（需人工核对检查项是否适用）')
+        # v0.1.180：按用户决策逐条明写「使用通用表」——
+        # 归档口径变了（用通用格式表代替监理未声明的专用表），人工复核必须能一眼捞出来。
+        lines.append('## 〇之二、使用通用表（该设备类型监理未声明专用表，需人工复核检查项）')
         for t in type_fallback:
-            for f in (t.get('借用情况') or [])[:10]:
-                lines.append(f"- {t['序号']} {t['名称']}：{f.get('设备类型')}「{f.get('设备')}」"
-                             f"借用 {f.get('借用表')} 的表")
+            _rows = t.get('借用情况') or []
+            lines.append(f"- {t['序号']} {t['名称']}：共 {len(_rows)} 台设备使用通用表")
+            for f in _rows[:30]:
+                # v0.1.180：台账里可能有「只有型号没有名称」的设备（实测 13 行），
+                # 直接印成「通用「」」会让人以为程序出错。无名称就只说类型。
+                _nm = str(f.get('设备') or '').strip()
+                _who = f"{f.get('设备类型')}「{_nm}」" if _nm else f"{f.get('设备类型')}（台账未填名称）"
+                lines.append(f"  - {_who}→ 使用通用表"
+                             f"（借用 {f.get('借用表')} 的表，每台只出一份）")
+    if skipped_device_forms:
+        # v0.1.180：材料车间跳过设备类表单 —— 必须写进清单，否则用户在卷目录里
+        # 找不到文件时不知道是「漏生成」还是「有意跳过」。
+        lines.append('## 〇之三、材料车间（不适用设备类表单，已跳过）')
+        if material_workshop:
+            lines.append(f'- 车间「{workshop}」台账内容为材料（土工膜/管材/土工布等），'
+                         f'不是设备，按用户决策跳过设备类表单')
+        for t in skipped_device_forms:
+            lines.append(f"- {t['序号']} {t['名称']}：{t.get('原因')}")
     if todo_fields:
         lines.append('## 一、B 类预填，待人工补充实测数据')
         for t in todo_fields:
             lines.append(f"- {t['序号']} {t['名称']}")
             lines.append(f"  待补：{'、'.join(t['待补字段'][:12])}")
     if todos:
-        lines.append('## 二、无模板/需人工处理')
-        for t in todos:
-            lines.append(f"- {t['序号']} {t['名称']}：{t.get('原因')}")
+        _todos_shown = [t for t in todos if not t.get('_skip_material')]
+        if _todos_shown:
+            lines.append('## 二、无模板/需人工处理')
+            for t in _todos_shown:
+                lines.append(f"- {t['序号']} {t['名称']}：{t.get('原因')}")
     if errors:
         lines.append('## 三、生成失败')
         for t in errors:
@@ -878,9 +974,9 @@ def _parse_registry_excel(content: bytes) -> list:
     return items
 
 
-def registry_info() -> dict:
+def registry_info(project_id=None) -> dict:
     """登记表状态：是否存在 / 条目数 / 册分布 / 字段完整度。供接口与前端展示。"""
-    items = load_registry()
+    items = load_registry(project_id)
     books = {}
     incomplete = 0
     for it in items:
@@ -891,25 +987,25 @@ def registry_info() -> dict:
         if not it.get("名称") or not str(it.get("序号") or "").strip():
             incomplete += 1
     return {
-        "ready": registry_ready(),
-        "path": _reg_file(),
-        "exists": os.path.exists(_reg_file()),
+        "ready": registry_ready(project_id),
+        "path": _reg_file(project_id),
+        "exists": os.path.exists(_reg_file(project_id)),
         "total": len(items),
         "books": dict(sorted(books.items(), key=lambda kv: -kv[1])),
-        "available_books": available_books(),
+        "available_books": available_books(project_id),
         "incomplete_items": incomplete,
         "fields": _REG_FIELDS,
     }
 
 
-def save_registry(items: list) -> dict:
+def save_registry(items: list, project_id=None) -> dict:
     """校验并落盘登记表。空表 / 全无效条目一律拒绝，避免写出一个"看起来存在"的空登记表。"""
     clean = [_normalize_item(it) for it in items if isinstance(it, dict)]
     clean = [it for it in clean if it["名称"]]
     if not clean:
         return {"ok": False, "error": "登记表没有任何含「名称」的有效条目，已拒绝写入"}
     bad = [i for i, it in enumerate(clean) if not it["册"]]
-    path = _reg_file()
+    path = _reg_file(project_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     # 已有文件先备份，避免反复导入覆盖掉正确版本且无法回退
     if os.path.exists(path):
@@ -920,7 +1016,7 @@ def save_registry(items: list) -> dict:
             pass
     with open(path, "w", encoding="utf-8") as f:
         json.dump(clean, f, ensure_ascii=False, indent=1)
-    info = registry_info()
+    info = registry_info(project_id)
     info.update({"ok": True, "imported": len(clean), "items_without_book": len(bad)})
     return info
 

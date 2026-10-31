@@ -17,6 +17,7 @@ v0.1.45：设备台账多版本合并去重
 
 import os
 import json
+import threading
 import re
 import datetime
 from . import config
@@ -131,6 +132,12 @@ def extract_equipment_from_cache(cache: dict, skipped: list = None) -> list:
                 out.append({
                     "tag": tag, "name": name, "model": model, "spec": spec,
                     "quantity": qty, "weight": weight,
+                    # v0.1.180：**单位必须一路带到合并条目**。
+                    # 实测事故（紫金选矿厂真实台账 248 行）：尾矿库 4 行全是
+                    # 「复合土工膜 1.5mm」「HDPE管 DN200」「长丝无纺土工布 400g」，
+                    # 单位 m2 / 米 —— 它们是材料不是设备；原来这里把单位丢了，
+                    # 下游无从判别，照样按设备逐台出「设备安装检查记录」。
+                    "unit": str(row.get("单位") or "").strip() if isinstance(row, dict) else "",
                     "workshop": ws, "source_file": fname,
                     "source_type": "excel", "version_ts": ts,
                     "row_index": _row_i,
@@ -338,6 +345,8 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 "quantity": eq.get("quantity", "") or (eq.get("fields", {}) or {}).get("数量", ""),
                 "weight": eq.get("weight", "") or (eq.get("fields", {}) or {}).get("重量", ""),
                 "workshop": eq.get("workshop", ""),
+                # v0.1.180：单位随设备条目走（台/套=设备，m2/米/kg=材料）
+                "unit": eq.get("unit", "") or (eq.get("fields", {}) or {}).get("单位", ""),
                 "versions": [eq],
                 "fields": dict(eq.get("fields", {})),
                 "conflicts": [],
@@ -396,6 +405,8 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 "model": eq.get("model", ""),
                 "spec": eq.get("spec", ""),
                 "workshop": eq.get("workshop", ""),
+                # v0.1.180：单位随设备条目走（台/套=设备，m2/米/kg=材料）
+                "unit": eq.get("unit", "") or (eq.get("fields", {}) or {}).get("单位", ""),
                 "versions": [eq],
                 "fields": dict(eq.get("fields", {})),
                 "conflicts": [],
@@ -411,6 +422,8 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 "model": eq.get("model", ""),
                 "spec": eq.get("spec", ""),
                 "workshop": eq.get("workshop", ""),
+                # v0.1.180：单位随设备条目走（台/套=设备，m2/米/kg=材料）
+                "unit": eq.get("unit", "") or (eq.get("fields", {}) or {}).get("单位", ""),
                 "versions": [eq],
                 "fields": dict(eq.get("fields", {})),
                 "conflicts": [],
@@ -460,6 +473,29 @@ def get_merged() -> list:
 # 于是「监理确认表按车间出设备行」永远拿不到设备，产出只剩表头。
 # 这里补齐写入链路：解析缓存里的台账行 → 合并 → 写 index.json["devices"]（按位号做键）。
 
+# v0.1.180：**索引写盘必须串行**。
+# 整卷按车间并发出卷（19 个车间 3 路并发），每个线程进来都会调一次
+# sync_devices_to_index，而原来 tmp 文件名固定是 index.json.tmp ——
+# 19 个线程抢同一个临时文件，写一半被别的线程覆盖，
+# 结果部分车间的设备在跑的过程中"消失"（实测：尾矿库材料跳过从 2 项掉到 0）。
+_SYNC_LOCK = threading.RLock()
+
+
+def _serialized(fn):
+    """把整个「读索引 → 解析缓存 → 合并 → 回写」包进同一把进程内锁。
+
+    用装饰器而不是改缩进：这个函数 60 多行、分支很多，手工整体缩进
+    极易引入缩进错误（已实战踩到一次 IndentationError）。
+    """
+    def wrapper(*a, **kw):
+        with _SYNC_LOCK:
+            return fn(*a, **kw)
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+@_serialized
 def sync_devices_to_index(data_dir: str) -> dict:
     """把当前项目解析出的设备台账行写进 index.json 的 devices 字段。
     返回 {"devices": n, "with_workshop": n, "sources": [...]}；无数据时 devices=0 且不覆盖原值以外的键。
@@ -509,6 +545,8 @@ def sync_devices_to_index(data_dir: str) -> dict:
             "model": d.get("model", ""),
             "quantity": d.get("quantity", ""),
             "weight": d.get("weight", ""),
+            # v0.1.180：单位写进索引 —— 整卷要知道哪些车间是"材料"（m2/米/kg）而非设备
+            "unit": d.get("unit", ""),
             "workshop": d.get("workshop", ""),
             "manufacturer": (d.get("fields") or {}).get("厂家", "") or (d.get("fields") or {}).get("生产厂家", ""),
             "drawing_no": (d.get("fields") or {}).get("图号", ""),
@@ -529,7 +567,10 @@ def sync_devices_to_index(data_dir: str) -> dict:
     if ws_map:
         idx["workshops"] = {k: {"devices": v} for k, v in sorted(ws_map.items())}
 
-    tmp = idx_path + ".tmp"
+    # 唯一临时名 + 进程内锁：并发线程不会互相覆盖半成品文件
+    import tempfile as _tf
+    _fd, tmp = _tf.mkstemp(prefix="index.", suffix=".tmp", dir=os.path.dirname(idx_path))
+    os.close(_fd)
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=1)
     os.replace(tmp, idx_path)
