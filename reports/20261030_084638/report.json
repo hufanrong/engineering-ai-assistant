@@ -1,0 +1,93 @@
+{
+  "run_id": "20261030_084638",
+  "started": "2026-10-30 08:46:38",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "ccb5cfbf81de832b0e2a0bd5ec15234ae9aa0f45",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 38, \"failed\": 2, \"skipped\": 0, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 10, \"failed\": 0, \"skipped\": 0}, \"4\": {\"passed\": 4, \"failed\": 2, \"skipped\": 0}}}",
+      "err": ""
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1"
+    },
+    {
+      "step": "git add reports",
+      "rc": 0,
+      "out": "",
+      "err": ""
+    },
+    {
+      "step": "git commit",
+      "rc": 0,
+      "out": "[main 1ed529f] test(workbuddy): 20261030_084638 status=failed P38/F2/S0\n 4 files changed, 430 insertions(+)\n create mode 100644 reports/20261030_084638/console.log\n create mode 100644 reports/20261030_084638/env.json\n create mode 100644 reports/20261030_084638/selftest_detail.md\n create mode 100644 ",
+      "err": ""
+    },
+    {
+      "step": "git push",
+      "rc": 0,
+      "out": "",
+      "err": "To https://github.com/hufanrong/engineering-ai-assistant\n   ccb5cfb..1ed529f  HEAD -> main"
+    }
+  ],
+  "summary": {
+    "passed": 38,
+    "failed": 2,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0
+      },
+      "4": {
+        "passed": 4,
+        "failed": 2,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "ccb5cfbf81de832b0e2a0bd5ec15234ae9aa0f45",
+  "behind": 0,
+  "ahead": 0,
+  "pushed": true,
+  "finished": "2026-10-30 08:50:49",
+  "commit_before": "ccb5cfbf81de832b0e2a0bd5ec15234ae9aa0f45",
+  "commit_after": "1ed529fcdfddf3eebc5ef011c03da7b606049667"
+}
