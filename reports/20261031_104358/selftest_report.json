@@ -1,0 +1,457 @@
+{
+  "generated_at": "2026-10-31 10:46:25",
+  "base_url": "http://127.0.0.1:8756",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "python": "3.13.14"
+  },
+  "samples_dir": "D:\\fangong-loop\\workbench\\tools\\_samples",
+  "summary": {
+    "1": {
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0
+    },
+    "2": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    "3": {
+      "passed": 13,
+      "failed": 1,
+      "skipped": 0
+    },
+    "5": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "results": [
+    {
+      "phase": 1,
+      "step": "服务健康检查",
+      "expected": "200 且返回 version",
+      "actual": "200 ",
+      "passed": true,
+      "skipped": false,
+      "evidence": "{\"app\": \"fangong-workbench\", \"version\": \"0.1.181\", \"node_name\": \"我的电脑\", \"scan_running\": false, \"parse_switches\": {\"pdf\": true, \"word\": true, \"excel\": true, \"text\": true, \"ocr\": false, \"cad\": true, \"pr"
+    },
+    {
+      "phase": 1,
+      "step": "版本号可读",
+      "expected": "version 字段非空",
+      "actual": "0.1.181",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 1,
+      "step": "项目创建",
+      "expected": "200 且 ok=true",
+      "actual": "200 {'ok': True, 'project': {'id': '0494be15', 'name': '自测_20261031_104430', 'descri",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 1,
+      "step": "递归扫描启动",
+      "expected": "200",
+      "actual": "200 {'ok': True, 'folders': ['D:\\\\fangong-loop\\\\workbench\\\\tools\\\\_samples']}",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 1,
+      "step": "扫描完成",
+      "expected": "running=false 且有 stats",
+      "actual": "{\"found\": 6, \"parsed\": 6, \"vectorized\": 0, \"skipped\": 0, \"failed\": 0, \"duplicate\": 0}",
+      "passed": true,
+      "skipped": false,
+      "evidence": "耗时 105.2s"
+    },
+    {
+      "phase": 1,
+      "step": "解析成功率",
+      "expected": "failed=0",
+      "actual": "parsed=6 failed=0",
+      "passed": true,
+      "skipped": false,
+      "evidence": "{\"found\": 6, \"parsed\": 6, \"vectorized\": 0, \"skipped\": 0, \"failed\": 0, \"duplicate\": 0}"
+    },
+    {
+      "phase": 1,
+      "step": "资料库条目数",
+      "expected": ">= 样本数(6)",
+      "actual": "条目 6",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 1,
+      "step": "详情回读可用",
+      "expected": "每个已解析文件都能取到详情",
+      "actual": "6/6 可取；失败：[]",
+      "passed": true,
+      "skipped": false,
+      "evidence": "404 未找到缓存 = 详情接口查错目录（项目目录 vs 全局目录）"
+    },
+    {
+      "phase": 1,
+      "step": "正文非空",
+      "expected": "全部有正文",
+      "actual": "6/6 有正文",
+      "passed": true,
+      "skipped": false,
+      "evidence": "设备清单.docx=141字；设备台账.csv=218字；管道材料表.xlsx=136字；施工说明.txt=84字；施工图_EQ-101.dxf=102字；图纸说明.pdf=69字"
+    },
+    {
+      "phase": 1,
+      "step": "实体(位号)提取",
+      "expected": "至少 1 条命中设备位号",
+      "actual": "6/6 条含实体；样例 [\"{'type': 'equipment', 'tag': 'EQ-101'}\", \"{'type': 'equipment', 'tag': 'P-101'}\", \"{'type': 'equipment', 'tag': 'T-301'}\", \"{'type': 'equipment', 'tag': 'V-201'}\", \"{'type': 'parameter', 'name': '材质', 'value': '材质'}\", \"{'type': 'workshop', 'name': '1号车间'}\", \"{'type': 'workshop', 'name': '2号车间'}\"]",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 1,
+      "step": "结构化解析",
+      "expected": "至少表格类文件有 structure",
+      "actual": "6/6 条有 structure",
+      "passed": true,
+      "skipped": false,
+      "evidence": "设备清单.docx；设备台账.csv；管道材料表.xlsx；施工说明.txt"
+    },
+    {
+      "phase": 1,
+      "step": "车间自动分类",
+      "expected": "识别出车间且文件已归入车间",
+      "actual": "识别车间 ['1号车间']；已归类文件 2",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 1,
+      "step": "资料库检索",
+      "expected": "200 且命中>0",
+      "actual": "200 hits=5 mode=keyword",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 1,
+      "step": "检索模式声明",
+      "expected": "vector 或 keyword",
+      "actual": "keyword",
+      "passed": true,
+      "skipped": false,
+      "evidence": "vector_error=cannot import name 'builder' from 'google.protobuf.internal' (D:\\WorkBuddy\\work\\data\\binaries\\python\\versions\\3.13.12.old.11896\\Lib\\site-packages\\google\\protobu"
+    },
+    {
+      "phase": 1,
+      "step": "向量库计数",
+      "expected": "有向量或明确降级",
+      "actual": "vector_count=0",
+      "passed": true,
+      "skipped": false,
+      "evidence": "vector_count=0 且检索走 keyword = embedding 模型未就绪（离线/未下载），资料仍可查但语义检索不可用"
+    },
+    {
+      "phase": 2,
+      "step": "资料类型清单",
+      "expected": "200 且类型数>0",
+      "actual": "200 types=10",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "模板预填",
+      "expected": "200",
+      "actual": "200 {'data': {'项目名称': '紫金矿业工程项目', '车间': '1号车间', '_devices': [{'tag': 'P-101', 'name'",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "单据生成",
+      "expected": "200 且生成成功",
+      "actual": "200 PK\u0003\u0004\u0014\u0000\u0000\u0000\b\u0000�U_]�R���\u0001\u0000\u0000�\u0006\u0000\u0000\u0013\u0000\u0000\u0000[Content_Types].xml��MO�@\u0010���\u0015�/> {C\u000f\u0015��p(p,�\u001aD���8Y�/�L\u0002���:�U�P�\u0006.����}\u001e۲=�|�&[CD�]]�W�\"",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "监理模板库",
+      "expected": "200",
+      "actual": "200 templates=0",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "设备清单供填表",
+      "expected": "200 且能取到设备",
+      "actual": "200 {'ok': True, 'equipment': [{'tag': 'P-101', 'name': '离心泵', 'model': 'IS100-65-200', 'manufacturer': ",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "模糊表类型返回候选",
+      "expected": "200 且给出候选/报错（不擅自生成）",
+      "actual": "200 candidates=10 error=表类型「仪表」不唯一，请从候选中明确指定",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "批量套模板生成",
+      "expected": "有产出 或 明确报错（非空洞通过）",
+      "actual": "200 cat=仪表回路试验记录 ok=True output=监理模板_仪表回路试验记录_1号车间_20261031_104617.docx error=",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "生成任务计划",
+      "expected": "200",
+      "actual": "200 {'plans': [{'key': '开箱验收记录', 'doc_type': '开箱验收记录', 'desc': '需要：设备台账（核对位号/型号/数量）＋",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "模板清单",
+      "expected": "200",
+      "actual": "200 {'ok': True, 'total': 121, 'templates': [{'id': '20261030084921280_18608', 'name",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "完整性检查",
+      "expected": "200 且至少一个阶段有已存在的资料",
+      "actual": "200 phases=6 有资料的阶段=0",
+      "passed": false,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "竣工资料要求",
+      "expected": "200 且 requirements 非空",
+      "actual": "200 requirements=6",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "竣工资料统计",
+      "expected": "200 且设备数>0，并与「一键竣工」结果一致（两接口不能自相矛盾）",
+      "actual": "200 total_devices=3 ｜ 一键竣工 total_devices=3",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "组卷清单",
+      "expected": "200 且 checklist 有内容（非『无设备数据』）",
+      "actual": "200 卷数=3 error=None",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "案卷目录",
+      "expected": "200 且目录行 > 0",
+      "actual": "200 rows=11",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "按车间组卷",
+      "expected": "200 且真的有车间分组",
+      "actual": "200 error=None",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "导入整编要求登记表",
+      "expected": "200 且登记表 ready=True",
+      "actual": "200 ready=True total=3 err=",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "整卷生成",
+      "expected": "真的组出卷且每一项都有交代（生成/归集/待办，不静默丢弃）",
+      "actual": "200 generated=2 todo=0 collect=1 errors=0 静默丢弃=[] error=",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "整卷文件落盘",
+      "expected": "generated 列出的每个文件都在本项目目录内落盘",
+      "actual": "generated=2 找不到=0 落到项目外=0 项目=0494be15",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "一键竣工资料",
+      "expected": "200 且真正处理了设备（total_devices>0）",
+      "actual": "200 total_devices=3",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "缺件清单",
+      "expected": "200 且 missing 非空（空列表=没数据可查，不是好结果）",
+      "actual": "200 missing=22",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "导出成套",
+      "expected": "合法 ZIP 且内含文件（真解压核对，不只看 200）",
+      "actual": "200 size=6589 files=3 uncompressed=8175 bad=None err=",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "竣工归档跨项目隔离",
+      "expected": "新建项目里竣工设备数=0、缺件=0（不承接上一个项目的清单）",
+      "actual": "新项目 total_devices=0 missing=0（对照 A=3 台）",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 3,
+      "step": "切回原项目仍读到本项清单",
+      "expected": "切回后设备数恢复为 A 的值（隔离不是丢数据）",
+      "actual": "切回后 total_devices=3（应为 3）home=0494be15",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 5,
+      "step": "遥测状态接口",
+      "expected": "200 且 enabled=true",
+      "actual": "200 lines=543 err=",
+      "passed": true,
+      "skipped": false,
+      "evidence": "{\"ok\": true, \"enabled\": true, \"log_file\": \"data/telemetry/requests.jsonl\", \"lines\": 543, \"watermark\": \"2026-10-31 10:33:47\", \"privacy\": \"只记路由/状态/耗时/异常类型；导出包已脱敏，不含项目名与路径\"}"
+    },
+    {
+      "phase": 5,
+      "step": "请求记录落盘",
+      "expected": "requests.jsonl 有记录（lines > 0）",
+      "actual": "lines=543",
+      "passed": true,
+      "skipped": false,
+      "evidence": "/api/telemetry/status lines=543"
+    },
+    {
+      "phase": 5,
+      "step": "按路由聚合",
+      "expected": "by_route 存在且路由保留 /api/xxx 结构",
+      "actual": "routes=36 total=544 分层=True",
+      "passed": true,
+      "skipped": false,
+      "evidence": "[{\"route\": \"GET /api/scan/status\", \"n\": 257, \"p50_ms\": 0.5, \"p95_ms\": 1.6, \"max_ms\": 221.5, \"status_2xx\": 257, \"status_4xx\": 0, \"status_5xx\": 0}, {\"route\": \"GET /api/status\", \"n\": 41, \"p50_ms\": 14.6, \"p95_ms\": 9247.4, \"max_ms\": 15917.3, \"status_2xx\":"
+    },
+    {
+      "phase": 5,
+      "step": "4xx 计入客户端错误",
+      "expected": "探测的 404 被计入 status_4xx",
+      "actual": "status_4xx=5",
+      "passed": true,
+      "skipped": false,
+      "evidence": "by_route 汇总 status_4xx=5"
+    },
+    {
+      "phase": 5,
+      "step": "导出诊断包",
+      "expected": "200 且返回结构化 bundle",
+      "actual": "200 keys=['bundle_version', 'generated_at', 'window', 'requests', 'errors', 'parse_failures', 'environment', 'privacy']",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 5,
+      "step": "脱敏标记",
+      "expected": "privacy.sanitized == true",
+      "actual": "sanitized=True",
+      "passed": true,
+      "skipped": false,
+      "evidence": "{\"sanitized\": true, \"note\": \"不含项目名/客户/地点/文件名/绝对路径；错误消息中的路径与长串已替换为占位符\", \"rules\": [\"绝对路径→<PATH>\", \"长十六进制→<HASH>\", \"长数字→<NUM>\", \"引号内容→<STR>\"]}"
+    },
+    {
+      "phase": 5,
+      "step": "包内不含绝对路径",
+      "expected": "无盘符路径、无用户目录",
+      "actual": "盘符命中=0 用户目录=False",
+      "passed": true,
+      "skipped": false,
+      "evidence": "drive_hits=[]"
+    },
+    {
+      "phase": 5,
+      "step": "包内不含业务敏感字段",
+      "expected": "导出键名无项目名/客户/文件名/路径类字段",
+      "actual": "命中=无",
+      "passed": true,
+      "skipped": false,
+      "evidence": "keys_sample=['bundle_version', 'generated_at', 'window', 'from', 'to', 'span_min', 'requests', 'total', 'by_route', 'route', 'n', 'p50_ms']"
+    },
+    {
+      "phase": 5,
+      "step": "解析失败聚合",
+      "expected": "含 total_failed 与 by_ext/by_fingerprint",
+      "actual": "total_failed=0 by_ext={}",
+      "passed": true,
+      "skipped": false,
+      "evidence": "{\"total_failed\": 0, \"by_ext\": {}}"
+    }
+  ]
+}
