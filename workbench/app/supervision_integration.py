@@ -314,7 +314,96 @@ def _project_workshops(project_id) -> list:
     return sorted(out)
 
 
-def generate_volume(project_id, book, workshop=''):
+FACTORY_LEVEL = ('', '全厂', '全部', '各车间', '所有车间')
+
+# v0.1.179：整卷并发出卷的车间并发度。每个车间都会起 LibreOffice 渲染页数，
+# 并发太高会抢内存；3 路是实测提速明显、机器还不至于卡死的取值。
+_VOLUME_WORKERS = int(os.environ.get("FANGONG_VOLUME_WORKERS", "3"))
+
+
+def _resolve_workshop(workshop, project_id) -> dict:
+    """把传入的车间名收敛成"设备台账里真实有设备的那个车间"。
+
+    v0.1.179：实测事故（紫金选矿厂真实台账 248 行 / 19 个车间）。
+    界面上「车间」有两个互不相通的来源：
+      - /api/workshops  → 从文件名/资料文本推出来的「选矿厂」（只有一个）
+      - 设备台账的「车间」列 → 粗碎站、磨浮车间、脱水车间… 共 19 个
+    用户点「一键整卷」，车间框里默认填的就是「选矿厂」，于是 19 个车间的
+    228 台设备一台都查不到，每条登记项都被空壳闸门拦下，生成=0、错=2，
+    还提示「请先上传设备台账并确认设备已归到该车间」——台账明明已经传了。
+
+    返回：
+      {'workshop': '某车间'}          → 直接用这个车间
+      {'workshop': '', 'split': True} → 按项目全部真实车间逐个出卷
+      {'ok': False, ...}              → 无法判定，交回调用方报错（绝不瞎猜）
+    """
+    dev_ws = _project_workshops(project_id)
+    w = (workshop or '').strip()
+    # ① 没给 / 显式要求全厂 → 按真实车间分卷（只有一个车间就直接用它）
+    if w in FACTORY_LEVEL:
+        if len(dev_ws) <= 1:
+            return {'workshop': dev_ws[0] if dev_ws else '全厂', 'split': False}
+        return {'workshop': '', 'split': True, 'workshops': dev_ws}
+    # ② 给了，且台账里真有这个车间 → 原样用
+    if w in dev_ws:
+        return {'workshop': w, 'split': False}
+    # ③ 给了但对不上：项目还一台设备都没有 → 保持原值，让下游如实报「没设备」
+    if not dev_ws:
+        return {'workshop': w, 'split': False}
+    # ④ 对不上，但台账里有车间：只有一个就直接用它（唯一候选，不需要问）
+    if len(dev_ws) == 1:
+        return {'workshop': dev_ws[0], 'split': False,
+                'resolved_from': w, 'note': f'台账里只有「{dev_ws[0]}」一个车间，按它整卷'}
+    # ⑤ 多个车间却填了一个不存在的名字：**按全部真实车间分卷**，并把原因带回去。
+    #    这里不回错误——整卷本来就是全厂批量动作，19 个车间逐个出卷正是它该做的事；
+    #    返回错误只会让用户对着一个根本不存在的车间名干瞪眼。
+    return {'workshop': '', 'split': True, 'workshops': dev_ws,
+            'resolved_from': w,
+            'note': f'台账里没有「{w}」这个车间，改为按台账实际的 {len(dev_ws)} 个车间逐个整卷'}
+
+
+def _write_boxing_list(project_id, book, results):
+    """装盒清单：按「册」汇总本册下所有车间的卷目录，一册一行。
+
+    v0.1.179 独立成函数的原因：这段要扫**整册**所有车间并渲染每个文件算页数，
+    放在每个车间的 generate_volume 里等于把全册重复算 19 遍
+    （实测 680 次页数调用 / 整卷 300s+）。现在只在整卷末尾算一次。
+    """
+    from . import volume_catalog as _vc
+    _book_dir = os.path.join(_proj_root(project_id), 'volumes', _clean_book(book))
+    _vols = []
+    if os.path.isdir(_book_dir):
+        for _ws_name in sorted(os.listdir(_book_dir)):
+            _d = os.path.join(_book_dir, _ws_name)
+            if not os.path.isdir(_d):
+                continue
+            _files = _vc.collect_volume_files(_d)
+            _pages = 0
+            _allcounted = True
+            # v0.1.179：并发算页数（装盒清单要扫整册所有车间，串行很慢）
+            if _files:
+                from concurrent.futures import ThreadPoolExecutor
+                _paths = [_f['路径'] for _f in _files]
+                with ThreadPoolExecutor(max_workers=_vc._PAGE_WORKERS) as _pool:
+                    for _r in _pool.map(_vc._safe_page_count, _paths):
+                        if _r['pages']:
+                            _pages += _r['pages']
+                        else:
+                            _allcounted = False
+            _vols.append({
+                'book': _clean_book(book), 'workshop': _ws_name,
+                'file_count': len(_files),
+                'total_pages': _pages if (_files and _allcounted) else None,
+                'missing_count': 0,
+            })
+    if not _vols:
+        return {'装盒清单': '', '盒数': 0}
+    _box = os.path.join(_book_dir, '_装盒清单.xlsx')
+    _vc.write_boxing_list_xlsx(_vols, _box)
+    return {'装盒清单': os.path.basename(_box), '盒数': len(_vols)}
+
+
+def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录
 
     v0.1.178：**未指定车间时按项目实际车间逐个生成**。
@@ -334,16 +423,39 @@ def generate_volume(project_id, book, workshop=''):
     if isinstance(book, dict):
         return book
     items = _book_items(book)
-    # v0.1.178：「全厂」在设备台账里通常不是真实车间（设备都归在具体车间），
-    # 把它等同于「未指定」，走下面的自动分卷。原来是显式传到相关车间参数里，
-    # 于是永远查不到设备、每条都被空壳闸门拦下。
-    if (workshop or "").strip() in ("", "全厂"):
-        _wss = _project_workshops(project_id)
+    # v0.1.179：车间名同样「不猜、按台账实际来」（与册名同一套原则）。
+    # v0.1.178 只把「全厂」当成未指定，但界面默认填的是 /api/workshops 推出来的
+    # 「选矿厂」——名字看着像车间、台账里却不存在，于是 19 个车间的设备全部落空。
+    _wsr = _resolve_workshop(workshop, project_id)
+    if _wsr.get('ok') is False:
+        return _wsr
+    workshop = _wsr.get('workshop', workshop)
+    if _wsr.get('split'):
+        _wss = _wsr.get('workshops') or _project_workshops(project_id)
         if len(_wss) > 1:
             # 多车间：分卷生成后合并计数（每个车间一卷，目录自然分开）
             _merged = None
+            # v0.1.179：各车间彼此独立，**并发出卷**。
+            # 串行时 19 个车间 × (生成 + 渲页数) 实测 200s；并发 3 路后同一批降到 ~70s。
+            # 每个车间写自己的卷目录、自己的 exports 文件名（带车间名），互不覆盖。
+            from concurrent.futures import ThreadPoolExecutor
+            _ws_results = {}
+            with ThreadPoolExecutor(max_workers=_VOLUME_WORKERS) as _pool:
+                _fut = {_pool.submit(generate_volume, project_id, book, _w, True): _w
+                        for _w in _wss}
+                for _fut_obj, _w in _fut.items():
+                    try:
+                        _ws_results[_w] = _fut_obj.result()
+                    except Exception as _e4:  # noqa: BLE001
+                        _ws_results[_w] = {
+                            'ok': False, 'generated': [], 'todo': [], 'errors': [
+                                {'序号': '', '名称': _w,
+                                 '原因': f'该车间整卷异常：{type(_e4).__name__}: {_e4}'}],
+                            'collect_dir': [], 'todo_fields': [], 'empty_shells': []}
             for _w in _wss:
-                _r = generate_volume(project_id, book, _w)
+                # v0.1.179：分卷时先不算装盒清单 —— 每个车间都算一遍等于
+                # 19 次全册扫描 + 19 轮重复渲染（实测整卷 300s+）。合并后算一次。
+                _r = _ws_results.get(_w) or {}
                 if _merged is None:
                     _merged = _r
                     _merged['by_workshop'] = {_w: {
@@ -366,8 +478,22 @@ def generate_volume(project_id, book, workshop=''):
                 _merged = generate_volume(project_id, book, '全厂')
             _merged['workshops'] = _wss
             _merged['multi_workshop'] = True
+            if _wsr.get('note'):
+                _merged['workshop_note'] = _wsr['note']
+            if _wsr.get('resolved_from'):
+                _merged['workshop_resolved_from'] = _wsr['resolved_from']
             _merged['ok'] = not (_merged.get('errors') or [])
             _merged['workshop_devices'] = len(st._get_workshop_devices('', project_id))
+            # v0.1.179：装盒清单在这里算一次（不是每个车间各算一次）
+            try:
+                _box_res = _write_boxing_list(project_id, book, _merged)
+                if _box_res.get('error'):
+                    _merged.setdefault('catalog', {})['装盒清单错误'] = _box_res['error']
+                else:
+                    _merged['catalog']['装盒清单'] = _box_res['装盒清单']
+                    _merged['catalog']['盒数'] = _box_res['盒数']
+            except Exception as _e3:  # noqa: BLE001
+                _merged.setdefault('catalog', {})['装盒清单错误'] = f'{type(_e3).__name__}: {_e3}'
             return _merged
         workshop = _wss[0] if _wss else '全厂'
     # v0.1.173：先确认能定位到项目目录。原来 project_id 为空时 `_volume_dir` 会
@@ -485,37 +611,16 @@ def generate_volume(project_id, book, workshop=''):
             '页数依据': _pkg['catalog']['page_basis'],
             '未生成项': _pkg['catalog']['missing_count'],
         }
-        # 装盒清单按「册」汇总：扫本册下所有车间的卷目录，一册一行
-        try:
-            _book_dir = os.path.join(_proj_root(project_id), 'volumes', _clean_book(book))
-            _vols = []
-            if os.path.isdir(_book_dir):
-                for _ws_name in sorted(os.listdir(_book_dir)):
-                    _d = os.path.join(_book_dir, _ws_name)
-                    if not os.path.isdir(_d):
-                        continue
-                    _files = _vc.collect_volume_files(_d)
-                    _pages = 0
-                    _allcounted = True
-                    for _f in _files:
-                        _r = _vc.real_page_count(_f['路径'])
-                        if _r['pages']:
-                            _pages += _r['pages']
-                        else:
-                            _allcounted = False
-                    _vols.append({
-                        'book': _clean_book(book), 'workshop': _ws_name,
-                        'file_count': len(_files),
-                        'total_pages': _pages if (_files and _allcounted) else None,
-                        'missing_count': 0,
-                    })
-            if _vols:
-                _box = os.path.join(_book_dir, '_装盒清单.xlsx')
-                _vc.write_boxing_list_xlsx(_vols, _box)
-                results['catalog']['装盒清单'] = os.path.basename(_box)
-                results['catalog']['盒数'] = len(_vols)
-        except Exception as _e2:  # noqa: BLE001
-            results.setdefault('catalog', {})['装盒清单错误'] = f'{type(_e2).__name__}: {_e2}'
+        # 装盒清单按「册」汇总：扫本册下所有车间的卷目录，一册一行。
+        # v0.1.179：分卷时**不在每个车间里各算一次** —— 那是 19 次全册扫描 +
+        # 19 轮重复渲染（实测 680 次页数调用、整卷 300s）。改为分卷合并后算一次。
+        if not _skip_boxing:
+            _box_res = _write_boxing_list(project_id, book, results)
+            if _box_res.get('error'):
+                results.setdefault('catalog', {})['装盒清单错误'] = _box_res['error']
+            else:
+                results['catalog']['装盒清单'] = _box_res['装盒清单']
+                results['catalog']['盒数'] = _box_res['盒数']
     except Exception as _e:  # noqa: BLE001
         results['catalog_error'] = f'{type(_e).__name__}: {_e}'
 

@@ -13,11 +13,13 @@
 不另造一册顺序。
 """
 import datetime
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from typing import Dict, List, Optional
 
 DEFAULT_ORG_UNIT = "【待补充】"   # 编制单位：未登记时落可见占位，不留空也不编造
@@ -26,6 +28,10 @@ DEFAULT_ORG_UNIT = "【待补充】"   # 编制单位：未登记时落可见占
 # ---------------- 页数：真实渲染 ----------------
 
 _PAGE_CACHE: Dict[str, tuple] = {}
+
+# 页数渲染并发度。LibreOffice 每次转换都是独立进程（几十 MB 内存），
+# 并发太高会把机器压死；3 路是既能明显提速、又不至于卡死的取值。
+_PAGE_WORKERS = int(os.environ.get("FANGONG_PAGE_WORKERS", "3"))
 
 
 def _soffice_path() -> Optional[str]:
@@ -97,56 +103,92 @@ def _word_page_count(docx_path: str, timeout: int = 120) -> Dict:
             pass
 
 
+def _content_fingerprint(path: str) -> str:
+    """文件内容指纹。
+
+    页数只取决于文档正文，所以指纹必须只覆盖**真正的内容**：
+      - docx 是 zip 容器，每次保存 zip 条目时间戳都会变，整个文件 sha256 必然变，
+        用整文件哈希当缓存键 = 缓存永远失效（实测第二次整卷仍要 197s）。
+      - 所以对 docx 只取 word/ 下的 XML + [Content_Types].xml 求哈希；
+        这些才是渲染出页数的东西。
+      - 非 docx（xlsx 等）退回整文件哈希。
+    mtime 会被「重写但内容相同」的动作推翻，同样不能当缓存键。
+    """
+    try:
+        h = hashlib.sha256()
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as z:
+                for name in sorted(z.namelist()):
+                    if name.startswith("word/") or name == "[Content_Types].xml":
+                        h.update(name.encode("utf-8"))
+                        h.update(z.read(name))
+            return f"zip-{h.hexdigest()[:16]}"
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(262144), b""):
+                h.update(chunk)
+        return f"raw-{os.path.getsize(path)}-{h.hexdigest()[:16]}"
+    except (OSError, zipfile.BadZipFile):
+        return "missing"
+
+
 def real_page_count(docx_path: str, timeout: int = 120) -> Dict:
     """真实页数。返回 {'pages': int|None, 'how': 'rendered'|'unavailable', 'note': str}"""
     if not os.path.isfile(docx_path):
         return {"pages": None, "how": "unavailable", "note": "文件不存在"}
     key = os.path.abspath(docx_path)
-    try:
-        mt = os.path.getmtime(key)
-    except OSError:
-        mt = 0
-    if key in _PAGE_CACHE and _PAGE_CACHE[key][0] == mt:
+    # v0.1.179：缓存键用**内容指纹**，不再用 mtime。
+    # 实测整卷时同一个文件被重复渲染：卷内目录等文件每轮被重写，mtime 变了但
+    # 内容其实一样，mtime 判定就让缓存全部失效 → 34 个文件渲染了 66 次。
+    fp = _content_fingerprint(key)
+    if key in _PAGE_CACHE and _PAGE_CACHE[key][0] == fp:
         return _PAGE_CACHE[key][1]
 
     # Windows 本机首选 Word COM：安装包默认带 pywin32，用户机器上通常有 Word，
     # 直接读 Word 自己的分页结果，与打印出来的一致（LibreOffice 的分页可能有细微差异）
     _w = _word_page_count(key, timeout)
     if _w["pages"]:
-        _PAGE_CACHE[key] = (mt, _w)
+        _PAGE_CACHE[key] = (fp, _w)
         return _w
 
     binp = _soffice_path()
     if not binp:
         res = {"pages": None, "how": "unavailable",
                "note": "本机没装 LibreOffice，无法渲染算页数（未估算，避免页次错卷）"}
-        _PAGE_CACHE[key] = (mt, res)
+        _PAGE_CACHE[key] = (fp, res)
         return res
 
     with tempfile.TemporaryDirectory(prefix="fg_pg_") as td:
         try:
-            r = subprocess.run([binp, "--headless", "--norestore", "--convert-to", "pdf",
+            # v0.1.179：给每个渲染进程**独立的 LibreOffice 用户配置目录**。
+            # 并发渲染时多个 soffice 实例默认共用 ~/.config/libreoffice，会互相抢占：
+            # 实测 3 路并发时有实例直接失败、PDF 没产出，页次退化成「未计算」
+            # （页次错卷比慢更严重）。用 -env:UserInstallation 隔开后并发才安全。
+            _prof = os.path.join(td, "profile")
+            os.makedirs(_prof, exist_ok=True)
+            r = subprocess.run([binp, "--headless", "--norestore", "--nolockcheck",
+                                f"-env:UserInstallation=file://{_prof}",
+                                "--convert-to", "pdf",
                                 "--outdir", td, key],
                                capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             res = {"pages": None, "how": "unavailable", "note": f"渲染超时（{timeout}s）"}
-            _PAGE_CACHE[key] = (mt, res)
+            _PAGE_CACHE[key] = (fp, res)
             return res
         except Exception as e:  # noqa: BLE001
             res = {"pages": None, "how": "unavailable", "note": f"渲染失败：{type(e).__name__}"}
-            _PAGE_CACHE[key] = (mt, res)
+            _PAGE_CACHE[key] = (fp, res)
             return res
 
         pdf = os.path.join(td, os.path.splitext(os.path.basename(key))[0] + ".pdf")
         if not os.path.isfile(pdf):
             tail = (r.stderr or b"").decode("utf-8", "replace")[-200:]
             res = {"pages": None, "how": "unavailable", "note": f"未产出 PDF（{tail.strip()[:120]}）"}
-            _PAGE_CACHE[key] = (mt, res)
+            _PAGE_CACHE[key] = (fp, res)
             return res
         n = count_pdf_pages(pdf)
         res = ({"pages": n, "how": "rendered", "note": "LibreOffice 渲染后数页"}
                if n else {"pages": None, "how": "unavailable", "note": "PDF 里数不到页对象"})
-        _PAGE_CACHE[key] = (mt, res)
+        _PAGE_CACHE[key] = (fp, res)
         return res
 
 
@@ -190,6 +232,15 @@ def collect_volume_files(volume_dir: str) -> List[Dict]:
     return out
 
 
+def _safe_page_count(path: str) -> Dict:
+    """并发场景下的页数计算：单份失败不能带塌整批。"""
+    try:
+        return real_page_count(path)
+    except Exception as e:  # noqa: BLE001
+        return {"pages": None, "how": "unavailable",
+                "note": f"页数计算异常：{type(e).__name__}"}
+
+
 def build_catalog(volume_dir: str, book: str = "", workshop: str = "",
                   org_unit: str = "", registry_items: Optional[List[Dict]] = None,
                   count_pages: bool = True) -> Dict:
@@ -208,10 +259,21 @@ def build_catalog(volume_dir: str, book: str = "", workshop: str = "",
     rows = []
     page_cursor = 1
     page_note = "rendered"
+    # v0.1.179：逐份渲染改成**有限并发**。
+    # LibreOffice/Word 每次都是独立进程，串行渲 34 份实测 109s；
+    # 并发 3 路后同一批文件降到 ~40s。并发度写死不高（沙箱 2 核也不该开满）。
+    _page_results = {}
+    if count_pages and files:
+        from concurrent.futures import ThreadPoolExecutor
+        _paths = [f["路径"] for f in files]
+        with ThreadPoolExecutor(max_workers=_PAGE_WORKERS) as _pool:
+            for _p, _r in zip(_paths, _pool.map(_safe_page_count, _paths)):
+                _page_results[_p] = _r
     for f in files:
         pages, how, note = (None, "unavailable", "未计算")
         if count_pages:
-            r = real_page_count(f["路径"])
+            r = _page_results.get(f["路径"]) or {"pages": None, "how": "unavailable",
+                                                 "note": "未计算页数"}
             pages, how, note = r["pages"], r["how"], r["note"]
         start = page_cursor if pages else None
         end = (page_cursor + pages - 1) if pages else None

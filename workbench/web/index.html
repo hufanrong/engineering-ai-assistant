@@ -2388,12 +2388,16 @@ function runVolume() {
     })
     .then(function(r){ return r.json(); })
     .then(function(d){
-        if (!d.ok) {
+        // v0.1.179：顶层 ok=false 有两种含义，原来混在一起显示成「整卷失败」：
+        //   ① 接口异常 → 没有 result 字段，才是真失败
+        //   ② 整卷跑完了，但有登记项需要人工确认 → result 有内容，文件已经生成
+        // 之前把 ② 显示成「整卷失败：未知错误」，用户看不到已经生成的 34 份文件。
+        if (!d.ok && !d.result) {
             btn.innerHTML = '整卷失败：' + (d.detail || '未知错误');
             return;
         }
         var r = d.result;
-        var html = '✅ 整卷完成：生成文件 <b>' + r.generated.length + '</b> 个｜归集目录 ' + r.collect_dir.length + ' 个';
+        var html = (r.errors.length ? '⚠️ 整卷完成，但有登记项需要人工确认：生成文件 <b>' : '✅ 整卷完成：生成文件 <b>') + r.generated.length + '</b> 个｜归集目录 ' + r.collect_dir.length + ' 个';
         if (r.todo_fields.length) {
             html += '<br>⏳ 待人工补充实测数据 <b>' + r.todo_fields.length + '</b> 组：';
             r.todo_fields.slice(0, 10).forEach(function(t){

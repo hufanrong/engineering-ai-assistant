@@ -52,12 +52,25 @@ DATA_KEEP = [
 
 EXCLUDE_SUFFIX = (".pyc", ".pyo", ".log", ".tmp")
 
+# 运行期生成的自测报告：里面会写死测机器的绝对路径和当时的版本号，
+# 打进安装包会泄露路径、也会让收件人看到与自己无关的版本数字。
+EXCLUDE_REL_FILES = [
+    "tools/fieldtest_report.json",
+    "tools/fieldtest_report.md",
+    "tools/selftest_report.json",
+    "tools/selftest_report.md",
+    "tools/verify_install.json",
+    "tools/last_install_verify.json",
+]
+
 
 def should_skip(rel):
     rel = rel.replace("\\", "/")
     if rel.endswith(EXCLUDE_SUFFIX):
         return True
     if "__pycache__" in rel.split("/"):
+        return True
+    if rel in EXCLUDE_REL_FILES:
         return True
     for p in EXCLUDE_PREFIX:
         if rel == p or rel.startswith(p + "/"):

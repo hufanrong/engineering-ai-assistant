@@ -43,6 +43,10 @@ WB_DIR = os.path.dirname(HERE)
 BASE = os.environ.get("FANGONG_BASE", "http://127.0.0.1:8756")
 TIMEOUT = 180
 
+# 整卷要逐份渲染算页数（v0.1.179 实测 19 个车间约 200s），比普通请求慢一个量级。
+# 单独给可配的宽超时，不把所有请求都放宽。
+VOLUME_TIMEOUT = int(os.environ.get("FANGONG_VOLUME_TIMEOUT", "900"))
+
 RESULT = {
     "tool": "fieldtest",
     "generated_at": "",
@@ -584,7 +588,8 @@ def run(args):
     RESULT["inputs"]["workshop"] = workshop
 
     code, vol, err = call("POST", "/api/supervision/volume",
-                          {"project_id": test_pid, "book": book, "workshop": workshop})
+                          {"project_id": test_pid, "book": book, "workshop": workshop},
+                          timeout=VOLUME_TIMEOUT)
     vr = jget(vol, "result") or jget(vol) or {}
     gen = vr.get("generated") or []
     todo = vr.get("todo") or []
@@ -849,7 +854,8 @@ def run(args):
             dev_b == 0 and miss_b == 0)
         # 新项目里整卷不能写进别人目录
         code, vol2, err2 = call("POST", "/api/supervision/volume",
-                                {"project_id": new_id, "book": book, "workshop": workshop})
+                                {"project_id": new_id, "book": book, "workshop": workshop},
+                                timeout=VOLUME_TIMEOUT)
         vr2 = jget(vol2, "result") or {}
         gen2 = vr2.get("generated") or []
         pdir2 = project_dir(new_id)

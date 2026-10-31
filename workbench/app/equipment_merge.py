@@ -49,9 +49,13 @@ def _save(m: dict):
 
 # ---------------- 设备提取 ----------------
 
-def extract_equipment_from_cache(cache: dict) -> list:
+def extract_equipment_from_cache(cache: dict, skipped: list = None) -> list:
     """从单个解析缓存中提取设备列表。
     返回 [{tag, name, model, spec, workshop, source_file, source_type, version_ts, fields}]
+
+    v0.1.179：传入 skipped 列表时，**每一行没进设备库的台账行都记账**（行号+原因），
+    不再静默丢弃。竣工资料按设备逐台出表，少一台就少一整套确认表，
+    用户必须能看到"这一行为什么没算设备"，而不是自己去数。
     """
     out = []
     if not cache:
@@ -66,19 +70,21 @@ def extract_equipment_from_cache(cache: dict) -> list:
         # Excel台账：每行一个设备
         for sheet in structure.get("sheets", [])[:10]:
             header = [str(h or "").strip() for h in sheet.get("header", [])]
-            for row in sheet.get("rows", [])[:5000]:
+            for _row_i, row in enumerate(sheet.get("rows", [])[:5000]):
                 if isinstance(row, dict):
                     tag = str(row.get("位号") or row.get("设备位号") or row.get("设备编号") or row.get("编号") or "").strip()
                     name = str(row.get("设备名称") or row.get("名称") or row.get("品名") or "").strip()
                     model = str(row.get("型号") or row.get("规格型号") or row.get("规格") or "").strip()
                     ws = str(row.get("车间") or row.get("所属车间") or row.get("区域") or "").strip()
                     weight = str(row.get("重量") or row.get("设备重量") or "").strip()
+                    spec = str(row.get("规格参数") or row.get("规格参数及技术性能")
+                               or row.get("规格及技术性能") or row.get("技术性能") or "").strip()
                     # v0.1.167：补采「数量」—— 原来只取重量，台账里的数量列整列丢失，
                     # 设备库/竣工资料的数量恒为空
                     qty = str(row.get("数量") or row.get("台数") or "").strip()
                 else:
                     vals = [str(v or "").strip() for v in row]
-                    tag = name = model = ws = weight = qty = ""
+                    tag = name = model = ws = weight = qty = spec = ""
                     for i, h in enumerate(header):
                         if i >= len(vals):
                             break
@@ -94,7 +100,28 @@ def extract_equipment_from_cache(cache: dict) -> list:
                             weight = vals[i]
                         elif h in ("数量", "台数"):
                             qty = vals[i]
-                if not tag and not name:
+                        # v0.1.179：采「规格参数」—— 真实台账里同一车间同名设备的唯一区分依据
+                        # 就是规格（渣浆泵 8/6E-AH、50/40B-AH…），型号列常常整列为空。
+                        elif h in ("规格参数", "规格参数及技术性能", "规格及技术性能",
+                                   "技术性能", "规格型号", "规格参数/性能"):
+                            spec = vals[i]
+                # v0.1.179：**有型号或有规格的行也要保留**。
+                # 实测事故：用户真实台账（选矿厂 248 行）里有 33 行「设备名称」是空的，
+                # 只填了型号（G6-51-10D-55kw、LS250、V11-8…）或规格。
+                # 原来这里 `not tag and not name` 直接 continue，把这 33 台设备整行丢掉，
+                # 竣工资料按设备逐台出表，等于凭空少了 33 台。
+                if not tag and not name and not model and not spec:
+                    # 空行 / 续行（只有厂家或只有数量）：不算设备，但要留下证据
+                    if skipped is not None:
+                        skipped.append({
+                            "source_file": fname, "row_index": _row_i,
+                            "workshop": ws, "unit": str(row.get("单位") or "").strip()
+                            if isinstance(row, dict) else "",
+                            "quantity": qty, "vendor": str(row.get("厂家") or "").strip()
+                            if isinstance(row, dict) else "",
+                            "reason": ("台账空行（无名称/型号/规格）" if not qty
+                                       else "只有数量、无名称/型号/规格"),
+                        })
                     continue
                 fields = {}
                 if weight:
@@ -102,10 +129,11 @@ def extract_equipment_from_cache(cache: dict) -> list:
                 if qty:
                     fields["数量"] = qty
                 out.append({
-                    "tag": tag, "name": name, "model": model,
+                    "tag": tag, "name": name, "model": model, "spec": spec,
                     "quantity": qty, "weight": weight,
                     "workshop": ws, "source_file": fname,
                     "source_type": "excel", "version_ts": ts,
+                    "row_index": _row_i,
                     "fields": fields,
                 })
     elif parser == "cad":
@@ -143,14 +171,17 @@ def extract_equipment_from_cache(cache: dict) -> list:
     return out
 
 
-def extract_all_equipment(docs: dict) -> list:
-    """从所有解析文档中提取设备清单。"""
+def extract_all_equipment(docs: dict, skipped: list = None) -> list:
+    """从所有解析文档中提取设备清单。
+
+    v0.1.179：skipped 透传到 extract_equipment_from_cache，逐行记账未计为设备的台账行。
+    """
     all_eq = []
     for sha, d in docs.items():
         cache = d.get("_cache") or {}
         if not cache:
             continue
-        eqs = extract_equipment_from_cache(cache)
+        eqs = extract_equipment_from_cache(cache, skipped=skipped)
         for e in eqs:
             e["sha"] = sha
             all_eq.append(e)
@@ -158,6 +189,32 @@ def extract_all_equipment(docs: dict) -> list:
 
 
 # ---------------- 设备匹配 ----------------
+
+# ---------------- 位号分层（v0.1.179） ----------------
+# 真实台账（如紫金矿业选矿厂设备台账 248 行）往往**没有「位号」列**。
+# 这类设备没有设计院编号，合并时必须给一个内部身份键，否则同名设备会互相当成同一台；
+# 但这个内部键**绝不能印到给监理的确认表里**——「设备位号」栏应当是空的（人工填写），
+# 而不是 _no_tag_xxx 这种字符串。所以内部键与对外位号必须分两层：
+#   canonical_tag   = 内部身份键（可以是占位键）
+#   display_tag()   = 对外位号（占位键一律返回空）
+PLACEHOLDER_TAG_PREFIX = "_no_tag_"
+
+
+def is_placeholder_tag(tag) -> bool:
+    """是否是"台账里没有位号"而生成的内部占位键。"""
+    return str(tag or "").strip().startswith(PLACEHOLDER_TAG_PREFIX)
+
+
+def display_tag(tag) -> str:
+    """对外（监理表格/设备清单）显示的位号。占位键一律返回空，由人工补填。"""
+    t = str(tag or "").strip()
+    if not t or is_placeholder_tag(t):
+        return ""
+    # _dup_ / _vN 后缀是合并过程产生的内部区分，同样不能外露
+    t = re.sub(r"_dup_\d+$", "", t)
+    t = re.sub(r"_v\d+$", "", t)
+    return t
+
 
 def _norm_tag(tag: str) -> str:
     """规范化位号：去空格、统一大写、去连接符差异。"""
@@ -249,8 +306,21 @@ def merge_equipment_list(equipment_list: list) -> dict:
     for eq in sorted_eq:
         tag = _norm_tag(eq.get("tag", ""))
         if not tag:
-            # 无位号设备，用名称+源文件作为临时key
-            tag = f"_no_tag_{eq.get('name', '')}_{eq.get('source_file', '')}"
+            # v0.1.179：**无位号设备必须做到"一台一行、互不合并"**。
+            # 旧写法只取「名称+源文件」，实测后果（紫金选矿厂真实台账 248 行）：
+            # 同一车间同名设备全被合成一台 —— 渣浆泵 6 行（不同规格 8/6E-AH、50/40B-AH、
+            # 200/150E-AH、100/80D-AH）、液下渣浆泵 20 行、电动单梁起重机 11 行……
+            # 合并后只剩 173 台，**凭空少了 75 台（30.2%）**，竣工资料按设备逐台出表，
+            # 等于每少一台就少一整套确认表。
+            # 现在把「名称+车间+型号+规格+源文件+行号」全放进键里：
+            # 内容相同的两行不会被误当成两台不同设备（同表同源），
+            # 内容不同的行也绝不会被挤成一台。宁可多出来让人去重，也不能悄悄少设备。
+            tag = (f"{PLACEHOLDER_TAG_PREFIX}"
+                   f"{eq.get('name', '')}|{eq.get('workshop', '')}|{eq.get('model', '')}"
+                   f"|{eq.get('spec', '')}|{eq.get('source_file', '')}"
+                   f"|{eq.get('row_index', '')}")
+            # 内部键统一大写去空格会破坏 | 分隔的中文内容，所以这里不再走 _norm_tag
+            tag = tag.strip()
 
         if tag not in merged:
             # 新设备
@@ -258,6 +328,11 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 "canonical_tag": tag,
                 "name": eq.get("name", ""),
                 "model": eq.get("model", ""),
+                # v0.1.179：规格提到顶层 —— 无位号台账里型号列常常整列为空，
+                # 能区分同名设备的只有规格（渣浆泵 8/6E-AH / 50/40B-AH），
+                # 只留在 fields 里下游读不到，确认表的「规格型号」栏就会空着。
+                "spec": eq.get("spec", "") or (eq.get("fields", {}) or {}).get("规格参数", ""),
+                "row_index": eq.get("row_index", ""),
                 # v0.1.167：数量/重量提到顶层 —— 下游 /api/supervision-templates/equipment
                 # 与 docgen 读的是顶层字段，只放在 fields 里读不到
                 "quantity": eq.get("quantity", "") or (eq.get("fields", {}) or {}).get("数量", ""),
@@ -282,6 +357,8 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 existing["name"] = eq["name"]
             if eq.get("model"):
                 existing["model"] = eq["model"]
+            if eq.get("spec") and not existing.get("spec"):
+                existing["spec"] = eq["spec"]
             if eq.get("workshop"):
                 existing["workshop"] = eq["workshop"]
             # v0.1.167：数量/重量同样合并（首个非空即采用，后续非空覆盖）
@@ -317,6 +394,7 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 "canonical_tag": new_tag,
                 "name": eq.get("name", ""),
                 "model": eq.get("model", ""),
+                "spec": eq.get("spec", ""),
                 "workshop": eq.get("workshop", ""),
                 "versions": [eq],
                 "fields": dict(eq.get("fields", {})),
@@ -331,6 +409,7 @@ def merge_equipment_list(equipment_list: list) -> dict:
                 "canonical_tag": new_tag,
                 "name": eq.get("name", ""),
                 "model": eq.get("model", ""),
+                "spec": eq.get("spec", ""),
                 "workshop": eq.get("workshop", ""),
                 "versions": [eq],
                 "fields": dict(eq.get("fields", {})),
@@ -345,10 +424,13 @@ def merge_equipment_list(equipment_list: list) -> dict:
 
 def run_merge(docs: dict) -> dict:
     """执行全量设备合并，保存结果。"""
-    all_eq = extract_all_equipment(docs)
+    skipped_rows = []
+    all_eq = extract_all_equipment(docs, skipped=skipped_rows)
     result = merge_equipment_list(all_eq)
     m = _load()
     m["merged"] = {d["canonical_tag"]: d for d in result["merged"]}
+    # v0.1.179：跳过行落盘，用户点开设备库就能看到"这一行为什么没算设备"
+    m["skipped_rows"] = skipped_rows
     # 保留已确认的别名，新pending追加
     existing_pending_tags = {(p["existing_tag"], p["new_eq"].get("source_file", "")) for p in m.get("pending", [])}
     for p in result["pending"]:
@@ -361,6 +443,8 @@ def run_merge(docs: dict) -> dict:
         "merged_count": len(result["merged"]),
         "pending_count": len(m["pending"]),
         "duplicate_removed": len(all_eq) - len(result["merged"]),
+        "skipped_rows": len(skipped_rows),
+        "skipped_samples": skipped_rows[:10],
     }
 
 
@@ -407,7 +491,8 @@ def sync_devices_to_index(data_dir: str) -> dict:
             continue
         docs[sha] = {"_cache": cache, "file_name": info.get("file_name", "")}
 
-    equipment = extract_all_equipment(docs)
+    skipped_rows = []
+    equipment = extract_all_equipment(docs, skipped=skipped_rows)
     if not equipment:
         # 不写空值到磁盘：保留上一次的有效结果，避免「一次扫描没解析到台账」把已有设备清空
         return {"devices": 0, "with_workshop": 0, "sources": [],
@@ -431,6 +516,8 @@ def sync_devices_to_index(data_dir: str) -> dict:
             "source_count": d.get("source_count", 1),
         }
     idx["devices"] = devices
+    # v0.1.179：跳过行写进索引，设备库页面能直接看到「哪些台账行没算成设备、为什么」
+    idx["ledger_skipped_rows"] = skipped_rows[:200]
     idx["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # 车间键顺手补齐（同一份索引里两个键都是"给人看的分组视图"）
     ws_map = {}
@@ -450,7 +537,8 @@ def sync_devices_to_index(data_dir: str) -> dict:
     return {"devices": len(devices),
             "with_workshop": sum(1 for d in devices.values() if d.get("workshop")),
             "sources": sources[:10],
-            "workshops": sorted(ws_map)}
+            "workshops": sorted(ws_map),
+            "skipped_rows": len(skipped_rows)}
 
 
 def get_pending() -> list:

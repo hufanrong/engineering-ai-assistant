@@ -266,9 +266,15 @@ COMMON_DEVICE_TYPE_KEYWORDS = [
 
 
 def _device_type_of(equipment: str) -> str:
-    """从设备名称提取设备类型（用于模板表匹配）。"""
+    """从设备名称提取设备类型（用于模板表匹配）。
+
+    v0.1.179：名称为空时返回「通用」而不是空串。
+    真实台账里有 13 台设备只有型号、没有名称（G6-51-10D-55kw、LS250、V11-8…）。
+    返回空串会让它们落进一个没有任何模板槽位会去取的隐形分组，
+    结果就是"提取到了、也合并了，但一张确认表都没出"。
+    """
     if not equipment:
-        return ""
+        return "通用"
     # 先匹配矿山专用设备（更具体），再回落到通用工艺设备
     for t, kws in DEVICE_TYPE_KEYWORDS:
         for k in kws:
@@ -413,6 +419,22 @@ def _load_project_config(project_id: str = None) -> Dict:
     return cfg
 
 
+def _em_tag_display(tag: str) -> str:
+    """内部身份键 → 对外位号。
+
+    v0.1.179：台账没有「位号」列时，合并层必须造一个内部键来保证"一台一行"；
+    但那个键（_no_tag_名称|车间|型号|规格|源文件|行号）属于实现细节，
+    **绝不能出现在给监理的确认表「设备位号」栏**。这里统一收敛成空，
+    表格里就是空栏，由现场人工填写，也是竣工资料的正常做法。
+    """
+    try:
+        from . import equipment_merge as _em
+        return _em.display_tag(tag)
+    except Exception:  # noqa: BLE001
+        t = str(tag or "").strip()
+        return "" if t.startswith("_no_tag_") else t
+
+
 def _get_workshop_devices(workshop: str = "", project_id: str = None) -> List[Dict]:
     """获取指定车间的设备清单（含类型分组）。
     数据源：项目 index.json devices + equipment_merge merged。"""
@@ -430,14 +452,20 @@ def _get_workshop_devices(workshop: str = "", project_id: str = None) -> List[Di
                 if workshop and dev_ws and dev_ws != workshop:
                     continue
                 name = d.get("name", "")
-                if not name:
+                # v0.1.179：**无名称但有型号/规格的真实设备也要出表**。
+                # 实测（紫金选矿厂真实台账 248 行）：33 行「设备名称」为空，其中 13 行
+                # 只填了型号（G6-51-10D-55kw、LS250、V11-8…）。原来这里一律 continue，
+                # 这些设备在确认表里一台都出不来。名称缺失不等于设备不存在。
+                if not name and not (d.get("model") or d.get("spec")):
                     continue
                 key = f"{tag}|{name}"
                 if key in seen:
                     continue
                 seen.add(key)
                 devices.append({
-                    "tag": tag,
+                    # v0.1.179：对外位号 —— 台账没位号时后端给的是内部占位键，
+                    # 直接印出去就等于把 _no_tag_xxx 打给监理。这里统一转成空。
+                    "tag": _em_tag_display(tag),
                     "name": name,
                     "model": d.get("model", "") or d.get("spec", ""),
                     "manufacturer": d.get("manufacturer", ""),
@@ -456,7 +484,9 @@ def _get_workshop_devices(workshop: str = "", project_id: str = None) -> List[Di
         merged = _em.get_merged()
         for m in merged:
             name = m.get("name", "")
-            if not name:
+            # v0.1.179：同 A —— 无名称但有型号/规格的设备不能在这里再被筛掉一次
+            if not name and not (m.get("model") or m.get("spec")
+                                or (m.get("fields") or {}).get("规格参数")):
                 continue
             dev_ws = m.get("workshop", "")
             if workshop and dev_ws and dev_ws != workshop:
@@ -468,9 +498,10 @@ def _get_workshop_devices(workshop: str = "", project_id: str = None) -> List[Di
             seen.add(key)
             flds = m.get("fields") or {}
             devices.append({
-                "tag": tag,
+                "tag": _em_tag_display(tag),
                 "name": name,
-                "model": m.get("model", "") or flds.get("型号", ""),
+                "model": (m.get("model", "") or flds.get("型号", "")
+                          or m.get("spec", "") or flds.get("规格参数", "")),
                 "manufacturer": m.get("manufacturer", "") or flds.get("厂家", ""),
                 "workshop": dev_ws or workshop,
                 "quantity": flds.get("数量", ""),
