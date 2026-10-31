@@ -11,14 +11,27 @@
 
 包含：app/ parsers/ web/ tools/ docs/ cloud_server/ templates_builtin/ platform_data/
       start.py *.bat requirements*.txt README.md .gitignore
-      data/templates 下的模板库（内置模板首次启动会自动注册，但带上省一次冷启动）
 排除：data/projects（各项目业务数据）、data/*.json、data/generated_docs、data/uploads、
       data/vectordb、data/backups、data/telemetry、data/upload_queue、cloud_server/cloud_data、
       venv/、__pycache__/、*.pyc、*.log
+      data/templates（v0.1.180 起排除）
+
+为什么不再带 data/templates（v0.1.180）：
+data/templates 是**运行期派生目录**——上传模板时由 template_engine.upload_template()
+从 templates_builtin/ 复制一份带时间戳的副本进来，并把副本的**绝对路径**写进
+template_index.json 的 file_path。带上它有两个实害：
+  ① 路径泄漏：index 里 122 条 file_path 全是构建机绝对路径
+     （/home/.../repo/workbench/data/templates/xxx.docx），收件人打开就看见别人的机器目录；
+  ② 体积与垃圾：本机开发期间累积了 1697 个文件 / 62MB，其中 1693 个与内置模板逐字节相同，
+     1575 个是索引里根本没有的孤儿副本（只有 122 个被注册）。
+第一次启动时 supervision_templates._ensure_builtin_registered() 会扫模板目录
+templates_builtin/ 把 121 个模板按 **名称** 重新注册（幂等，不看 file_path），
+所以调用方拿到的模板一个不少，只是少了 60MB 冗余和别人的机器路径。
 """
 
 import argparse
 import json
+import re
 import os
 import shutil
 import sys
@@ -43,11 +56,13 @@ EXCLUDE_PREFIX = [
     "data/projects", "data/generated_docs", "data/uploads", "data/vectordb",
     "data/backups", "data/telemetry", "data/upload_queue", "data/exports",
     "cloud_server/cloud_data", "venv", ".venv", "__pycache__", "updates",
+    # v0.1.180：运行期派生目录，见文件头说明。首次启动由
+    # _ensure_builtin_registered() 从 templates_builtin/ 按名称重建。
+    "data/templates",
 ]
 
 # data/ 下这些**要**带上（首次启动即可用，不带也能跑但会多等一次注册）
 DATA_KEEP = [
-    "data/templates",
 ]
 
 EXCLUDE_SUFFIX = (".pyc", ".pyo", ".log", ".tmp")
@@ -250,8 +265,43 @@ def main():
         leaked = [n for n in names if n.startswith(f"{args.root_name}/data/projects/") and not n.endswith(".keep")]
         if leaked:
             problems.append(f"包内混入项目业务数据 {len(leaked)} 个：{leaked[:3]}")
-        tpl = [n for n in names if n.startswith(f"{args.root_name}/data/templates/")]
-        tpl_files = len(tpl)
+        # v0.1.180：模板库口径改为 templates_builtin/ —— data/templates 已排除，
+        # 首启由 _ensure_builtin_registered() 从这里按名称重建。
+        _bt = [n for n in names if n.startswith(f"{args.root_name}/templates_builtin/")
+               and n.lower().endswith((".docx", ".xlsx"))]
+        tpl_files = len(_bt)
+        # v0.1.180：**断言包内任何文本成员都不含构建机的绝对路径**。
+        # 这一条防的是「拿本机跑过的数据直接打包」——template_index.json 的
+        # file_path 就是这么泄漏出去的（122 条 /home/... 路径跟着包发给客户）。
+        # 只读文本类成员（zip 里都是可解压的小文件），二进制跳过不看。
+        _TEXT_EXT = (".json", ".md", ".txt", ".bat", ".py", ".html", ".js",
+                     ".css", ".yaml", ".yml", ".csv", ".ini", ".cfg", ".toml")
+        # 用正则而不是裸前缀：**前缀后面必须真的有路径段**。
+        # 裸前缀会误报——tools/selftest.py 里就写着 `"/Users/" in blob` 这种
+        # 自查判定串，它不是路径。实测第一版裸前缀检查因此 FAIL 掉。
+        _PATHRE = re.compile(
+            r"(?:/home/gem/\w+"
+            r"|aily/workdir/\w+"
+            r"|/Users/[\w.-]{2,}"
+            r"|C:\\\\Users\\\\[\w.-]{2,})")
+        _leak_hits = []
+        for _n in names:
+            if not _n.lower().endswith(_TEXT_EXT):
+                continue
+            try:
+                _c = zf.read(_n).decode("utf-8", errors="ignore")
+            except Exception:  # noqa: BLE001
+                continue
+            _m = _PATHRE.search(_c)
+            if _m:
+                _leak_hits.append((_n, _m.group(0)[:40]))
+        if _leak_hits:
+            problems.append(
+                f"包内 {len(_leak_hits)} 个文本成员含构建机绝对路径，禁止分发："
+                + "；".join(f"{os.path.basename(a)}({b})" for a, b in _leak_hits[:5]))
+            print(f"  路径泄漏检查：[FAIL] 命中 {len(_leak_hits)} 个文本成员")
+        else:
+            print("  路径泄漏检查：[PASS] 0 个文本成员含构建机绝对路径")
         # v0.1.177：**断言包内每个 .bat 都是 UTF-8 BOM + CRLF**。
         # 这一条是防回归的：用户端执行不了 .bat，整个安装流程就走不下去，
         # 而这类问题在沙箱 Linux 上跑任何测试都发现不了，只有回读字节才能拦住。
@@ -265,12 +315,12 @@ def main():
     size = os.path.getsize(out)
     print(f"  ZIP：{out}")
     print(f"  大小：{size/1024/1024:.1f} MB（原始 {total_raw/1024/1024:.1f} MB，{len(names)} 个成员）")
-    print(f"  内置模板库带上：{tpl_files} 个文件")
+    print(f"  内置模板库（templates_builtin）：{tpl_files} 个 docx/xlsx")
     if problems:
         for p in problems:
             print(f"  [FAIL] {p}")
         return 1
-    print("  [PASS] 包可打开、关键文件齐全、版本号一致、无业务数据泄漏")
+    print("  [PASS] 包可打开、关键文件齐全、版本号一致、无业务数据泄漏、无构建机路径泄漏")
     print(f"\n完成：{out}")
     return 0
 
