@@ -1,0 +1,77 @@
+{
+  "run_id": "20261031_143653",
+  "started": "2026-10-31 14:36:53",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "36ef300e71eb48e010450267c3ff1a6e21ee9cf8",
+      "err": ""
+    },
+    {
+      "step": "跳过拉取",
+      "rc": 0,
+      "out": "--no-pull"
+    },
+    {
+      "step": "taskkill 7216",
+      "rc": 0,
+      "out": "�ɹ�: ����ֹ PID Ϊ 7216 �Ľ��̡�",
+      "err": ""
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 46, \"failed\": 1, \"skipped\": 0, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 13, \"failed\": 1, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}}}",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=147 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1"
+    }
+  ],
+  "summary": {
+    "passed": 46,
+    "failed": 1,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 13,
+        "failed": 1,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "36ef300e71eb48e010450267c3ff1a6e21ee9cf8",
+  "finished": "2026-10-31 14:40:59",
+  "commit_before": "36ef300e71eb48e010450267c3ff1a6e21ee9cf8",
+  "commit_after": "36ef300e71eb48e010450267c3ff1a6e21ee9cf8"
+}
