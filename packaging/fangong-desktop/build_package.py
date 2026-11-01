@@ -76,6 +76,9 @@ EXCLUDE_REL_FILES = [
     "tools/selftest_report.md",
     "tools/verify_install.json",
     "tools/last_install_verify.json",
+    # v0.1.186：漏了一项 —— test_ledger_units.py 会生成这份报告，
+    # 它是运行期产物（同一类：含本机结果与时间戳），不该随包分发给别人。
+    "tools/test_ledger_units_report.json",
 ]
 
 
@@ -272,6 +275,19 @@ def main():
         leaked = [n for n in names if n.startswith(f"{args.root_name}/data/projects/") and not n.endswith(".keep")]
         if leaked:
             problems.append(f"包内混入项目业务数据 {len(leaked)} 个：{leaked[:3]}")
+        # v0.1.186：不许带进**运行期生成的报告**。EXCLUDE_REL_FILES 是按名字删的，
+        # 漏一个名字就会漏一份带本机结果和版本号的文件（实测漏了
+        # test_ledger_units_report.json）。这里改成按模式兜住，不再依赖逐个列举。
+        # 名字可能是 report 结尾，也可能不带 report（verify_install.json、
+        # last_install_verify.json），所以用「运行期工具名 + json/md/txt」而不是只认 report。
+        _REPORT_PAT = re.compile(
+            r"^(?:(?:test|fieldtest|selftest)[\w-]*?(?:_report)?"
+            r"|verify_install|last_install_verify|install_verify)[\w-]*\.(json|md|txt)$",
+            re.I)
+        _rep_stray = [n for n in names
+                      if _REPORT_PAT.match(os.path.basename(n))]
+        if _rep_stray:
+            problems.append(f"包内混入运行期报告 {len(_rep_stray)} 个：{_rep_stray[:3]}")
         # v0.1.180：模板库口径改为 templates_builtin/ —— data/templates 已排除，
         # 首启由 _ensure_builtin_registered() 从这里按名称重建。
         _bt = [n for n in names if n.startswith(f"{args.root_name}/templates_builtin/")

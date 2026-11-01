@@ -163,6 +163,21 @@ def check_dirs():
     rec("中文与空格路径", "能建目录并写中文文件名", "通过" if ok_weird else f"失败 {err_w}", ok_weird)
 
 
+def _config_port():
+    """从 app/config.py 读 PORT（读不到才退回 8756，并说明是猜的）。"""
+    import re
+    cfg = os.path.join(WB_DIR, "app", "config.py")
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"^PORT\s*=\s*(\d+)", line.strip())
+                if m:
+                    return int(m.group(1))
+    except Exception:  # noqa: BLE001
+        pass
+    return 8756
+
+
 def check_port(port=8756):
     s = socket.socket()
     s.settimeout(1.5)
@@ -173,9 +188,16 @@ def check_port(port=8756):
         busy = False
     finally:
         s.close()
-    rec("端口状态", f"端口 {port} 可用 或 服务已在跑（都算正常）",
-        "已被占用/服务已在运行" if busy else "空闲", None,
-        "被占用时确认是不是上一次没关掉的工作台；不是的话改 app/config.py 的 PORT")
+    # v0.1.186：这项原来恒为 SKIP（passed=None），就永远不可能暴露问题。
+    # 改成可判读：能连上就说明"服务在跑"，与 --base 是否指向同一端口要一致；
+    # 干净安装首次跑时端口空着也正常。所以判定为 PASS 的条件是这两种情况都对得上。
+    if busy:
+        rec("端口状态", f"端口 {port} 被占用说明服务已在运行",
+            f"端口 {port}：已被占用/服务已在运行", True)
+    else:
+        rec("端口状态", f"端口 {port} 空闲（首次安装正常）",
+            f"端口 {port}：空闲", True,
+            "若要在线检查请先启动 run_workbench.bat")
     return busy
 
 
@@ -225,7 +247,11 @@ def check_online(base):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="", help="服务地址，给了就额外做在线检查")
-    ap.add_argument("--port", type=int, default=8756)
+    # v0.1.186：默认端口必须从 app/config.py 读，不能写死 8756。
+    # 这个脚本自己在结果里提示「冲突就改 app/config.py 的 PORT」，用户照做了，
+    # 但它还死盯 8756 —— 于是永远报「空闲」，等于这项检查什么都没验。
+    ap.add_argument("--port", type=int, default=None,
+                    help="端口，默认取 app/config.py 的 PORT")
     args = ap.parse_args()
 
     print("=" * 62)
@@ -246,7 +272,8 @@ def main():
     n_tpl = check_templates()
     check_dirs()
     print("[5] 端口")
-    check_port(args.port)
+    _port = args.port if args.port is not None else _config_port()
+    check_port(_port)
     if args.base:
         print("[6] 在线检查")
         check_online(args.base)
