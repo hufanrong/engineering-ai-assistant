@@ -174,6 +174,49 @@ def main():
     check("空白兜底表有 gb_blank 标记",
           r_none.get("gb_blank") is True)
 
+        # --- D2：版面门禁。表是要打印出来交给监理的，列宽错了就是废表 ---
+    # v0.1.185：原来四列一律 4.25cm 等宽，条款被挤成两三行、手写列反而空着很宽；
+    # 改成按表种分配后又把第 0 列压到 1.5cm，标签「分部分项工程名称」折成三行。
+    # 这两次都是靠渲染出来看才发现的，所以把版面约束写成断言钉住。
+    print("\n[D2] 兜底表版面（列宽 / 越界 / 折行）")
+    from docx.oxml.ns import qn as _qn
+    _TW = 566.93
+    for _k in ('check', 'conceal', 'test', 'sign', 'generic'):
+        _p = os.path.join(tmp, f"lay_{_k}.docx")
+        _r = gb.build_gb_form(_p, form_name="通用记录表", form_no="SH/T3503-J399", kind=_k)
+        _d = Document(_p)
+        _t = _d.tables[0]
+        _sec = _d.sections[0]
+        _usable = _sec.page_width.cm - _sec.left_margin.cm - _sec.right_margin.cm
+        _grid = _t._tbl.find(_qn('w:tblGrid'))
+        _w = [int(x.get(_qn('w:w'))) for x in _grid.findall(_qn('w:gridCol'))]
+        _cm = [x / _TW for x in _w]
+        check(f"[{_k}] 列宽合计等于可用页宽",
+              abs(sum(_cm) - _usable) <= 0.05, f"合计={sum(_cm):.2f} 可用={_usable:.2f}")
+        check(f"[{_k}] 第0列 >= 2.95cm（放得下 8 字标签）", _cm[0] >= 2.95, f"{_cm[0]:.2f}")
+        check(f"[{_k}] 条款列最宽", _cm[1] == max(_cm), f"{[round(x,2) for x in _cm]}")
+        _bad = 0
+        for _tr in _t._tbl.findall(_qn('w:tr')):
+            _s = 0
+            for _tc in _tr.findall(_qn('w:tc')):
+                _s += int(_tc.find(_qn('w:tcPr')).find(_qn('w:tcW')).get(_qn('w:w')))
+            if abs(_s / _TW - _usable) > 0.05:
+                _bad += 1
+        check(f"[{_k}] 每行宽度合计都等于页宽（无越界行）", _bad == 0, f"异常行={_bad}")
+        # 第 0 列文字（含跨列合并的大类标题）都要放得下
+        _over = ""
+        for _row in range(len(_t.rows)):
+            _tcPr = _t.cell(_row, 0)._tc.find(_qn('w:tcPr'))
+            _span = 1
+            _gs = _tcPr.find(_qn('w:gridSpan')) if _tcPr is not None else None
+            if _gs is not None:
+                _span = int(_gs.get(_qn('w:val')) or 1)
+            _txt = _t.cell(_row, 0).text or ""
+            if len(_txt) * 0.317 + 0.38 > sum(_cm[:_span]):
+                _over = _txt
+                break
+        check(f"[{_k}] 第0列无折行", not _over, _over or "ok")
+
     print("\n[E] 别名在入口生效，不被其它类别的子串匹配抢走")
     # 先证明这个坑确实存在：模板库里有「防爆电气设备安装记录」，没有「设备安装记录」，
     # 所以旧的子串回退（category in c）必然唯一命中前者，且不会报歧义。

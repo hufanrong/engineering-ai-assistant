@@ -164,6 +164,21 @@ _KIND_COLS = {
     'generic': ("序号", "记录事项", "内容说明", "备注"),
 }
 
+# 各表种的列宽（cm，合计 = 可用页宽 17.0）。
+# v0.1.185：原来四列一律 4.25cm 等宽，实测渲染出来「事项名称与内容：」这类条款
+# 被挤在窄列里折成两三行，而后两个**要手写**的列反而空着很宽 —— 版面重心是反的。
+# 条款列给足，手写列只留够写一行。合计必须等于 17.0，否则表格会超出页边。
+# 第 0 列同时承担「序号」和「单位工程名称 / 分部分项工程名称」这类标签，
+# 标签最长 8 字（9pt 中文 ≈ 0.317cm/字 + 单元格左右边距 0.38cm ≈ 2.92cm），
+# 给到 3.0cm 才不折行 —— 实测 1.5cm 时「分部分项工程名称」被折成三行。
+_KIND_WIDTHS = {
+    'check':   (3.0, 6.5, 4.0, 3.5),
+    'conceal': (3.0, 6.5, 4.0, 3.5),
+    'test':    (3.0, 5.5, 5.0, 3.5),
+    'sign':    (3.0, 5.5, 5.0, 3.5),
+    'generic': (3.0, 5.5, 5.0, 3.5),
+}
+
 _KIND_TITLE_NOTE = {
     'check': "检查项目",
     'conceal': "隐蔽内容",
@@ -261,6 +276,67 @@ def _span(table, r, c_start, c_end):
             a.merge(b)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _apply_col_widths(table, widths_cm):
+    """按列宽写 tblGrid，并回填每个单元格的 tcW（含合并单元格）。
+
+    只改 tblGrid 不够：python-docx 给每个 tc 都写了 tcW，Word 会按 tcW 显示，
+    合并单元格的 tcW 还得等于它所跨列的宽度之和，否则会缩成单列宽。
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    twips = [int(round(w * 566.93)) for w in widths_cm]
+
+    tbl = table._tbl
+    grid = tbl.find(qn('w:tblGrid'))
+    if grid is None:
+        grid = OxmlElement('w:tblGrid')
+        tbl.insert(0, grid)
+    for gc in list(grid.findall(qn('w:gridCol'))):
+        grid.remove(gc)
+    for w in twips:
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), str(w))
+        grid.append(gc)
+
+    # 表格总宽写死，避免 Word「自动适应窗口」把列宽重新均分
+    tblPr = tbl.tblPr
+    for old in tblPr.findall(qn('w:tblW')):
+        tblPr.remove(old)
+    tblW = OxmlElement('w:tblW')
+    tblW.set(qn('w:w'), str(sum(twips)))
+    tblW.set(qn('w:type'), 'dxa')
+    tblPr.append(tblW)
+    for old in tblPr.findall(qn('w:tblLayout')):
+        tblPr.remove(old)
+    lay = OxmlElement('w:tblLayout')
+    lay.set(qn('w:type'), 'fixed')
+    tblPr.append(lay)
+
+    ncols = len(twips)
+    for tr in tbl.findall(qn('w:tr')):
+        pos = 0
+        for tc in tr.findall(qn('w:tc')):
+            tcPr = tc.find(qn('w:tcPr'))
+            if tcPr is None:
+                tcPr = OxmlElement('w:tcPr')
+                tc.insert(0, tcPr)
+            span = 1
+            gs = tcPr.find(qn('w:gridSpan'))
+            if gs is not None:
+                span = int(gs.get(qn('w:val')) or 1)
+            w = sum(twips[pos:pos + span])
+            pos += span
+            for old in tcPr.findall(qn('w:tcW')):
+                tcPr.remove(old)
+            tcW = OxmlElement('w:tcW')
+            tcW.set(qn('w:w'), str(w))
+            tcW.set(qn('w:type'), 'dxa')
+            tcPr.insert(0, tcW)
+        if pos != ncols:
+            raise ValueError(f"表格列数不匹配：行内跨列合计 {pos}，应为 {ncols}")
 
 
 def build_gb_form(out_path: str,
@@ -383,6 +459,9 @@ def build_gb_form(out_path: str,
         _span(t, r, 1, 3)
         _set_cell(t, r, 0, "签字", bold=True)
         _set_cell(t, r, 1, "施工班组：　　　　专业工程师：　　　　监理工程师：　　　　日期：")
+
+        # 表格内容全部写完后再统一落列宽（合并单元格的 tcW 要按跨列求和）
+        _apply_col_widths(t, _KIND_WIDTHS.get(kind, _KIND_WIDTHS['generic']))
 
         _tn = _KIND_TITLE_NOTE.get(kind, '记录事项')
         _n = (f"说明：本表按国标通用格式生成，「{_tn}」按该类记录的通用条款列出；"
