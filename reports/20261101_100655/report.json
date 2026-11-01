@@ -40,6 +40,24 @@
       "step": "判定",
       "rc": 0,
       "out": "status=failed rc=1"
+    },
+    {
+      "step": "git add reports",
+      "rc": 0,
+      "out": "",
+      "err": "warning: in the working copy of 'reports/.wb_loop_state.json', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'reports/20261101_095058/report.json', LF will be replaced by CRLF the next time Git touches it"
+    },
+    {
+      "step": "git commit",
+      "rc": 0,
+      "out": "[main 3215d03] test(workbuddy): 20261101_100655 status=failed P46/F1/S0\n 9 files changed, 1000 insertions(+), 4 deletions(-)\n create mode 100644 reports/20261101_100655/console.log\n create mode 100644 reports/20261101_100655/env.json\n create mode 100644 reports/20261101_100655/report.json\n create mo",
+      "err": ""
+    },
+    {
+      "step": "git push",
+      "rc": 0,
+      "out": "",
+      "err": "To https://github.com/hufanrong/engineering-ai-assistant\n   7730345..3215d03  HEAD -> main"
     }
   ],
   "summary": {
@@ -71,7 +89,8 @@
   },
   "error": "",
   "remote_head": "773034535c6f84afa9cd7633851224ad2a2f37d8",
-  "finished": "2026-11-01 10:11:14",
+  "finished": "2026-11-01 10:11:20",
   "commit_before": "773034535c6f84afa9cd7633851224ad2a2f37d8",
-  "commit_after": "773034535c6f84afa9cd7633851224ad2a2f37d8"
+  "commit_after": "3215d0368c416666d23809fe45b07592c61a12d7",
+  "pushed": true
 }
