@@ -1,0 +1,97 @@
+===== 诊断日志 20261101_095058 =====
+时间: 2026-11-01 09:52:05
+
+--- [1] 自动轮询日志尾部 ---
+[2026-11-01 06:06:43] 本地 19ec871f8b48  ahead=0 behind=0
+[2026-11-01 06:06:44] HEAD 19ec871f8b48 已测过且远端无新提交，本轮跳过
+[2026-11-01 06:36:49] 本地 19ec871f8b48  ahead=0 behind=0
+[2026-11-01 06:36:49] HEAD 19ec871f8b48 已测过且远端无新提交，本轮跳过
+[2026-11-01 07:06:55] 本地 19ec871f8b48  ahead=0 behind=0
+[2026-11-01 07:06:55] HEAD 19ec871f8b48 已测过且远端无新提交，本轮跳过
+[2026-11-01 07:36:48] 本地 19ec871f8b48  ahead=0 behind=1
+[2026-11-01 07:36:49] 快进到 origin/main rc=0 
+[2026-11-01 07:36:50] 开始一轮自测：HEAD 364e2e901d8b phases=1,2,3,5 py=pythonw.exe
+[2026-11-01 07:41:42] 一轮结束 rc=1 日志 D:\fangong-auto\logs\20261101_073643.log | [2026-11-01 07:36:51] ===== 本轮开始 20261101_073651，本地 364e2e901d8b =====
+[2026-11-01 07:36:53] --no-pull：跳过拉取，直接用当前本地代码
+[2026-11-01 07:41:42] 本轮结束 status=failed 报告在 reports/20261101_073651/
+[2026-11-01 08:06:58] 本地 2cd0761b9a3c  ahead=0 behind=0
+[2026-11-01 08:06:58] HEAD 2cd0761b9a3c 已测过且远端无新提交，本轮跳过
+[2026-11-01 08:36:43] 本地 2cd0761b9a3c  ahead=0 behind=0
+[2026-11-01 08:36:44] HEAD 2cd0761b9a3c 已测过且远端无新提交，本轮跳过
+[2026-11-01 09:06:56] 本地 2cd0761b9a3c  ahead=0 behind=0
+[2026-11-01 09:06:56] HEAD 2cd0761b9a3c 已测过且远端无新提交，本轮跳过
+[2026-11-01 09:36:54] 本地 2cd0761b9a3c  ahead=0 behind=0
+[2026-11-01 09:36:54] HEAD 2cd0761b9a3c 已测过且远端无新提交，本轮跳过
+
+--- [2] 远端与本地 ---
+2cd0761 test(workbuddy): 20261101_073651 status=failed P46/F1/S0
+364e2e9 chore: sync workbench
+19ec871 test(workbuddy): 20261101_013708 status=failed P46/F1/S0
+behind=0 ahead=0
+
+--- [3] 断言位置 ---
+607:           f"{code} phases={len(phases)} 有资料的阶段={len(filled)}", code == 200 and bool(filled), err)
+
+--- [4] existing 来源 ---
+72:def _load_generated_docs() -> dict:
+96:def _load_index_docs() -> set:
+98:    idx_path = os.path.join(config.DATA_DIR, "index.json")
+154:    generated = _load_generated_docs()
+155:    uploaded = _load_index_docs()
+
+--- [5] C1: 全局 index.json 是否存在 ---
+ls: cannot access 'workbench/data/index.json': No such file or directory
+
+--- [6] C2: 项目切换时序 ---
+506:        call("POST", "/api/projects/switch", {"project_id": origin["id"]})
+582:        call("POST", "/api/projects/switch", {"project_id": TEST_PROJECT_ID})
+779:            call("POST", "/api/projects/switch", {"project_id": _new_id})
+791:            call("POST", "/api/projects/switch", {"project_id": _home_id})
+
+--- [7] C2 物证: 07:30 之后生成的 docx ---
+workbench/data/projects/60268ea6/exports/监理模板_仪表回路试验记录_1号车间_20261101_074122.docx
+workbench/data/projects/60268ea6/generated_docs/施工方案/繁工AI_施工方案_20261101_074117.docx
+workbench/data/projects/686a5bec/volumes/第一册/1号车间/1_设备开箱检查记录.docx
+workbench/data/projects/686a5bec/volumes/第一册/1号车间/2_设备安装检查记录.docx
+workbench/data/projects/686a5bec/volumes/第一册/1号车间/_卷内备考表.docx
+workbench/data/projects/686a5bec/volumes/第一册/1号车间/_卷内目录.docx
+workbench/data/projects/686a5bec/volumes/第一册/1号车间/_案卷封面.docx
+
+--- [8] 本轮自测项目目录 ---
+archive_enhanced.json
+completion_archive.json
+exports
+generated_docs
+index.json
+parsed_cache
+project_meta.json
+relations.json
+supervision_registry.json
+upload_log.jsonl
+upload_queue
+uploads
+vector_db
+volumes
+workshop_assign.json
+
+--- [9] 版本 ---
+APP_VERSION = "0.1.185"
+
+--- [10] C2 物证加强：两项目 generated_docs 实况 ---
+[本轮 686a5bec]
+workbench/data/projects/686a5bec/generated_docs:
+total 4
+drwxr-xr-x 1 hufanrong 197121 0 Nov  1 07:41 .
+drwxr-xr-x 1 hufanrong 197121 0 Nov  1 07:41 ..
+[上一轮 60268ea6]
+workbench/data/projects/60268ea6/generated_docs:
+total 4
+drwxr-xr-x 1 hufanrong 197121 0 Nov  1 07:41 .
+drwxr-xr-x 1 hufanrong 197121 0 Nov  1 01:41 ..
+drwxr-xr-x 1 hufanrong 197121 0 Nov  1 07:41 施工方案
+
+workbench/data/projects/60268ea6/generated_docs/施工方案:
+total 40
+drwxr-xr-x 1 hufanrong 197121     0 Nov  1 07:41 .
+drwxr-xr-x 1 hufanrong 197121     0 Nov  1 07:41 ..
+-rw-r--r-- 1 hufanrong 197121 37670 Nov  1 07:41 繁工AI_施工方案_20261101_074117.docx
