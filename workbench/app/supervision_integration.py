@@ -427,12 +427,15 @@ MERGE_LIST_KEYS = ('generated', 'todo', 'errors', 'collect_dir',
                    'type_fallback',
                    # v0.1.183：别名复用 + 国标兜底两本新账，同样必须跨车间合并，
                    # 否则整卷视图又会和逐车间合计对不上（v0.1.182 修过一次同类缺陷）。
-                   'gb_fallback', 'name_alias')
+                   'gb_fallback', 'name_alias',
+                   # v0.1.187：无名设备不出表，但必须跨车间合并记账 —— 否则整卷视图
+                   # 上看不到这些设备，现场就以为台账里的设备全归档了。
+                   'nameless_devices')
 
 # 「原因」之外的判别字段：不同列表的行形状不同，同车间同序号同名时
 # 只能靠这些字段区分到底是不是同一条。
 _ROW_SIG_FIELDS = ('表号', '文件', '待补字段', '借用情况', '借用表',
-                   '未覆盖设备', '目录')
+                   '未覆盖设备', '目录', '型号')
 
 
 def _row_sig(k, row):
@@ -629,6 +632,21 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     results['material_workshop'] = is_material_workshop(_ws_devs)
     results['workshop_device_rows'] = len(_ws_devs)
     results['skipped_device_forms'] = []
+    # v0.1.187：无名设备（台账有行、没设备名称）不出表，但要单独记一本账。
+    # 分车间整卷时每个车间各记一次，_merge_workshop_results 会跨车间合并。
+    results['nameless_devices'] = []
+    # 材料车间的行本来就不是设备（单位 m2/米），不按「缺设备名称」记账。
+    _nm_rows = ([] if results['material_workshop']
+                else [d for d in _ws_devs if not (d.get('name') or '').strip()])
+    for _i, _d in enumerate(_nm_rows, 1):
+        # 序号必须车间内唯一：_merge_workshop_results 用「车间+序号+名称+判别字段」
+        # 去重，同型号两台设备若序号也相同会被误当成重复而丢一条。
+        results['nameless_devices'].append({
+            '序号': f'无名{_i}', '名称': '',
+            '位号': _d.get('tag', ''), '型号': _d.get('model', ''),
+            '数量': _d.get('quantity', ''),
+            '_车间': workshop or '全厂',
+        })
     todo_fields = []
     for it in items:
         cls = it.get('分类')
@@ -764,7 +782,8 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                            skipped_device_forms=results.get('skipped_device_forms'),
                            material_workshop=results.get('material_workshop', False),
                            gb_fallback=results.get('gb_fallback'),
-                           name_alias=results.get('name_alias'))
+                           name_alias=results.get('name_alias'),
+                           nameless_devices=results.get('nameless_devices'))
     todo_path = os.path.join(vol, '_待办清单.md')
     with open(todo_path, 'w', encoding='utf-8') as f:
         f.write(todo_md)
@@ -838,7 +857,7 @@ def is_material_workshop(devices) -> bool:
 
 def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=None, workshop='',
                  skipped_device_forms=None, material_workshop=False,
-                 gb_fallback=None, name_alias=None):
+                 gb_fallback=None, name_alias=None, nameless_devices=None):
     lines = ['# 整编待办清单', '', f'生成时间：{__import__("datetime").datetime.now():%Y-%m-%d %H:%M}',
              f'车间：{workshop or "全厂"}', '']
     if empty_shells:
@@ -895,6 +914,26 @@ def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=No
                          f"需补专用表时再重新生成")
             if t.get('文件'):
                 lines.append(f"  文件：{t['文件']}")
+    if nameless_devices:
+        # v0.1.187：台账里有这批设备、但「设备名称」空着 —— 出不了表，必须让人回去补。
+        # 这一节存在的意义是：不让这些设备在交付物里悄悄消失。
+        _by_ws = {}
+        for t in nameless_devices:
+            _by_ws.setdefault(t.get('_车间') or workshop or '全厂', []).append(t)
+        total = len(nameless_devices)
+        lines.append('## 〇之六、台账缺设备名称（无法出表，需回台账补名称）')
+        lines.append(f'- 共 {total} 台。竣工资料按设备名立卷，名称空着的行归不了档，'
+                     f'这类设备**没有生成任何表**；补齐名称后重新整卷即可出表。')
+        for _w, _rows in _by_ws.items():
+            lines.append(f'- 车间「{_w}」（{len(_rows)} 台）：')
+            for t in _rows[:40]:
+                _id = ' '.join(x for x in [(t.get('位号') or '').strip(),
+                                           (t.get('型号') or '').strip()] if x)
+                _q = t.get('数量')
+                _q_txt = f" × {_q}" if str(_q or '').strip() else ''
+                lines.append(f'  - {_id or "（无位号无型号）"}{_q_txt}')
+            if len(_rows) > 40:
+                lines.append(f'  - ……余 {len(_rows) - 40} 台，见整卷结果 nameless_devices')
     if todo_fields:
         lines.append('## 一、B 类预填，待人工补充实测数据')
         for t in todo_fields:
@@ -911,7 +950,8 @@ def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=No
         for t in errors:
             lines.append(f"- {t['序号']} {t['名称']}：{t.get('原因')}")
     if (not todo_fields and not todos and not errors and not empty_shells
-            and not type_fallback and not gb_fallback and not name_alias):
+            and not type_fallback and not gb_fallback and not name_alias
+            and not nameless_devices):
         lines.append('（无待办项，全部完成）')
     return '\n'.join(lines)
 

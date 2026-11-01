@@ -266,6 +266,151 @@ def main():
 
     shutil.rmtree(tmp, ignore_errors=True)
 
+    # ---------------- G. 项目配置必须按 project_id 取，且不得串项目 ----------------
+    # 这两个缺陷都是 v0.1.187 修掉的，用真实落盘的项目目录复现，不 mock 配置内容：
+    # ① 传了 project_id 却读「当前项目」的配置 —— 整卷会印上另一个项目的工程名。
+    # ② save_project_config 写 project_meta.json，读取却查 index.json ——
+    #    用户填好的单位信息出表时全落成【待补充】，要在几十份文件里手写。
+    print("\n[G] 项目配置按 project_id 读取（不串项目）")
+    import json
+    from app import supervision_templates as _st
+    from app import project_manager as _pm
+
+    gtmp = tempfile.mkdtemp(prefix="cfg_")
+    _was_root = _pm.PROJECTS_ROOT
+    _was_cur = _pm.CURRENT_PROJECT_FILE
+    try:
+        _pm.PROJECTS_ROOT = os.path.join(gtmp, "projects")
+        _pm.CURRENT_PROJECT_FILE = os.path.join(gtmp, "current_project.json")
+        os.makedirs(_pm.PROJECTS_ROOT, exist_ok=True)
+
+        def _mk_project(pid, meta):
+            d = os.path.join(_pm.PROJECTS_ROOT, pid)
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "project_meta.json"), "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False)
+
+        _mk_project("projA", {"id": "projA", "name": "选矿厂A",
+                              "contractor": "A施工单位", "unit_works": "A单位工程"})
+        _mk_project("projB", {"id": "projB", "name": "选矿厂B",
+                              "contractor": "B施工单位", "unit_works": "B单位工程"})
+        # 把「当前项目」钉在 B 上 —— 这正是线上出问题的场景
+        with open(_pm.CURRENT_PROJECT_FILE, "w", encoding="utf-8") as f:
+            json.dump({"project_id": "projB", "project_name": "选矿厂B"}, f)
+
+        cfgA = _st._load_project_config("projA")
+        check("传 projA 取到 A 的施工单位（不串当前项目 B）",
+              cfgA.get("施工单位") == "A施工单位",
+              f"实得 {cfgA.get('施工单位')!r}")
+        check("传 projA 取到 A 的项目名称",
+              cfgA.get("项目名称") == "选矿厂A",
+              f"实得 {cfgA.get('项目名称')!r}")
+        check("传 projA 取到 A 的单位工程",
+              cfgA.get("单位工程") == "A单位工程",
+              f"实得 {cfgA.get('单位工程')!r}")
+
+        cfgB = _st._load_project_config("projB")
+        check("传 projB 取到 B 的施工单位",
+              cfgB.get("施工单位") == "B施工单位",
+              f"实得 {cfgB.get('施工单位')!r}")
+        check("A/B 两个项目配置互不串",
+              cfgA.get("施工单位") != cfgB.get("施工单位"))
+
+        cfgNone = _st._load_project_config(None)
+        check("不传 project_id 时回退当前项目 B（既有行为不变）",
+              cfgNone.get("施工单位") == "B施工单位",
+              f"实得 {cfgNone.get('施工单位')!r}")
+
+        # ② 写进去必须能读回来（原来写 meta 读 index，读回全空）
+        _st.save_project_config("projA", {"施工单位": "A单位工程公司", "监理单位": "A监理"})
+        cfgA2 = _st._load_project_config("projA")
+        check("save_project_config 写入后能读回施工单位",
+              cfgA2.get("施工单位") == "A单位工程公司",
+              f"实得 {cfgA2.get('施工单位')!r}")
+        check("save_project_config 写入后能读回监理单位",
+              cfgA2.get("监理单位") == "A监理",
+              f"实得 {cfgA2.get('监理单位')!r}")
+        check("改 A 不影响 B",
+              _st._load_project_config("projB").get("施工单位") == "B施工单位")
+    finally:
+        _pm.PROJECTS_ROOT = _was_root
+        _pm.CURRENT_PROJECT_FILE = _was_cur
+        shutil.rmtree(gtmp, ignore_errors=True)
+
+    # ---------------- H. 无名称设备不出空壳表，但要记账 ----------------
+    # v0.1.187 缺陷（真实台账 e75e857c / 辊磨筛分车间实测）：台账行有型号没设备名称，
+    # _device_type_of("") 返回「通用」→ 出表，结果那张表设备名称栏是【待补充】。
+    # 10 张表里第 4 张空着，监理一看就知道资料不能用，它还占掉一个表位。
+    # 竣工资料按设备名立卷，无名行本来就归不了档 —— 正确做法是不出表、进待办。
+    print("\n[H] 无名称设备不出空壳表（但必须记账）")
+    htmp = tempfile.mkdtemp(prefix="nm_")
+    _h_root = _pm.PROJECTS_ROOT
+    _h_cur = _pm.CURRENT_PROJECT_FILE
+    try:
+        _pm.PROJECTS_ROOT = os.path.join(htmp, "projects")
+        _pm.CURRENT_PROJECT_FILE = os.path.join(htmp, "current_project.json")
+        _pid = "hp"
+        _pd = os.path.join(_pm.PROJECTS_ROOT, _pid)
+        os.makedirs(_pd, exist_ok=True)
+        with open(os.path.join(_pd, "project_meta.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": _pid, "name": "无名设备测试"}, f, ensure_ascii=False)
+        # 5 台有名称 + 1 台只有型号（= 线上那张空壳表）
+        idx = {"devices": {}, "files": {}, "workshops": {"甲车间": {}}}
+        _named_ = ["胶带输送机A", "胶带输送机B", "振动筛A", "渣浆泵A", "电动葫芦A"]
+        for i, n in enumerate(_named_):
+            idx["devices"][f"T{i:03d}"] = {"name": n, "model": "X", "workshop": "甲车间",
+                                           "unit": "台", "quantity": "1"}
+        idx["devices"]["N001"] = {"name": "", "model": "CDMF5-12", "workshop": "甲车间",
+                                  "unit": "台", "quantity": "1"}
+        with open(os.path.join(_pd, "index.json"), "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+
+        devs = _st._get_workshop_devices("甲车间", _pid)
+        check("无名但有型号的台账行仍被读取（不丢设备）", len(devs) == 6, f"实得 {len(devs)}")
+
+        r = _st.render_supervision_doc(category="设备安装检查记录",
+                                       workshop="甲车间", project_id=_pid)
+        check("有名称设备时仍能正常出表", r.get("ok") is True, f"实得 {r.get('error')}")
+        check("出表数 = 有名称设备数（无名设备不占表位）",
+              r.get("filled_tables") == len(_named_),
+              f"实得 {r.get('filled_tables')}，应 {len(_named_)}")
+        check("返回值带 nameless_devices 记账",
+              isinstance(r.get("nameless_devices"), list) and len(r["nameless_devices"]) == 1,
+              f"实得 {r.get('nameless_devices')!r}")
+        check("记账里带出缺名称那台设备的型号",
+              (r.get("nameless_devices") or [{}])[0].get("型号") == "CDMF5-12",
+              f"实得 {(r.get('nameless_devices') or [{}])[0]!r}")
+
+        # 生成的文档里不得出现「设备名称栏为空」的表：按 <w:tbl> 数核对
+        _op = r.get("output_path") or ""
+        check("生成文件已落盘", bool(_op) and os.path.exists(_op), _op)
+        if _op and os.path.exists(_op):
+            import zipfile
+            _xml = zipfile.ZipFile(_op).read("word/document.xml").decode("utf-8")
+            check("文档表格数等于有名称设备数（不再多一张空壳）",
+                  _xml.count("<w:tbl>") == len(_named_),
+                  f"实得 {_xml.count('<w:tbl>')}，应 {len(_named_)}")
+            check("文档里不出现无名设备的型号（没被塞进表）",
+                  "CDMF5-12" not in _xml)
+
+        # 全车间都无名 → 必须明确报「缺设备名称」，不能拿「模板对不上」搪塞
+        idx2 = {"devices": {"N1": {"name": "", "model": "M1", "workshop": "乙车间",
+                                   "unit": "台"}, }, "files": {}, "workshops": {"乙车间": {}}}
+        with open(os.path.join(_pd, "index.json"), "w", encoding="utf-8") as f:
+            json.dump(idx2, f, ensure_ascii=False)
+        r2 = _st.render_supervision_doc(category="设备安装检查记录",
+                                        workshop="乙车间", project_id=_pid)
+        check("全车间无名时不出表", r2.get("ok") is False)
+        check("报错文案点明「设备名称」而非模板问题",
+              "设备名称" in (r2.get("error") or ""),
+              f"实得 {r2.get('error')!r}")
+        check("全车间无名时同样记账", len(r2.get("nameless_devices") or []) == 1,
+              f"实得 {r2.get('nameless_devices')!r}")
+    finally:
+        _pm.PROJECTS_ROOT = _h_root
+        _pm.CURRENT_PROJECT_FILE = _h_cur
+        shutil.rmtree(htmp, ignore_errors=True)
+
     print(f"\n结果：{_PASS[0]} passed, {len(_FAIL)} failed")
     if _FAIL:
         for f in _FAIL:

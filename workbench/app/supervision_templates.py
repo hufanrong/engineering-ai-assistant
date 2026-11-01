@@ -400,18 +400,39 @@ def _load_project_config(project_id: str = None) -> Dict:
         "建设单位": "",
         "标准编号": "《机械设备安装工程施工及验收通用规范》GB50231-2009",
     }
-    current = _pm.get_current_project()
-    if current:
-        cfg["项目名称"] = current.get("name", "")
-        cfg["建设单位"] = current.get("client", "")
-        cfg["单位工程"] = current.get("unit_works", cfg["单位工程"])
-        cfg["分部工程"] = current.get("sub_works", cfg["分部工程"])
-        cfg["车间"] = current.get("default_workshop", cfg["车间"])
-        cfg["施工单位"] = current.get("contractor", cfg["施工单位"])
-        cfg["项目经理"] = current.get("project_manager", cfg["项目经理"])
-        cfg["技术负责人"] = current.get("tech_leader", cfg["技术负责人"])
-        cfg["质量负责人"] = current.get("quality_leader", cfg["质量负责人"])
-        cfg["监理单位"] = current.get("supervisor", cfg["监理单位"])
+    # v0.1.187：两个缺陷都在这一段。
+    #
+    # ① 传了 project_id 却仍以「当前项目」为准。
+    #    generate_volume(project_id="A") 生成的卷里带的是 B 的项目名称和单位。
+    #    实测证据：_load_project_config("e75e857c") 返回「自测_20261101_193026」，
+    #    那是另一个项目的名字。整卷、批量出表都走这条路径，一旦同时开着两个项目，
+    #    交付物就会印着别人的工程名 —— 比留空更危险，因为看不出来是错的。
+    #    有 project_id 就必须用它，只有没传时才回退到当前项目。
+    #
+    # ② 配置读写没有指向同一处。
+    #    save_project_config() 把施工单位/监理单位等写进 project_meta.json，
+    #    这里却去读 index.json —— 而 index.json 只存 devices/files/workshops，
+    #    根本没有这些字段。结果：用户在界面上填好的单位信息，出表时全部落成
+    #    【待补充】，还要在 54 份文件里手写一遍。
+    #    先按 id 读 project_meta.json（pm.get_project 就是读它）。
+    target = None
+    if project_id:
+        target = _pm.get_project(project_id)
+        if not target:
+            # 传了 id 但项目不存在，不要静默套用别人的配置
+            target = {}
+    else:
+        target = _pm.get_current_project() or {}
+    cfg["项目名称"] = target.get("name", "")
+    cfg["建设单位"] = target.get("client", "")
+    cfg["单位工程"] = target.get("unit_works", cfg["单位工程"])
+    cfg["分部工程"] = target.get("sub_works", cfg["分部工程"])
+    cfg["车间"] = target.get("default_workshop", cfg["车间"])
+    cfg["施工单位"] = target.get("contractor", cfg["施工单位"])
+    cfg["项目经理"] = target.get("project_manager", cfg["项目经理"])
+    cfg["技术负责人"] = target.get("tech_leader", cfg["技术负责人"])
+    cfg["质量负责人"] = target.get("quality_leader", cfg["质量负责人"])
+    cfg["监理单位"] = target.get("supervisor", cfg["监理单位"])
     # 扩展配置：合并项目 index.json（设备台账/工程常量可能存于此）
     try:
         _dd = _pm.get_project_data_dir(project_id)
@@ -944,13 +965,56 @@ def render_supervision_doc(category: str = "", workshop: str = "",
 
     # 车间设备清单 + 按类型分组
     devices = _get_workshop_devices(workshop, project_id)
+
+    # v0.1.187：无名称的设备不参与出表，转入待办。
+    # 实测证据（真实台账 e75e857c / 辊磨筛分车间）：13 台设备里有 2 台「设备名称」为空、
+    # 但填了型号（CDMF5-12 等）。v0.1.179 为了「名称缺失不等于设备不存在」把它们归进
+    # 「通用」类型出表 —— 方向是对的，可落地的结果是一张**设备名称栏是【待补充】的空壳表**：
+    # 10 张表里 9 张有设备名、第 4 张空着，监理翻到那张就知道这份资料不能直接用，
+    # 而且它占掉一个表位，让人误以为这台设备已经记录过了。
+    # 无名称的台账行在竣工资料里本来就归不了档（档案按设备名立卷），
+    # 正确做法是**不出表、进待办、写明缺什么**，让人回台账补名称，而不是替他造一张空表。
+    # 返回值里带 nameless_devices，整卷出表时据此记账。
+    _nameless = [d for d in devices if not (d.get('name') or '').strip()]
+    _named = [d for d in devices if (d.get('name') or '').strip()]
+
+    # 只出无名称设备的车间：一张表也出不来，不能拿「模板对不上」搪塞过去。
+    # 要明确说是台账缺名称，否则现场会去换模板、白折腾一轮。
+    if _nameless and not _named:
+        return {
+            "ok": False,
+            "error": (f"「{workshop or '全厂'}」台账里这 {len(_nameless)} 台设备都没有设备名称，"
+                      f"无法出表。竣工资料按设备名立卷，无名行归不了档，请回台账补全名称后重新出表"),
+            "empty_shell_blocked": True,
+            "nameless_devices": [
+                {"位号": d.get('tag', ''), "型号": d.get('model', ''),
+                 "数量": d.get('quantity', '')} for d in _nameless
+            ],
+            "device_count": len(devices),
+            "covered_devices": [],
+            "uncovered_devices": [],
+            "empty_tables": [],
+            "template_types": _classify_slots(tpl_path, chosen.get('name', '')),
+            "workshop_types": [],
+            "suggestion": f"台账「{workshop or '该车间'}」{len(_nameless)} 台设备缺设备名称，补名称后可正常出表",
+        }
+
+    # 无名行逐条记账（位号+型号+数量），不合并：台账里同型号多台就是多台设备，
+    # 合起来报「1 条 ×3 台」现场反而对不上台账行号。
+    _nameless_rows = [
+        {"位号": d.get('tag', ''), "型号": d.get('model', ''),
+         "数量": d.get('quantity', '')} for d in _nameless
+    ]
+
     dev_groups = {}
-    for d in devices:
+    for d in _named:
         dev_groups.setdefault(d['dev_type'], []).append(d)
 
-    # xlsx 模板（重量确认单）走 openpyxl 渲染
+    # xlsx 模板（重量确认单）走 openpyxl 渲染；无名行同样不写进设备行
     if tpl_path and tpl_path.endswith('.xlsx'):
-        return _render_xlsx(tpl_path, fill, devices, project_id)
+        _x = _render_xlsx(tpl_path, fill, _named, project_id)
+        _x['nameless_devices'] = _nameless_rows
+        return _x
 
     # docx 渲染
     result = _render_docx_by_workshop(tpl_path, fill, dev_groups, workshop or '',
@@ -975,6 +1039,7 @@ def render_supervision_doc(category: str = "", workshop: str = "",
             "error": _why,
             "empty_shell_blocked": True,
             "device_count": len(devices),
+            "nameless_devices": _nameless_rows,
             "covered_devices": [],
             "uncovered_devices": result.get('uncovered_devices', []),
             "empty_tables": result.get('empty_tables', []),
@@ -1021,6 +1086,9 @@ def render_supervision_doc(category: str = "", workshop: str = "",
         "type_fallback": result.get('type_fallback', []),
         "filled_fields": filled_fields,
         "unfilled_fields": result['unfilled_fields'],
+        # 无名设备不进表，但必须能被整卷记账 —— 否则这些设备在交付物里彻底消失，
+        # 比出一张空壳表更糟（现场根本不知道台账还有没归档的设备）。
+        "nameless_devices": _nameless_rows,
     }
     if _alias and _alias != (req_category or ''):
         # 别名复用：调用方要能看出「要的是 A，实际用的是 B」，
@@ -1183,6 +1251,12 @@ def render_gb_fallback(category: str = "", workshop: str = "",
     _ws = workshop or '全厂'
     _sub = (fill.get('分部工程') or '').strip()
 
+    # v0.1.187：国标兜底表同样只出**有名称**的设备。
+    # 国标表头第一列就是「设备名称」，无名设备填进去只是把【待补充】换个位置，
+    # 监理还是要退回来。无名行统一记进 nameless_devices，由整卷写进待办清单。
+    _gb_nameless = [_d for _d in devices if not (_d.get('name') or '').strip()]
+    devices = [_d for _d in devices if (_d.get('name') or '').strip()]
+
     data_dir = _pm.get_project_data_dir(project_id)
     exports_dir = os.path.join(data_dir, "exports")
     os.makedirs(exports_dir, exist_ok=True)
@@ -1226,6 +1300,11 @@ def render_gb_fallback(category: str = "", workshop: str = "",
         "filled_fields": [k for k, v in fill.items() if v],
         "unfilled_fields": ["设备位号", "检查情况", "检查结果"],
         "check_item_count": r.get('check_item_count', 0),
+        # v0.1.187：无名设备不出表，但要交代清楚
+        "nameless_devices": [
+            {"位号": _d.get('tag', ''), "型号": _d.get('model', ''),
+             "数量": _d.get('quantity', '')} for _d in _gb_nameless
+        ],        "gb_nameless_count": len(_gb_nameless),
     }
 
 
