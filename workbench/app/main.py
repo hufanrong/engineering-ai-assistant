@@ -4692,13 +4692,19 @@ def run():
     print(f"  数据目录: {config.DATA_DIR}")
     print(f"  解析节点: {config.NODE_NAME}")
     print("=" * 56)
-    _start_guardian()
+    # v0.1.188：原来这里连着调了两次 _start_guardian()，起了两个守护线程。
+    # 卡死超时后两个线程会在同一分钟内各自判一次「卡死」并同时调
+    # retry_failed_files(shas=None)，同一批失败文件被重试两遍、retry_count 加倍
+    # （MAX_RETRY 只有几次，本来还能自动恢复的文件会被提前打成 pending_manual）。
+    # 守护线程一个就够。
     _start_guardian()
     uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")
 
-
-if __name__ == "__main__":
-    run()
+# v0.1.188：这里原来紧跟 `if __name__ == "__main__": run()`。
+# 但下方还有一个 v0.1.125 前端兼容 API 层（_log_op / 36 条 @app 路由 / 82 个定义）。
+# 以 `python -m app.main` 启动时，uvicorn.run 阻塞在这一行，4704 行之后的东西
+# **永远不会执行** —— 表现为新建项目 500（_log_op 未定义）、/api/files 404。
+# 启动块只能放在文件最后。
 
 
 # ========== v0.1.125：前端兼容API层（5大模块UI统一调用） ==========
@@ -5485,3 +5491,7 @@ def dwg_cleaner_save_config(data: dict):
         return {"ok": False, "error": "config 必须是 JSON 对象"}
     return _dcb.save_project_cleaner_config(project_id or None, config_dict)
 
+# ========== 启动入口（必须留在文件最后，见上方 v0.1.188 说明）==========
+
+if __name__ == "__main__":
+    run()

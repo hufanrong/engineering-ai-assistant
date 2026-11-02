@@ -386,16 +386,27 @@ def _write_boxing_list(project_id, book, results):
     v0.1.179 独立成函数的原因：这段要扫**整册**所有车间并渲染每个文件算页数，
     放在每个车间的 generate_volume 里等于把全册重复算 19 遍
     （实测 680 次页数调用 / 整卷 300s+）。现在只在整卷末尾算一次。
+
+    v0.1.187：**0 件的卷不占盒号**。实测（真实项目 e75e857c）尾矿库是材料车间，
+    台账 4 行全是 m2/米，按用户决策跳过设备类表单，卷里除封面/目录/备考表外一件没有。
+    原来它照样进装盒清单并编成「第3盒」，于是后面 16 个盒号整体后移一位 ——
+    现场照着清单装盒会拿错盒子，而且脊背上还印着「共0件」。空卷不该占盒位。
+    但也不能悄悄删掉：记进 `empty_volumes` 让待办清单能交代"这个车间为什么没盒子"。
     """
     from . import volume_catalog as _vc
     _book_dir = os.path.join(_proj_root(project_id), 'volumes', _clean_book(book))
     _vols = []
+    _empties = []
     if os.path.isdir(_book_dir):
         for _ws_name in sorted(os.listdir(_book_dir)):
             _d = os.path.join(_book_dir, _ws_name)
             if not os.path.isdir(_d):
                 continue
             _files = _vc.collect_volume_files(_d)
+            if not _files:
+                # 0 件：不占盒号，但记账
+                _empties.append({'车间': _ws_name, '件数': 0})
+                continue
             _pages = 0
             _allcounted = True
             # v0.1.179：并发算页数（装盒清单要扫整册所有车间，串行很慢）
@@ -415,10 +426,10 @@ def _write_boxing_list(project_id, book, results):
                 'missing_count': 0,
             })
     if not _vols:
-        return {'装盒清单': '', '盒数': 0}
+        return {'装盒清单': '', '盒数': 0, '空卷': _empties}
     _box = os.path.join(_book_dir, '_装盒清单.xlsx')
     _vc.write_boxing_list_xlsx(_vols, _box)
-    return {'装盒清单': os.path.basename(_box), '盒数': len(_vols)}
+    return {'装盒清单': os.path.basename(_box), '盒数': len(_vols), '空卷': _empties}
 
 
 # 整卷合并时要跨车间的列表键。顺序无关，只用于「先建空列表再追加」。
@@ -583,6 +594,8 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
                 else:
                     _merged['catalog']['装盒清单'] = _box_res['装盒清单']
                     _merged['catalog']['盒数'] = _box_res['盒数']
+                    # v0.1.187：0 件的卷不占盒号，但要交代清楚，别让人以为漏了车间
+                    _merged['catalog']['空卷'] = _box_res.get('空卷') or []
             except Exception as _e3:  # noqa: BLE001
                 _merged.setdefault('catalog', {})['装盒清单错误'] = f'{type(_e3).__name__}: {_e3}'
             return _merged
@@ -815,6 +828,8 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
             else:
                 results['catalog']['装盒清单'] = _box_res['装盒清单']
                 results['catalog']['盒数'] = _box_res['盒数']
+                # v0.1.187：同上 —— 空卷不占盒号，但记进目录
+                results['catalog']['空卷'] = _box_res.get('空卷') or []
     except Exception as _e:  # noqa: BLE001
         results['catalog_error'] = f'{type(_e).__name__}: {_e}'
 
@@ -953,7 +968,10 @@ def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=No
             and not type_fallback and not gb_fallback and not name_alias
             and not nameless_devices):
         lines.append('（无待办项，全部完成）')
-    return '\n'.join(lines)
+    # v0.1.188：以换行结尾。原来 `return '\n'.join(lines)` 末尾没有换行，
+    # 写出来的 _待办清单.md 最后一行直接顶在文件末字节上 —— `cat` / `tail`
+    # 会和 shell 提示符粘成一行，用编辑器打开还会提示"文件末尾无换行"。
+    return '\n'.join(lines) + '\n'
 
 
 def export_todo(project_id, book, workshop=''):

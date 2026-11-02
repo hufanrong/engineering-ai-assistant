@@ -411,6 +411,203 @@ def main():
         _pm.CURRENT_PROJECT_FILE = _h_cur
         shutil.rmtree(htmp, ignore_errors=True)
 
+    # ---------------- I. 0 件的卷不占盒号（装盒清单不得错位） ----------------
+    # v0.1.187 缺陷（真实项目 e75e857c 实测）：尾矿库是材料车间，台账 4 行全是
+    # m2/米，按用户决策跳过设备类表单，卷里一件没有。原来自照样进装盒清单并编成
+    # 「第3盒」，后面 16 个盒号整体后移一位 —— 现场照清单装盒会拿错盒子。
+    # 这条测试必须**真的调用 _write_boxing_list**，手工造 _vols 验证不了缺陷。
+    print("\n[I] 0 件的卷不占盒号，但要记账")
+    from app import volume_catalog as _vc
+    itmp = tempfile.mkdtemp(prefix="box_")
+    _i_proj = si._proj_root
+    try:
+        def _mk_docx(path, text):
+            import zipfile
+            _ct = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                   '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                   '<w:body><w:p><w:r><w:t>' + text + '</w:t></w:r></w:p></w:body></w:document>')
+            _ctypes = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                       '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                       '<Default Extension="xml" ContentType="application/xml"/>'
+                       '<Override PartName="/word/document.xml" '
+                       'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+                       '</Types>')
+            with zipfile.ZipFile(path, "w") as _z:
+                _z.writestr("[Content_Types].xml", _ctypes)
+                _z.writestr("word/document.xml", _ct)
+
+        _fake_root = os.path.join(itmp, "proj")
+        _bd = os.path.join(_fake_root, "volumes", "测试册")
+        os.makedirs(os.path.join(_bd, "甲车间"), exist_ok=True)
+        os.makedirs(os.path.join(_bd, "乙车间"), exist_ok=True)   # 0 件卷
+        _mk_docx(os.path.join(_bd, "甲车间", "1_记录.docx"), "甲")
+        si._proj_root = lambda pid: _fake_root   # 绕过真实项目目录要求
+
+        _f1 = _vc.collect_volume_files(os.path.join(_bd, "甲车间"))
+        _f2 = _vc.collect_volume_files(os.path.join(_bd, "乙车间"))
+        check("甲车间有归档件", len(_f1) == 1, f"实得 {len(_f1)}")
+        check("乙车间是 0 件（对照空卷）", len(_f2) == 0, f"实得 {len(_f2)}")
+
+        _r = si._write_boxing_list("fake", "测试册", None)
+        check("装盒清单已生成", bool(_r.get("装盒清单")), f"实得 {_r.get('装盒清单')!r}")
+        check("盒数只算有件的卷（空卷不占盒号）", _r.get("盒数") == 1,
+              f"实得 {_r.get('盒数')}，应 1")
+        _emp = _r.get("空卷") or []
+        check("空卷单独记账、指名到车间",
+              len(_emp) == 1 and _emp[0].get("车间") == "乙车间",
+              f"实得 {_emp!r}")
+
+        import openpyxl
+        _box = os.path.join(_bd, _r.get("装盒清单") or "_装盒清单.xlsx")
+        if os.path.exists(_box):
+            _wb = openpyxl.load_workbook(_box)
+            _rows = list(_wb.active.iter_rows(min_row=2, values_only=True))
+            check("清单行数 = 有件的卷数", len(_rows) == 1, f"实得 {len(_rows)}")
+            check("盒号从第1盒起连续（无空盒占位）",
+                  [r[0] for r in _rows] == ["第1盒"], f"实得 {[r[0] for r in _rows]}")
+            check("清单里不出现 0 件的车间",
+                  all(str(r[2]) != "乙车间" for r in _rows),
+                  f"实得 {[r[2] for r in _rows]}")
+    finally:
+        si._proj_root = _i_proj
+        shutil.rmtree(itmp, ignore_errors=True)
+
+    # ---------------- J. 启动块必须在文件末尾（否则尾部定义整段失效） ----------------
+    # v0.1.188 缺陷（实测）：main.py 的 `if __name__ == "__main__": run()` 原来夹在
+    # 第 4701 行，而 v0.1.125 前端兼容 API 层（_log_op / 36 条 @app 路由 / 82 个定义）
+    # 全在 4704 行之后。用 `python -m app.main` 启动时 uvicorn.run 阻塞在那行，
+    # 尾部的东西**永远不执行**：新建项目 500（NameError: _log_op）、/api/files 404。
+    #
+    # 注意：**不能靠"import app.main 后符号在不在"来守**。import 时 run() 不执行，
+    # 尾部定义自然全部完成 —— 把启动块搬回中部，import 出来的结果一模一样，
+    # 那几项永远绿。必须真的起一个 `-m app.main` 子进程（= 那条故障路径）去问接口。
+    print("\n[J] 用 -m app.main 真启动，尾部接口必须可用")
+    _msrc = open(os.path.join(WB, "app", "main.py"), encoding="utf-8").read()
+    _mlines = _msrc.split("\n")
+    _main_idx = None
+    for _i, _l in enumerate(_mlines):
+        if _l.strip() == 'if __name__ == "__main__":':
+            _main_idx = _i
+            break
+    check("main.py 存在 __main__ 启动块", _main_idx is not None)
+    if _main_idx is not None:
+        _after = [x for x in _mlines[_main_idx + 1:] if x.strip()]
+        check("启动块之后再无任何代码（必须是文件末尾）",
+              len(_after) <= 1 and (_after[0].strip() == "run()" if _after else True),
+              f"启动块后还有 {len(_after)} 行非空内容，首行={_after[0].strip()[:60] if _after else ''!r}")
+    check("run() 只启一个守护线程（不重复调 _start_guardian）",
+          _msrc.count("_start_guardian()\n") == 1,
+          f"实得 {_msrc.count('_start_guardian()')} 处调用")
+
+    import subprocess
+    import socket
+    import time as _t
+    import json as _json
+    import urllib.request as _url
+    from urllib.error import HTTPError as _HTTPErr
+
+    def _free_port():
+        s_ = socket.socket()
+        s_.bind(("127.0.0.1", 0))
+        _p = s_.getsockname()[1]
+        s_.close()
+        return _p
+
+    _port = _free_port()
+    _dtdir = tempfile.mkdtemp(prefix="j_data_")
+    _proj_name = f"_j_节自测_{int(_t.time() * 1000) % 100000}"
+    # main.py 里 PORT / DATA_DIR 都是硬编码，环境变量覆盖不了。用包装器改 config
+    # 之后再以 run_name="__main__" 跑一遍——这才会真的执行 `if __name__` 那段，
+    # 也就是**那条出故障的启动路径**。同时把 DATA_DIR 指到临时目录，
+    # 不往真实 data/ 里写测试项目和操作日志。
+    _code = (
+        "import runpy\n"
+        "from app import config as _c\n"
+        f"_c.PORT = {_port}\n"
+        f"_c.DATA_DIR = {_dtdir!r}\n"
+        "runpy.run_module('app.main', run_name='__main__')\n"
+    )
+    _env = dict(os.environ)
+    _env["FANGONG_NO_BROWSER"] = "1"
+    _env["PYTHONPATH"] = WB
+    _lg = open(os.path.join(tempfile.gettempdir(), f"jm_{_port}.log"), "w")
+    _pr = subprocess.Popen([sys.executable, "-c", _code], cwd=WB,
+                           stdout=_lg, stderr=subprocess.STDOUT, env=_env)
+
+    def _get(_path, _body=None, _timeout=20):
+        _req = _url.Request(f"http://127.0.0.1:{_port}{_path}",
+                            data=(_json.dumps(_body).encode() if _body else None),
+                            headers={"Content-Type": "application/json"},
+                            method="POST" if _body else "GET")
+        try:
+            _r = _url.urlopen(_req, timeout=_timeout)
+            return _r.status, _r.read().decode("utf-8", "ignore")
+        except _HTTPErr as _e:
+            return _e.code, _e.read().decode("utf-8", "ignore")
+        except Exception as _e:            # noqa: BLE001
+            return -1, repr(_e)
+
+    try:
+        _up = False
+        for _ in range(90):
+            _t.sleep(0.5)
+            _c, _txt = _get("/api/status", _timeout=2)
+            if _c == 200:
+                _up = True
+                break
+        check("以 __main__ 路径能起来（uvicorn 已监听）", _up,
+              f"{_port} 端口 45 秒内未就绪，见 {os.path.basename(_lg.name)}")
+        if _up:
+            # ① 尾部路由必须 200（旧行为：404，因为 4704 行后根本没执行）
+            for _p in ("/api/files?limit=1", "/api/files/tree", "/api/files/pending"):
+                _code_, _txt_ = _get(_p)
+                check(f"启动后 {_p.split('?')[0]} 可用（尾部定义已执行）",
+                      _code_ == 200, f"http={_code_} {_txt_[:80]}")
+
+            # ② 新建项目必须 ok（旧行为：500 NameError: _log_op）
+            _code_, _txt_ = _get("/api/projects/create", {"name": _proj_name})
+            _okj = False
+            try:
+                _okj = _json.loads(_txt_).get("ok") is True
+            except Exception:
+                pass
+            check("启动后新建项目成功（_log_op 已定义）", _code_ == 200 and _okj,
+                  f"http={_code_} {_txt_[:120]}")
+
+            # ③ 操作日志真的落盘（证明 _log_op 存在且能写，不是个空壳）
+            _logp = os.path.join(_dtdir, "operation_log.jsonl")
+            _has = False
+            if os.path.exists(_logp):
+                _has = _proj_name in open(_logp, encoding="utf-8").read()
+            check("_log_op 实际写出操作日志", _has,
+                  f"未在 operation_log.jsonl 找到本次建项目记录")
+    finally:
+        try:
+            _pr.terminate()
+            _pr.wait(timeout=10)
+        except Exception:
+            try:
+                _pr.kill()
+            except Exception:
+                pass
+        _lg.close()
+        shutil.rmtree(_dtdir, ignore_errors=True)
+
+    # ---------------- K. 待办清单必须换行结尾 ----------------
+    # v0.1.188：_render_todo 原来 return '\n'.join(lines)，末尾没换行。
+    # 写出的 _待办清单.md 最后一行顶在文件末字节上，联营/监理用记事本打开会
+    # 提示「文件末尾无换行」，cat 出来也和 shell 提示符粘成一行。
+    print("\n[K] 待办清单以换行结尾")
+    _todo_md = si._render_todo({}, [{"序号": "1", "名称": "设备安装记录",
+                                     "原因": "该车间台账全为材料，非设备"}], [],
+                               workshop="尾矿库", material_workshop=True,
+                               skipped_device_forms=[{"序号": "1", "名称": "设备安装记录",
+                                                      "原因": "非设备"}])
+    check("_render_todo 返回值以换行结尾", _todo_md.endswith("\n"),
+          f"末尾 20 字符={_todo_md[-20:]!r}")
+    check("内容本身没被截断（仍含原因说明）",
+          "非设备" in _todo_md and _todo_md.strip(), f"长度={len(_todo_md)}")
+
     print(f"\n结果：{_PASS[0]} passed, {len(_FAIL)} failed")
     if _FAIL:
         for f in _FAIL:
