@@ -1086,6 +1086,21 @@ def supervision_volume(req: VolumeReq):
         raise HTTPException(500, f"整卷失败：{e}")
 
 
+@app.get("/api/supervision/volume/progress")
+def supervision_volume_progress(project_id: str = "", book: str = "", workshop: str = ""):
+    """整卷进度（v0.1.190）。
+
+    实测事故：19 个车间整卷 130314 ms，界面只有一句静态「整卷生成中，请稍候」。
+    用户不知道是死是活，等不及就再点一次，于是两路同时写同一批卷目录。
+    这个接口给界面轮询用，返回「正在出第 N/M 个车间」与已用时长。
+    """
+    try:
+        p = si.get_volume_progress(project_id, book, workshop)
+        return {"ok": True, "running": bool(p and p.get("running")), "progress": p}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"读取整卷进度失败：{e}")
+
+
 @app.get("/api/supervision/todo")
 def supervision_todo(project_id: str = "", book: str = "", workshop: str = ""):
     """导出待办清单文本。"""

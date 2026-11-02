@@ -39,6 +39,35 @@ _PASS = [0]
 _FAIL = []
 
 
+def _exception_releases_slot(si):
+    """出卷中途抛异常时，整卷槽位必须被释放（否则一次失败就把整卷永久封死）。
+
+    做法：把 `_book_items` 打成抛异常。它在 acquire 之后才被调用，
+    所以异常真的从 generate_volume 里冒出来 —— 只有 try/finally 才会把槽位收回去。
+    """
+    orig = si._book_items
+
+    def boom(*a, **k):
+        raise RuntimeError("测试用：模拟出卷中途异常")
+
+    si._book_items = boom
+    raised = False
+    try:
+        si.generate_volume("e75e857c", "设备安装", "测试车间_锁")
+    except Exception:  # noqa: BLE001
+        raised = True
+    finally:
+        si._book_items = orig
+    if not raised:
+        return False
+    # 异常之后必须还能再拿到同一个槽位
+    k = si.acquire_volume_slot("e75e857c", "设备安装", "测试车间_锁")
+    if k is None:
+        return False
+    si.release_volume_slot(k)
+    return True
+
+
 def check(name, cond, detail=""):
     if cond:
         _PASS[0] += 1
@@ -758,6 +787,131 @@ def main():
           f"实得 {_m2r.get('material_workshop')}（回退会得 True）")
     check("材料车间名单不会因为首车间是材料就只剩它",
           _m2r.get("material_workshops") == ["甲"], f"实得 {_m2r.get('material_workshops')}")
+
+    print("\n[M] 整卷互斥：同一册+车间不许两路同时出卷（会并发写同一批卷目录）")
+    # v0.1.190 实测事故（真实项目 e75e857c，19 个车间，整卷实测 130314 ms）：
+    # 界面上点「一键整卷」后只有一句「整卷生成中，请稍候」，130 秒内没有任何进度，
+    # 按钮也没禁用（runVolume() 里 disabled / _running 出现次数实测均为 0）。
+    # 用户等不及会再点一次 —— 此时两路车间级线程池同时写同一批卷目录与 exports。
+    # 源码检索 Lock / _INFLIGHT 在 generate_volume 里一个都没有。
+    check("整卷入口有互斥机制（acquire_volume_slot 存在）",
+          hasattr(si, "acquire_volume_slot") and hasattr(si, "release_volume_slot"),
+          "generate_volume 内部无任何互斥，重复点击会并发写同一批卷目录")
+
+    if hasattr(si, "acquire_volume_slot"):
+        # 同一 (项目, 册, 车间) 第二次必须被拒
+        _k1 = si.acquire_volume_slot("e75e857c", "设备安装", "选矿厂")
+        _k2 = si.acquire_volume_slot("e75e857c", "设备安装", "选矿厂")
+        check("同一册+同一车间第二次整卷被拒（返回进行中而非开跑）",
+              _k1 is not None and _k2 is None,
+              f"第一次={_k1} 第二次={_k2}（第二次必须为 None，否则两路同时写盘）")
+        # 但不同车间必须放行，不能被一把大锁串死
+        _k3 = si.acquire_volume_slot("e75e857c", "设备安装", "磨浮车间")
+        check("不同车间可以并行（互斥粒度按车间，不是全项目一把锁）",
+              _k3 is not None, f"实得 {_k3}")
+        si.release_volume_slot(_k1)
+        si.release_volume_slot(_k3)
+        # 释放后必须能再进来，否则一次异常就把整卷永久锁死
+        _k4 = si.acquire_volume_slot("e75e857c", "设备安装", "选矿厂")
+        check("释放后能重新整卷（异常不会把整卷永久锁死）", _k4 is not None, f"实得 {_k4}")
+        si.release_volume_slot(_k4)
+        # 全厂（车间为空/全厂）单独一把键，与具体车间不冲突
+        _k5 = si.acquire_volume_slot("e75e857c", "设备安装", "")
+        _k6 = si.acquire_volume_slot("e75e857c", "设备安装", "全厂")
+        check("全厂与全厂（空/全厂两种写法）视为同一个任务",
+              (_k5 is not None) != (_k6 is not None),
+              f"空={_k5} 全厂={_k6}（两者必须只有一个能拿到）")
+        for _k in (_k5, _k6):
+            si.release_volume_slot(_k)
+
+        # 异常路径：业务异常也必须释放，否则后续整卷全被拒
+        check("出卷抛异常时槽位会被释放（不会把整卷封死）",
+          _exception_releases_slot(si), "generate_volume 未用 try/finally，异常会漏锁")
+
+    print("\n[M3] 进度必须按**真实完成顺序**推进，不能按提交顺序排队等")
+    # 实测 v0.1.190 首版缺陷（真并发探针 19 车间，185 秒）：
+    #   t=179.7s 时 done 仍是 16，t=185.1s 才一次跳到 19。
+    # 原因是进度写在 `for _fut_obj, _w in _fut.items()` 里 —— 那是**提交顺序**，
+    # 必须等排在前面的车间先完成才能往前挪。一个慢车间（辊磨筛分车间）
+    # 就把后面已完成的车间的进度全压住，界面在最后 6 秒一动不动，
+    # 恰恰让「是不是卡死了」这个本来要解决的问题又回来了。
+    # 正确做法是 as_completed：谁先出完谁先报。
+    check("有「按完成顺序收集」的并发出卷辅助函数",
+          hasattr(si, "_run_parallel_with_progress"),
+          "进度写在提交顺序的 future.items() 上，慢车间会压住其余车间的进度")
+
+    if hasattr(si, "_run_parallel_with_progress"):
+        import time as _t
+
+        def _慢(*a, **k):
+            _t.sleep(0.45)
+            return {"name": "慢车间"}
+
+        def _快(*a, **k):
+            _t.sleep(0.01)
+            return {"name": "快车间"}
+
+        _order = []
+        _t0 = _t.time()
+        _res = si._run_parallel_with_progress(
+            [("慢车间", _慢), ("快车间", _快)], max_workers=2,
+            on_done=lambda name, ok: _order.append((name, round(_t.time() - _t0, 2))))
+        check("先完成的车间接先报到（快车间在慢车间之前）",
+              [x[0] for x in _order] == ["快车间", "慢车间"],
+              f"实得顺序 {_order}")
+        check("快车间报到时慢车间还没完（不是等齐了一次性报）",
+              bool(_order) and _order[0][1] < 0.4,
+              f"首个报到时间 {_order[0][1] if _order else None}s（应远小于 0.45s）")
+        check("结果按车间名可回取，慢的快的一个都不丢",
+              (isinstance(_res, dict) and set(_res) == {"慢车间", "快车间"}
+               and _res["慢车间"]["name"] == "慢车间"),
+              f"实得 {_res}")
+        check("回调次数等于任务数（不多报也不漏报）",
+              len(_order) == 2, f"实得 {len(_order)} 次")
+
+    print("\n[M4] 整编联动面板必须真的能取到册（否则「一键整卷」永远点不动）")
+    # 实测缺陷（真浏览器）：整编联动的书册下拉框在 module-archive 里，
+    # 但只有进入 docgen 模块时才会调 loadRegistryStatus() 去填它。
+    # 用户从整编模块进来，下拉恒为「（未导入登记表）」，点整卷只会 alert 3 次
+    # 「请先选项目」—— 整编这条路的主路径其实一直是断的。
+    _html_path = os.path.join(WB, "web", "index.html")
+    _html = open(_html_path, encoding="utf-8", errors="replace").read() if os.path.exists(_html_path) else ""
+    check("能读到前端 index.html", bool(_html), f"未找到 {_html_path}")
+
+    if _html:
+        _i_switch = _html.find("function switchModule")
+        _i_end = _html.find("\nfunction ", _i_switch + 10)
+        _sw = _html[_i_switch:_i_end] if _i_switch > 0 else ""
+        _i_arc = _sw.find("moduleName === 'archive'")
+        # 取 archive 分支之后的一小段窗口（跨行写也算），到下一个 if 分支为止
+        _arc_blk = _sw[_i_arc:_sw.find("if (moduleName === 'ai')", _i_arc)] if _i_arc > 0 else ""
+        check("进入整编模块时会刷新册列表（loadRegistryStatus）",
+              _i_arc > 0 and "loadRegistryStatus()" in _arc_blk,
+              "module-archive 分支里没有 loadRegistryStatus()，"
+              "册下拉永远是「未导入登记表」，点整卷不生效")
+
+        # runVolume 里 btn 必须先赋值再用，否则命中「重复点击」时 btn 是 undefined
+        _i_rv = _html.find("function runVolume()")
+        _rv = _html[_i_rv:_html.find("\nfunction ", _i_rv + 10)] if _i_rv > 0 else ""
+        _p_btn = _rv.find("var btn = document.getElementById('supTodoBar')")
+        _p_guard = _rv.find("if (window.__volRunning)")
+        check("重复点击守卫在 btn 赋值之后（否则 TypeError）",
+              _p_btn > 0 and _p_guard > _p_btn,
+              f"btn@{_p_btn} guard@{_p_guard}（guard 必须更靠后）")
+
+        # 每条早退路径都必须放开 __volRunning，否则一次异常把按钮永久卡住
+        check("「接口失败」早退路径会放开 __volRunning",
+              "window.__volRunning = false" in _rv.split("if (!d.ok && !d.result)")[1][:400]
+              if "if (!d.ok && !d.result)" in _rv else False,
+              "接口异常时直接 return，按钮永久停在「进行中」，用户只能刷新页面")
+
+    print("\n[M2] 整卷进度：长任务必须有可读进展，而不是一句静态文案")
+    check("有整卷进度读取接口（get_volume_progress 存在）",
+          hasattr(si, "get_volume_progress"),
+          "130 秒全程只有「整卷生成中，请稍候」，用户无法判断死没死")
+    if hasattr(si, "get_volume_progress"):
+        _p0 = si.get_volume_progress("e75e857c", "设备安装", "不存在的车间X")
+        check("没有进行中的整卷时进度为空/空闲", not _p0, f"实得 {_p0}")
 
     print(f"\n结果：{_PASS[0]} passed, {len(_FAIL)} failed")
     if _FAIL:

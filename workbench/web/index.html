@@ -836,7 +836,11 @@ function switchModule(moduleName) {
     // 模块加载时刷新数据（无项目时也能访问，显示空状态）
     if (moduleName === 'resource') { try { loadResourceData(); loadStorageLocations(); } catch(e) {} }
     if (moduleName === 'docgen') { try { loadDocgenWorkshops(); loadTemplates(); loadGenHistory(); loadSupCategories(); loadSupWorkshops(); loadSupConfig(); loadRegistryStatus(); } catch(e) {} }
-    if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); onEnterArchiveModule(); } catch(e) {} }
+    if (moduleName === 'archive') { try { loadArchiveData(); loadDashboard(); onEnterArchiveModule(); } catch(e) {}
+        // v0.1.191：整编联动面板（册下拉 + 一键整卷）就在 module-archive 里，
+        // 但原来只有进 docgen 才调 loadRegistryStatus() 去填那个下拉。
+        // 用户从整编进来，册下拉恒为「（未导入登记表）」，点整卷永远不生效。
+        try { loadRegistryStatus(); } catch(e) {} }
     if (moduleName === 'ai') { try { loadOperationLogs(); } catch(e) {} }
     if (moduleName === 'update') { try { loadUpdateInfo(); } catch(e) {} }
 }
@@ -2380,10 +2384,42 @@ function checkSupervision() {
 function runVolume() {
     var pid = getCurrentProjectIdForSup();
     if (!pid) { alert('请先在资源管理中选择项目'); return; }
+    // v0.1.190：**整卷期间必须防重复点击**。
+    // 实测 19 个车间整卷 130 秒，原来按钮一直可点（disabled/_running 出现次数为 0），
+    // 用户等不及再点一次 → 两路车间级线程池同时写同一批卷目录，docx 互相覆盖，
+    // 卷内目录的页数与实际文件对不上，而监理现场核对的正是这两个数。
+    // v0.1.190 修正：btn 必须**先赋值再用**。原来守卫块写在了 var btn 之前，
+    // 命中「重复点击」这条分支时 btn 还是 undefined，会抛 TypeError，
+    // 结果恰恰是最该拦住重复点击的那条路径先崩了。
     var book = document.getElementById('supBookSel').value;
     var ws = document.getElementById('supWorkshopInput').value.trim();
     var btn = document.getElementById('supTodoBar');
+    if (window.__volRunning) {
+        btn.innerHTML = '整卷正在进行中，请等待完成（重复点击不会加速，只会两路同时改写文件）。';
+        return;
+    }
+    window.__volRunning = true;
     btn.innerHTML = '整卷生成中，请稍候（A/B 项按车间生成，C 类建归集目录）...';
+    // v0.1.190：**长任务要有可读进展**。
+    // 原来这 130 秒里界面就一句静态文案，用户看不出死没死。
+    // 这里按秒轮询 /api/supervision/volume/progress，显示「正在出第 N/M 个车间」。
+    var _pollTimer = setInterval(function () {
+        fetch('/api/supervision/volume/progress?project_id=' + encodeURIComponent(pid)
+              + '&book=' + encodeURIComponent(book) + '&workshop=' + encodeURIComponent(ws))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var p = d.progress;
+                if (!d.running || !p) { return; }
+                var _n = p.total ? ('第 ' + (p.done || 0) + '/' + p.total + ' 个车间') : '正在准备';
+                btn.innerHTML = '⏳ 整卷进行中 ' + (p.stage || '') + '：' + _n
+                    + (p.current ? '（' + p.current + '）' : '')
+                    + '　已用 ' + (p.elapsed || 0) + ' 秒'
+                    + '<br><span style="color:#888">整卷要逐份生成并渲染页数，'
+                    + '19 个车间实测约 130 秒。已完成的车间的文件已落盘，请勿重复点击。</span>';
+            })
+            .catch(function () { /* 轮询失败不影响主流程，下次再试 */ });
+    }, 1000);
+    var _stopPoll = function () { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } };
     if (typeof manualCollect === 'undefined') {
       window.manualCollect = function () {
         var sha = document.getElementById('supCollectSha').value.trim();
@@ -2412,9 +2448,25 @@ function runVolume() {
         // 之前把 ② 显示成「整卷失败：未知错误」，用户看不到已经生成的 34 份文件。
         if (!d.ok && !d.result) {
             btn.innerHTML = '整卷失败：' + (d.detail || '未知错误');
+            // v0.1.190 修正：接口异常这条早退路径原来既不停轮询、也不放开
+            // __volRunning —— 一次后端异常就把「一键整卷」永久锁在「进行中」，
+            // 用户只能刷新页面。失败同样必须收尾。
+            _stopPoll();
+            window.__volRunning = false;
             return;
         }
         var r = d.result;
+        // v0.1.190：后端槽位互斥拦下的重复请求。必须明确告诉用户
+        // 「正在跑，别重复点」，而不是显示成「整卷失败」。
+        // 注意：这时**不能**清 __volRunning —— 原来那次还在跑，本页仍在轮询进度。
+        if (r && r.already_running) {
+            var _p2 = r.progress || {};
+            btn.innerHTML = '⚠ 该册已有整卷正在进行中，本次请求未执行。'
+                + '<br>进度：' + (_p2.stage || '') + '　第 ' + (_p2.done || 0) + '/'
+                + (_p2.total || 0) + ' 个车间　已用 ' + (_p2.elapsed || 0) + ' 秒'
+                + '<br><span style="color:#888">' + (r.hint || '') + '</span>';
+            return;
+        }
         var html = (r.errors.length ? '⚠️ 整卷完成，但有登记项需要人工确认：生成文件 <b>' : '✅ 整卷完成：生成文件 <b>') + r.generated.length + '</b> 个｜归集目录 ' + r.collect_dir.length + ' 个';
         if (r.todo_fields.length) {
             // v0.1.189：原来这里直接按行刷 todo_fields.slice(0,10)。
@@ -2539,8 +2591,15 @@ function runVolume() {
         }
         btn.innerHTML = html;
         checkSupervision();
+        _stopPoll();
+        window.__volRunning = false;
     })
-    .catch(function(e){ btn.innerHTML = '整卷出错：' + e; });
+    .catch(function(e){
+        btn.innerHTML = '整卷出错：' + e;
+        // v0.1.190：异常也必须放开，否则一次出错就把「一键整卷」永久卡在「进行中」。
+        if (typeof _stopPoll === 'function') { _stopPoll(); }
+        window.__volRunning = false;
+    });
 }
 
 // ===== 竣工组卷 =====

@@ -7,6 +7,8 @@
 - export_todo: 待补字段清单导出
 """
 import os, json, re
+import threading
+import time
 from . import supervision_templates as st
 
 # v0.1.173：整编要求登记表改为「按项目存放」。
@@ -339,6 +341,140 @@ FACTORY_LEVEL = ('', '全厂', '全部', '各车间', '所有车间')
 _VOLUME_WORKERS = int(os.environ.get("FANGONG_VOLUME_WORKERS", "3"))
 
 
+# v0.1.190：**整卷必须互斥，且必须给出可读进度**。
+#
+# 实测事故（真实项目 e75e857c，设备安装册，19 个车间，54 份 docx）：
+#   整卷耗时 130314 ms（130 秒）。这 130 秒里界面上只有一句静态的
+#   「整卷生成中，请稍候（A/B 项按车间生成，C 类建归集目录）...」，
+#   没有任何进展；同一段 runVolume() 里 disabled / _running 出现次数实测为 0，
+#   按钮一直可点。用户等不及再点一次，就是**两路车间级线程池同时写同一批
+#   卷目录和 exports 文件**——生成的 docx 互相覆盖，卷内目录页数和实际文件
+#   对不上，而监理现场核对的恰恰就是这两个数。
+#
+# 所以这里做两件事：
+#   ① 按「项目 + 册 + 车间」的槽位互斥：同一件事已经有任务在跑，第二次直接
+#      返回「进行中」，不再开第二路去写盘；不同车间互不影响（不能一把大锁串死
+#      19 个车间的并行出卷，那是 v0.1.179 才把 200s 降到 70s 的收益）。
+#   ② 记下逐车间进度，供界面轮询显示「正在出第 7/19 个车间」。
+#
+# 为什么用普通 Lock 而不是全局文件锁：整卷是单机单进程（uvicorn 单 worker）场景，
+# 线程级互斥已经够用；跨进程那层由端口占用（同一台机器只能起一个工作台）保证。
+_VOLUME_SLOT_LOCK = threading.Lock()
+_VOLUME_SLOTS = {}       # key -> {'started': ts, 'total': n, 'done': [...], 'current': str}
+_VOLUME_PROGRESS = {}    # key -> 进度字典（与 slot 同生命周期）
+
+_FACTORY_WORDS = ('', '全厂', '全部', '各车间', '所有车间')
+
+
+def _volume_key(project_id, book, workshop):
+    """整卷任务键：同一册同一车间算同一件事；全厂的几种写法归成一个。"""
+    _w = (workshop or '').strip()
+    if _w in _FACTORY_WORDS:
+        _w = '全厂'
+    return (str(project_id or ''), str(book or ''), _w)
+
+
+def acquire_volume_slot(project_id, book, workshop):
+    """占住「项目+册+车间」的整卷槽位。拿到返回 key，已被占则返回 None。
+
+    v0.1.190：重复点击「一键整卷」不再开第二路。返回 None 由调用方转成
+    「已有整卷在进行中，请等待完成」的可见结果，而不是静默重开。
+    """
+    key = _volume_key(project_id, book, workshop)
+    with _VOLUME_SLOT_LOCK:
+        if key in _VOLUME_SLOTS:
+            return None
+        _VOLUME_SLOTS[key] = {'started': time.time()}
+        _VOLUME_PROGRESS[key] = {
+            'key': list(key), 'running': True, 'total': 0, 'done': 0,
+            'current': '', 'started': time.time(), 'finished': None,
+            'generated': 0, 'errors': 0, 'stage': '准备中',
+        }
+        return key
+
+
+def release_volume_slot(key):
+    """释放槽位。必须放在 finally 里 —— 一次异常就把整卷永久封死是最坏的结果。"""
+    if key is None:
+        return
+    with _VOLUME_SLOT_LOCK:
+        _VOLUME_SLOTS.pop(key, None)
+        _p = _VOLUME_PROGRESS.get(key)
+        if _p is not None:
+            _p['running'] = False
+            _p['finished'] = time.time()
+            _p['stage'] = '已完成'
+
+
+def set_volume_progress(key, **kw):
+    """更新进度（total/done/current/stage/generated/errors）。"""
+    if key is None:
+        return
+    with _VOLUME_SLOT_LOCK:
+        _p = _VOLUME_PROGRESS.get(key)
+        if _p is not None:
+            _p.update(kw)
+
+
+def get_volume_progress(project_id, book, workshop):
+    """读整卷进度。没有进行中的整卷时返回 None（界面据此显示空闲）。"""
+    key = _volume_key(project_id, book, workshop)
+    with _VOLUME_SLOT_LOCK:
+        _p = _VOLUME_PROGRESS.get(key)
+        if not _p:
+            return None
+        _d = dict(_p)
+        if _d.get('started'):
+            _d['elapsed'] = round((_d.get('finished') or time.time()) - _d['started'], 1)
+        return _d
+
+
+def _run_parallel_with_progress(tasks, max_workers=None, on_done=None):
+    """按**完成顺序**跑一批车间，每完成一个就回调一次。
+
+    tasks: [(名字, 无参函数), ...]；返回 {名字: 结果}，异常路径也收进结果里。
+
+    v0.1.191：为什么要单独抽出来 —— 这是真并发实测出来的缺陷。
+    首版（v0.1.190）把进度写在 `for _fut_obj, _w in _fut.items()` 上，
+    那是**提交顺序**：必须等排在前面的车间完成，进度才能往前挪一个。
+    19 个车间实测 185 秒，采样显示 t=179.7s 时 done 还是 16，t=185.1s 才跳到 19 ——
+    最后 6 秒界面一动不动。而「用户看不出死没死」正是加进度的原因，
+    这样写等于把原问题又搬了回来。改成 as_completed：谁先出完谁先报。
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results = {}
+    tasks = list(tasks or [])
+    if not tasks:
+        return results
+    if not max_workers or max_workers < 1:
+        max_workers = min(len(tasks), 8)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        fut_map = {pool.submit(fn): name for name, fn in tasks}
+        for fut in as_completed(fut_map):
+            name = fut_map[fut]
+            ok = True
+            try:
+                results[name] = fut.result()
+            except Exception as e:  # noqa: BLE001
+                # 单个车间炸掉不能拖垮整卷：记账、继续跑其余的。
+                ok = False
+                results[name] = {
+                    'ok': False, 'generated': [], 'todo': [], 'collect_dir': [],
+                    'todo_fields': [], 'empty_shells': [],
+                    'errors': [{'序号': '', '名称': name,
+                                '原因': f'该车间整卷异常：{type(e).__name__}: {e}'}],
+                }
+            if on_done:
+                try:
+                    on_done(name, ok)
+                except Exception:  # noqa: BLE001
+                    # 进度回调本身出错不允许影响出卷（界面显示错误不该让文件白出）。
+                    pass
+    return results
+
+
+
 def _resolve_workshop(workshop, project_id) -> dict:
     """把传入的车间名收敛成"设备台账里真实有设备的那个车间"。
 
@@ -605,6 +741,41 @@ def _merge_workshop_results(ws_results, wss):
 
 
 def generate_volume(project_id, book, workshop='', _skip_boxing=False):
+    """一键整卷的**唯一对外入口**（v0.1.190 起负责互斥与进度）。
+
+    v0.1.190 实测事故：整卷 130 秒，界面只有一句静态「整卷生成中」、按钮不禁用。
+    用户等不及再点一次 → 两路车间级线程池同时写同一批卷目录，docx 互相覆盖。
+    所以对外入口先占槽位：同一「项目+册+车间」已有任务在跑，第二次直接返回
+    「进行中」，绝不再开第二路去写盘。
+
+    真正的出卷逻辑在 _generate_volume_impl。内部分卷（每个车间一路）走 impl
+    直连，不再各自占槽 —— 车间级 3 路并发是 v0.1.179 把 200s 降到 70s 的收益，
+    不能被一把大锁串死。
+    """
+    key = acquire_volume_slot(project_id, book, workshop)
+    if key is None:
+        _p = get_volume_progress(project_id, book, workshop) or {}
+        return {
+            'ok': False, 'generated': [], 'todo': [], 'collect_dir': [],
+            'errors': [], 'todo_fields': [],
+            'already_running': True,
+            'error': '该册已有整卷正在进行中，请等待完成后再操作',
+            'progress': _p,
+            'hint': '整卷要逐份生成并渲染页数，19 个车间实测约 130 秒；'
+                    '重复点击不会加速，只会让两路同时改写同一批文件。'
+                    '进度请看界面上的「正在出第 N/M 个车间」。',
+        }
+    try:
+        set_volume_progress(key, stage='准备中', total=0, done=0, current='')
+        return _generate_volume_impl(project_id, book, workshop, _skip_boxing,
+                                     _progress_key=key)
+    finally:
+        # 必须 finally：一次异常就把整卷永久封死是最坏的结果。
+        release_volume_slot(key)
+
+
+def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
+                          _progress_key=None):
     """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录
 
     v0.1.178：**未指定车间时按项目实际车间逐个生成**。
@@ -639,20 +810,27 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
             # v0.1.179：各车间彼此独立，**并发出卷**。
             # 串行时 19 个车间 × (生成 + 渲页数) 实测 200s；并发 3 路后同一批降到 ~70s。
             # 每个车间写自己的卷目录、自己的 exports 文件名（带车间名），互不覆盖。
-            from concurrent.futures import ThreadPoolExecutor
-            _ws_results = {}
-            with ThreadPoolExecutor(max_workers=_VOLUME_WORKERS) as _pool:
-                _fut = {_pool.submit(generate_volume, project_id, book, _w, True): _w
-                        for _w in _wss}
-                for _fut_obj, _w in _fut.items():
-                    try:
-                        _ws_results[_w] = _fut_obj.result()
-                    except Exception as _e4:  # noqa: BLE001
-                        _ws_results[_w] = {
-                            'ok': False, 'generated': [], 'todo': [], 'errors': [
-                                {'序号': '', '名称': _w,
-                                 '原因': f'该车间整卷异常：{type(_e4).__name__}: {_e4}'}],
-                            'collect_dir': [], 'todo_fields': [], 'empty_shells': []}
+            # v0.1.190：这里走 _generate_volume_impl **直连**，不再走 generate_volume，
+            # 否则每个车间都会去抢一次自己的槽位（19 路全在同一个父任务里，本来就不该抢），
+            # 且唯一入口的槽位会被第一个车间占走。分卷内部的并发出卷不受互斥限制。
+            _total_ws = len(_wss)
+            set_volume_progress(_progress_key, total=_total_ws, done=0,
+                                stage='并发出卷中', current=(_wss[0] if _wss else ''))
+            _done_ws = []
+
+            def _on_ws_done(_name, _ok):
+                # v0.1.191：**按完成顺序**推进度（as_completed），不是提交顺序。
+                # 首版按提交顺序记账，实测最后 6 秒界面一动不动，见辅助函数 docstring。
+                _done_ws.append(_name)
+                set_volume_progress(_progress_key, done=len(_done_ws),
+                                    current=_name, stage='并发出卷中')
+
+            _ws_results = _run_parallel_with_progress(
+                [(_w, (lambda _w=_w: _generate_volume_impl(project_id, book, _w, True, None)))
+                 for _w in _wss],
+                max_workers=_VOLUME_WORKERS,
+                on_done=_on_ws_done,
+            )
             # v0.1.179：分卷时先不算装盒清单 —— 每个车间都算一遍等于
             # 19 次全册扫描 + 19 轮重复渲染（实测整卷 300s+）。合并后算一次。
             # v0.1.182：合并逻辑抽到 _merge_workshop_results（纯函数、可单测），
@@ -660,7 +838,9 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
             if _ws_results:
                 _merged = _merge_workshop_results(_ws_results, _wss)
             if _merged is None:
-                _merged = generate_volume(project_id, book, '全厂')
+                # v0.1.190：同一条出卷链路里不再回抢槽位（当前槽位就是这次的）。
+                _merged = _generate_volume_impl(project_id, book, '全厂',
+                                                _progress_key=_progress_key)
             _merged['workshops'] = _wss
             _merged['multi_workshop'] = True
             if _wsr.get('note'):
@@ -922,6 +1102,10 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
 
     results['ok'] = not results['errors']
     results['empty_shell_count'] = len(results.get('empty_shells', []))
+    # v0.1.190：单车间/单卷路径也要把进度收尾，否则界面停在「正在出第 0/0 个车间」。
+    set_volume_progress(_progress_key, done=1, total=1, current=workshop,
+                        stage='已完成', generated=len(results.get('generated') or []),
+                        errors=len(results.get('errors') or []))
     results['device_source'] = _dev_info
     results['workshop_devices'] = len(st._get_workshop_devices(workshop, project_id))
     if _dev_info.get('devices', 0) == 0:
