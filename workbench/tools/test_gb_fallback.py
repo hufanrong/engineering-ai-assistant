@@ -20,6 +20,7 @@
 
 用法：python3 tools/test_gb_fallback.py   （退出码 0 = 全过）
 """
+import copy
 import os
 import shutil
 import sys
@@ -607,6 +608,156 @@ def main():
           f"末尾 20 字符={_todo_md[-20:]!r}")
     check("内容本身没被截断（仍含原因说明）",
           "非设备" in _todo_md and _todo_md.strip(), f"长度={len(_todo_md)}")
+
+    # ---------------- L. 整卷 catalog 必须逐车间汇总 ----------------
+    # v0.1.189 缺陷（真实项目 e75e857c 实测，18 个车间的设备安装册）：整卷返回
+    #   catalog 件数=3 / 页数=66
+    # 而 generated 明明是 54 件（18 车间 × 3）、装盒清单页数实测合计 1142。
+    # 根因：_merge_workshop_results 里 `base = dict(ws_results.get(wss[0]) or {})`
+    # 只浅拷贝首个车间，catalog 是嵌套 dict，于是整册继承了「中矿堆」这一个车间的
+    # 数字，调用方又只覆盖 装盒清单/盒数/空卷，件数页数永不修正。
+    # 危害：监理拿这个数对整册卷内目录与脊背标签 —— 18 盒 1142 页被报成 3 件 66 页，
+    # 等于整册资料没交。这条必须直调合并函数，看返回值，不能靠人工合算。
+    print("\n[L] 整卷 catalog 逐车间汇总（不得只取首车间）")
+    _w3 = ["中矿堆", "选矿厂", "尾矿库"]
+    _wsr = {
+        "中矿堆": {"generated": [{"序号": str(i)} for i in range(3)],
+                   "errors": [], "todo": [],
+                   "catalog": {"件数": 3, "页数": 66, "页数依据": "rendered",
+                               "未生成项": 0, "文件": ["_卷内目录.docx"]}},
+        "选矿厂": {"generated": [{"序号": str(i)} for i in range(3)],
+                   "errors": [], "todo": [{"序号": "9", "名称": "设备安装记录"}],
+                   "catalog": {"件数": 3, "页数": 70, "页数依据": "rendered",
+                               "未生成项": 1, "文件": ["_卷内目录.docx",
+                                                       "_卷内备考表.docx"]}},
+        "尾矿库": {"generated": [], "errors": [], "todo": [],
+                   "catalog": {"件数": 0, "页数": 0, "页数依据": "rendered",
+                               "未生成项": 0, "文件": ["_案卷封面.docx"]}},
+    }
+    _mg = si._merge_workshop_results(_wsr, _w3)
+    _cat = (_mg or {}).get("catalog") or {}
+    check("整卷 catalog 件数 = 逐车间合计", _cat.get("件数") == 6,
+          f"实得 {_cat.get('件数')}，应 6（回退成只取首车间会得到 3）")
+    check("整卷 catalog 页数 = 逐车间合计", _cat.get("页数") == 136,
+          f"实得 {_cat.get('页数')}，应 136（回退会得到 66）")
+    check("件数与 generated 计数自洽",
+          _cat.get("件数") == sum(v["generated"] for v in _mg.get("by_workshop", {}).values()),
+          f"catalog={_cat.get('件数')} vs by_workshop 合计="
+          f"{sum(v['generated'] for v in _mg.get('by_workshop', {}).values())}")
+    check("卷数 = 参与合并的车间数", _cat.get("卷数") == 3, f"实得 {_cat.get('卷数')}")
+    check("按车间逐项留底（3 个车间都要有）",
+          sorted((_cat.get("按车间") or {}).keys()) == sorted(_w3),
+          f"实得 {sorted((_cat.get('按车间') or {}).keys())}")
+    check("按车间明细里的页数是各车间自己的值",
+          [(_cat.get("按车间") or {}).get(w, {}).get("页数") for w in _w3] == [66, 70, 0],
+          f"实得 {[(_cat.get('按车间') or {}).get(w, {}).get('页数') for w in _w3]}")
+    check("未生成项也累加", _cat.get("未生成项") == 1, f"实得 {_cat.get('未生成项')}")
+    check("文件清单取并集（不丢车间独有的文件）",
+          set(_cat.get("文件") or []) == {"_卷内目录.docx", "_卷内备考表.docx", "_案卷封面.docx"},
+          f"实得 {sorted(_cat.get('文件') or [])}")
+    check("页数依据同口径时照抄", _cat.get("页数依据") == "rendered",
+          f"实得 {_cat.get('页数依据')!r}")
+
+    # 口径混杂：不能拿 "rendered" 盖住"有些车间没渲染出来"，要如实说只算了一部分。
+    _wsr_mix = copy.deepcopy(_wsr)
+    _wsr_mix["选矿厂"]["catalog"]["页数依据"] = "libreoffice"
+    _mix = si._merge_workshop_results(_wsr_mix, _w3).get("catalog") or {}
+    check("口径混杂时不谎报 rendered",
+          _mix.get("页数依据") != "rendered" and "partial" in str(_mix.get("页数依据")),
+          f"实得 {_mix.get('页数依据')!r}")
+    check("口径混杂不影响件数/页数合计",
+          _mix.get("件数") == 6 and _mix.get("页数") == 136,
+          f"实得 件数={_mix.get('件数')} 页数={_mix.get('页数')}")
+
+    # 边界：某车间页数未实测（None）时，合计不能把 None 当 0 悄悄少算，
+    # 宁可给 None 也不能给一个错数（监理会拿它做核对）。
+    _wsr_non = copy.deepcopy(_wsr)
+    _wsr_non["选矿厂"]["catalog"]["页数"] = None
+    _non = si._merge_workshop_results(_wsr_non, _w3).get("catalog") or {}
+    check("任一车间页数为 None 时整卷页数置 None（不静默少算）",
+          _non.get("页数") is None,
+          f"实得 {_non.get('页数')!r}（若给 66 就是把 None 当 0 加了）")
+    check("但件数仍可算（不因页数缺失一起丢掉）",
+          _non.get("件数") == 6, f"实得 {_non.get('件数')}")
+
+    # 边界：bool 是 int 的子类，True 不能当 1 加进合计。
+    _wsr_b = copy.deepcopy(_wsr)
+    _wsr_b["尾矿库"]["catalog"]["件数"] = True
+    _b = si._merge_workshop_results(_wsr_b, _w3).get("catalog") or {}
+    check("bool 不计入件数合计（True 不等于 1）",
+          _b.get("件数") is None or _b.get("件数") == 6,
+          f"实得 {_b.get('件数')!r}（真实合计 6，若得 7 说明把 True 当 1）")
+
+    # 只有一个车间时行为不能变（避免汇总逻辑把单车间也改坏）。
+    _one = si._merge_workshop_results({"甲": {"generated": [{"序号": "1"}],
+                                             "catalog": {"件数": 3, "页数": 66,
+                                                         "页数依据": "rendered",
+                                                         "未生成项": 0,
+                                                         "文件": ["a.docx"]}}}, ["甲"])
+    check("单车间件数不变", (_one.get("catalog") or {}).get("件数") == 3,
+          f"实得 {(_one.get('catalog') or {}).get('件数')}")
+    check("单车间页数不变", (_one.get("catalog") or {}).get("页数") == 66,
+          f"实得 {(_one.get('catalog') or {}).get('页数')}")
+
+    # 车间没有 catalog（空项目）时不能崩，也不能编出数字。
+    _no = si._merge_workshop_results({"甲": {"generated": []}}, ["甲"])
+    check("车间无 catalog 时不崩、catalog 仍可读",
+          isinstance((_no or {}).get("catalog"), (dict, type(None))),
+          f"实得 {type((_no or {}).get('catalog'))}")
+
+    # ---- 同一类缺陷的标量残留：这些字段同样只继承首车间 ----
+    # 实测（真实项目 e75e857c，19 个车间）：
+    #   workshop_device_rows = 13（中矿堆一个车间的台账行数，整册应为各车间合计）
+    #   todo_file 指向 .../中矿堆/_待办清单.md，界面拿它当整册待办
+    #   material_workshop = False（中矿堆不是材料车间，可尾矿库是）
+    print("\n[L2] 整卷标量统计也按整册口径（不得只取首车间）")
+    _ws2 = {
+        "甲": {"generated": [], "errors": [], "todo": [],
+               "workshop_device_rows": 13, "workshop_devices": 13,
+               "material_workshop": False,
+               "empty_shells": [], "todo_file": "/甲/_待办清单.md",
+               "catalog": {"件数": 3, "页数": 60, "页数依据": "rendered",
+                           "未生成项": 0, "文件": []}},
+        "乙": {"generated": [], "errors": [], "todo": [],
+               "workshop_device_rows": 4, "workshop_devices": 4,
+               "material_workshop": True,
+               "empty_shells": [{"序号": "1", "名称": "x"}], "todo_file": "/乙/_待办清单.md",
+               "catalog": {"件数": 0, "页数": 0, "页数依据": "rendered",
+                           "未生成项": 3, "文件": []}},
+    }
+    _m2 = si._merge_workshop_results(_ws2, ["甲", "乙"])
+    check("workshop_device_rows = 各车间合计", _m2.get("workshop_device_rows") == 17,
+          f"实得 {_m2.get('workshop_device_rows')}，应 17（回退会得到 13）")
+    check("workshop_devices = 各车间合计", _m2.get("workshop_devices") == 17,
+          f"实得 {_m2.get('workshop_devices')}")
+    check("empty_shell_count 跟着合并后的列表走", _m2.get("empty_shell_count") == 1,
+          f"实得 count={_m2.get('empty_shell_count')} vs len(list)={len(_m2.get('empty_shells') or [])}")
+    check("整册 material_workshop=False（只有部分是材料车间）",
+          _m2.get("material_workshop") is False, f"实得 {_m2.get('material_workshop')}")
+    check("并指名哪些车间是材料车间",
+          _m2.get("material_workshops") == ["乙"], f"实得 {_m2.get('material_workshops')}")
+    check("todo_file 不再冒充整册待办（置空）",
+          _m2.get("todo_file") is None, f"实得 {_m2.get('todo_file')!r}")
+    check("按车间给出每份待办清单文件",
+          sorted((_m2.get("todo_files") or {}).keys()) == ["乙", "甲"],
+          f"实得 {sorted((_m2.get('todo_files') or {}).keys())}")
+
+    # 全部车间都是材料车间时，整册才是材料车间（all 的语义，不是 any）
+    _m2b = si._merge_workshop_results(
+        {"甲": {"material_workshop": True}, "乙": {"material_workshop": True}}, ["甲", "乙"])
+    check("全部车间都是材料车间时整册才为 True",
+          _m2b.get("material_workshop") is True, f"实得 {_m2b.get('material_workshop')}")
+
+    # 上面 material_workshop 那两条的**首车间是 False**，回退成"继承首车间"也恰好
+    # 得 False —— 咬不住这个缺陷。反过来摆一次：首车间是材料车间、后面不是。
+    # 回退会得 True（错），正确逻辑必须得 False。
+    _m2r = si._merge_workshop_results(
+        {"甲": {"material_workshop": True}, "乙": {"material_workshop": False}}, ["甲", "乙"])
+    check("首车间是材料车间、后面不是 → 整册不能判成材料车间",
+          _m2r.get("material_workshop") is False,
+          f"实得 {_m2r.get('material_workshop')}（回退会得 True）")
+    check("材料车间名单不会因为首车间是材料就只剩它",
+          _m2r.get("material_workshops") == ["甲"], f"实得 {_m2r.get('material_workshops')}")
 
     print(f"\n结果：{_PASS[0]} passed, {len(_FAIL)} failed")
     if _FAIL:

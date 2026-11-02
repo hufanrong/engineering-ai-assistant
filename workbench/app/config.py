@@ -144,7 +144,7 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #    并且不再是恒 SKIP（恒 SKIP 永远不会暴露问题）。
 # ② 打包时漏排 tools/test_ledger_units_report.json —— 运行期产物随包发给别人。
 #    排除清单是按名字逐个写的，漏一个名字就漏一份；打包回读改成按模式兜住。
-APP_VERSION = "0.1.188"
+APP_VERSION = "0.1.189"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

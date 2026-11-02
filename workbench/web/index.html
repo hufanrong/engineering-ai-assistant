@@ -2417,10 +2417,33 @@ function runVolume() {
         var r = d.result;
         var html = (r.errors.length ? '⚠️ 整卷完成，但有登记项需要人工确认：生成文件 <b>' : '✅ 整卷完成：生成文件 <b>') + r.generated.length + '</b> 个｜归集目录 ' + r.collect_dir.length + ' 个';
         if (r.todo_fields.length) {
-            html += '<br>⏳ 待人工补充实测数据 <b>' + r.todo_fields.length + '</b> 组：';
-            r.todo_fields.slice(0, 10).forEach(function(t){
-                html += '<br> &nbsp;&nbsp;- ' + t['序号'] + ' ' + t['名称'] + '：' + t['待补字段'].slice(0, 8).join('、') + (t['待补字段'].length > 8 ? ' 等' : '');
+            // v0.1.189：原来这里直接按行刷 todo_fields.slice(0,10)。
+            // 整卷视图下 todo_fields 是**每车间一份**（实测 18 车间 × 3 项 = 54 条），
+            // 18 个车间的 3 项内容完全相同，slice(0,10) 恰好只把第一个车间的
+            // 3 条重复刷了 3 遍，其余 17 个车间的待办一条都看不到。
+            // 与下面 name_alias / gb_fallback 用同一套聚合：按「序号+名称」归并。
+            var _tdMap = {};
+            r.todo_fields.forEach(function(t) {
+                var k = (t['序号'] || '') + '|' + (t['名称'] || '');
+                if (!_tdMap[k]) { _tdMap[k] = {row: t, n: 0, ws: []}; }
+                _tdMap[k].n += 1;
+                if (t['_车间']) _tdMap[k].ws.push(t['_车间']);
             });
+            var _tdKeys = Object.keys(_tdMap);
+            html += '<br>⏳ 待人工补充实测数据 <b>' + _tdKeys.length + '</b> 项'
+                 + (r.todo_fields.length > _tdKeys.length
+                    ? '（共 <b>' + r.todo_fields.length + '</b> 组，按登记项归并）' : '')
+                 + '：';
+            _tdKeys.slice(0, 10).forEach(function(k){
+                var v = _tdMap[k], t = v.row, _f = t['待补字段'] || [];
+                html += '<br> &nbsp;&nbsp;- ' + t['序号'] + ' ' + t['名称'] + '：'
+                     + _f.slice(0, 8).join('、') + (_f.length > 8 ? ' 等' : '')
+                     + (v.n > 1 ? '（' + v.n + ' 个车间）' : '');
+            });
+            if (_tdKeys.length > 10) {
+                html += '<br> &nbsp;&nbsp;<span style="color:#888">…另 ' + (_tdKeys.length - 10)
+                     + ' 项，明细见各车间卷内《待办清单》</span>';
+            }
         }
         // v0.1.184：整卷里两类需要用户知道的表，原来一行都不显示：
         // 「按国标通用格式生成的」和「借用别的表的」。不显示的话用户以为都是专用表。
@@ -2466,6 +2489,53 @@ function runVolume() {
         }
         if (r.errors.length) {
             html += '<br>⚠️ 失败 ' + r.errors.length + ' 项：' + r.errors.map(function(e){ return e['名称']; }).join('、');
+        }
+        // v0.1.189：整册汇总必须显示出来。
+        // 原来这里只报「生成文件 N 个｜归集目录 M 个」，整册到底多少件、多少页、
+        // 要装几盒、页数是渲染实测还是估的 —— 一句都没有。而装出来的盒子和
+        // 卷内目录上的合计恰恰是监理现场核对的两个数。
+        // 后端同时修了口径：整卷 catalog 原来只取第一个车间的数字（18 车间
+        // 1142 页会被报成 3 件 66 页），必须逐车间汇总。
+        var _c = r.catalog || null;
+        if (_c && _c['件数'] !== null && _c['件数'] !== undefined) {
+            html += '<br>📦 整册汇总：共 <b>' + _c['件数'] + '</b> 件';
+            if (_c['页数'] !== null && _c['页数'] !== undefined) {
+                html += '／<b>' + _c['页数'] + '</b> 页';
+            }
+            if (_c['盒数'] !== null && _c['盒数'] !== undefined) html += '／装 <b>' + _c['盒数'] + '</b> 盒';
+            if (_c['卷数'] !== null && _c['卷数'] !== undefined) html += '（' + _c['卷数'] + ' 卷）';
+            if (_c['页数依据']) {
+                // 页数依据是内部枚举（rendered / unavailable / partial），
+                // 装盒清单里已经译成「渲染实测」，界面上不能露出英文。
+                var _basisMap = {
+                    'rendered': '渲染实测',
+                    'unavailable': '未渲染（页数待本机 Word 核对）',
+                    'libreoffice': 'LibreOffice 渲染实测',
+                    'partial（部分车间的页数未渲染实测）': '部分车间未渲染实测'
+                };
+                var _b = _basisMap[_c['页数依据']] || _c['页数依据'];
+                html += '　页数依据：' + _b;
+            }
+        }
+        var _emp = (_c && _c['空卷']) || [];
+        if (_emp.length) {
+            html += '<br>⚠ 有 <b>' + _emp.length + '</b> 个卷没有归档件、不占盒号：'
+                 + _emp.map(function(e){ return (e['车间'] || '') + '（' + (e['件数'] || 0) + ' 件）'; }).join('、')
+                 + '　<span style="color:#888">清单与待办里已写明原因</span>';
+        }
+        if (_c && _c['装盒清单']) {
+            html += '<br>📋 装盒清单：' + _c['装盒清单'];
+        }
+        // v0.1.189：待办清单是「一车间一份」，整册没有合并版。
+        // 原来接口把首车间那份的路径当整册待办返回，界面照它显示，
+        // 用户点开只看到中矿堆一个车间的待办，其余 18 个车间的待办像凭空消失。
+        var _tf = r.todo_files || null;
+        if (r.multi_workshop && _tf) {
+            var _tn = Object.keys(_tf).length;
+            if (_tn) {
+                html += '<br>📝 待办清单：按车间各一份，共 <b>' + _tn + '</b> 份（整册不合并）'
+                     + '　<span style="color:#888">在各车间卷目录的 _待办清单.md 里</span>';
+            }
         }
         btn.innerHTML = html;
         checkSupervision();

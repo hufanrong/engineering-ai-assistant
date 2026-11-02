@@ -518,6 +518,89 @@ def _merge_workshop_results(ws_results, wss):
             'todo': len(r.get('todo') or []),
         }
     merged['by_workshop'] = by_workshop
+
+    # v0.1.189：**整卷 catalog 必须逐车间汇总，不能只取首个车间**。
+    # 实测（真实项目 e75e857c，18 个车间的设备安装册）：整卷返回
+    #   catalog 件数=3 / 页数=66，
+    # 而 generated 明明是 54 件、每个车间各 3 件，页数实测合计 1142。
+    # 原因就是上面 `base = dict(ws_results.get(wss[0]) or {})` —— catalog 是
+    # 嵌套 dict，浅拷贝继承了**中矿堆这一个车间**的数字，再没被任何地方覆盖。
+    # 后果比"数字不准"严重：监理拿这个数字对整册卷内目录和脊背标签，
+    # 3 件 / 66 页会把 18 盒 1142 页的册子报成 3 件，等于整册资料没交。
+    _cats = [(w, (ws_results.get(w) or {}).get('catalog') or {}) for w in wss]
+    _cats = [(w, c) for w, c in _cats if isinstance(c, dict)]
+    if _cats:
+        def _sum(_key):
+            _vals = [c.get(_key) for _w, c in _cats]
+            _nums = [v for v in _vals if isinstance(v, int) and not isinstance(v, bool)]
+            return (sum(_nums), len(_nums) == len(_vals))
+
+        _cnt, _cnt_ok = _sum('件数')
+        _pgs, _pgs_ok = _sum('页数')
+        _mis, _mis_ok = _sum('未生成项')
+        _basis = {str(c.get('页数依据') or '') for _w, c in _cats}
+        # 页数依据只有"所有车间都同一口径"才敢照抄；混着就如实说只算了一部分，
+        # 不能拿"rendered"去盖住"有些车间没渲染出来"。
+        _basis_out = (_basis.pop() if len(_basis) == 1 else
+                      'partial（部分车间的页数未渲染实测）')
+        _files = set()
+        for _w, c in _cats:
+            for _f in (c.get('文件') or []):
+                _files.add(_f)
+        _cat = dict(merged.get('catalog') or {})
+        _cat.update({
+            '件数': _cnt if _cnt_ok else None,
+            '页数': _pgs if _pgs_ok else None,
+            '页数依据': _basis_out,
+            '未生成项': _mis if _mis_ok else None,
+            '卷数': len(_cats),
+            '按车间': {_w: {'件数': c.get('件数'), '页数': c.get('页数'),
+                            '页数依据': c.get('页数依据')} for _w, c in _cats},
+            '文件': sorted(_files),
+        })
+        # 装盒清单 / 盒数 / 空卷 由调用方在合并后算一次再写进来，这里不碰。
+        merged['catalog'] = _cat
+
+    # v0.1.189：与 catalog 同源的**标量统计**同样只继承了首车间，这里一并纠正。
+    # 实测（真实项目 e75e857c，19 个车间）：
+    #   workshop_device_rows = 13   ← 中矿堆一个车间的行数，整册应是各车间合计
+    #   todo_file            = .../volumes/设备安装/中矿堆/_待办清单.md
+    #   material_workshop    = False ← 中矿堆不是材料车间，可整册里尾矿库是
+    # 前两个直接对外（接口返回 / 界面展示），第三个的语义在整册上本来就不成立
+    # （不可能"整册都是材料车间"）。整册视图必须给整册口径，不能拿一个车间冒充。
+    def _sum_field(_key):
+        _vals = [(ws_results.get(_w) or {}).get(_key) for _w in wss]
+        _nums = [v for v in _vals if isinstance(v, int) and not isinstance(v, bool)]
+        return sum(_nums) if len(_nums) == len(_vals) else None
+
+    _rows = _sum_field('workshop_device_rows')
+    if _rows is not None:
+        merged['workshop_device_rows'] = _rows      # 各车间的台账行数合计
+    _devs = _sum_field('workshop_devices')
+    if _devs is not None:
+        merged['workshop_devices'] = _devs
+
+    # empty_shell_count 是 empty_shells 的派生计数。合并后的 empty_shells 才是真相，
+    # 计数必须跟着列表走，否则同一件事有两个数、而且它们对不上。
+    if isinstance(merged.get('empty_shells'), list):
+        merged['empty_shell_count'] = len(merged['empty_shells'])
+
+    # 整册里可能有的车间是材料车间、有的不是 → 对整册而言是「部分」
+    _mat = [(ws_results.get(_w) or {}).get('material_workshop') for _w in wss]
+    _mat = [m for m in _mat if isinstance(m, bool)]
+    if _mat:
+        merged['material_workshop'] = all(_mat)
+        merged['material_workshops'] = [w for w in wss
+                                        if (ws_results.get(w) or {}).get('material_workshop') is True]
+
+    # todo_file：多车间整卷**不写整册待办清单**（每个车间各写自己卷里的一份）。
+    # 原来这里留着首车间那份的路径，界面/接口拿它当「整册待办」，
+    # 用户点开只看到中矿堆一个车间的待办，其余 18 个车间的待办全"消失"。
+    # 改为给出按车间的文件清单，并明确说明整册没有合并版。
+    _tfiles = {w: (ws_results.get(w) or {}).get('todo_file') for w in wss}
+    _tfiles = {w: f for w, f in _tfiles.items() if f}
+    merged['todo_files'] = _tfiles
+    merged['todo_file'] = None
     return merged
 
 
@@ -585,6 +668,10 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
             if _wsr.get('resolved_from'):
                 _merged['workshop_resolved_from'] = _wsr['resolved_from']
             _merged['ok'] = not (_merged.get('errors') or [])
+            # 注意这两个数**不是一回事**，别拿其中一个去核另一个：
+            #   workshop_devices     = 项目设备库总台数（含未归入任何车间的设备）
+            #   workshop_device_rows = 各车间台账行数合计（不含未归车间的）
+            # 实测 e75e857c：229 台总数 vs 226 行（3 台没写车间）。
             _merged['workshop_devices'] = len(st._get_workshop_devices('', project_id))
             # v0.1.179：装盒清单在这里算一次（不是每个车间各算一次）
             try:
