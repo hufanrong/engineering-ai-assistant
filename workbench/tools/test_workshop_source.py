@@ -90,7 +90,20 @@ def run():
                             "source_file": "设备台账_真实_选矿厂.xlsx"}
 
     pid, ddir = _make_project(devices, "设备台账_真实_选矿厂.xlsx", workshop_hint="选矿厂")
-    old_cur = getattr(M, "_CURRENT_PROJECT_ID", None)
+
+    # v0.1.195：原项目必须从 current_project.json 读，不能从 M._CURRENT_PROJECT_ID 取。
+    # 实测事故：app/main.py 里根本没有 _CURRENT_PROJECT_ID 这个变量（grep 全仓 0 命中），
+    # getattr 永远返回 None，于是 finally 里 `if old_cur:` 从不成立 —— 还原代码写了
+    # 但从来没执行过。更糟的是这个测试切到 ws_src_test，随后 _cleanup 又把这个项目
+    # **删掉**，current_project.json 就指向一个不存在的 id：
+    #   {"project_id": "ws_src_test", "project_name": "车间来源测试项目"}
+    # 用户打开界面看到的是「当前未选择项目，请先新建或选择项目」——等于自己的工程不见了。
+    try:
+        _oc = pm.get_current_project()
+        old_cur = (_oc or {}).get("id") or ""
+        _oc_name = (_oc or {}).get("name") or ""
+    except Exception:  # noqa: BLE001
+        old_cur, _oc_name = "", ""
     try:
         pm.set_current_project(pid) if hasattr(pm, "set_current_project") else None
 
@@ -153,11 +166,27 @@ def run():
               f"total={d_bad.get('total')}")
     finally:
         _cleanup(ddir)
+        # 还原必须落在 _cleanup 之后：先删测试项目，再切回原项目，
+        # 否则中间会存在「指针指着刚被删的项目」的一瞬间。
         if old_cur:
             try:
                 pm.set_current_project(old_cur)
-            except Exception:  # noqa: BLE001
-                pass
+                print(f"  [还原] 当前项目已切回 {old_cur}（{_oc_name}）")
+            except Exception as _e:  # noqa: BLE001
+                print(f"  [WARN] 当前项目还原失败：{_e}")
+
+    # T7：还原之后，current_project.json 必须指向一个**真实存在、能读出来**的项目。
+    # 只断言「调过 set_current_project」不够——实测过的坑是这个测试把指针留在
+    # ws_src_test 上，而该目录已被 _cleanup 删掉，界面于是显示「当前未选择项目」。
+    if old_cur:
+        try:
+            _now = pm.get_current_project()
+        except Exception:  # noqa: BLE001
+            _now = None
+        check("T7 测试结束后当前项目可用（不指向已删除项目）",
+              bool(_now) and _now.get("id") == old_cur,
+              f"原项目={old_cur}，测试后=({(_now or {}).get('id')}, "
+              f"{(_now or {}).get('name')})")
 
     ok = sum(1 for r in RESULTS if r["passed"])
     bad = len(RESULTS) - ok
