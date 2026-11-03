@@ -46,30 +46,72 @@ _FAIL = []
 def _exception_releases_slot(si):
     """出卷中途抛异常时，整卷槽位必须被释放（否则一次失败就把整卷永久封死）。
 
-    做法：把 `_book_items` 打成抛异常。它在 acquire 之后才被调用，
-    所以异常真的从 generate_volume 里冒出来 —— 只有 try/finally 才会把槽位收回去。
+    v0.1.197 修正 —— 这一条原来是**假红灯**：
+    原实现拿真实项目 `e75e857c` 当靶子，但那个项目根本没有
+    supervision_registry.json（实测 _reg_file 返回的路径不存在）。
+    于是 generate_volume 在 acquire 之后、调用 _book_items 之前就
+    `return {'ok': False, 'error': '登记表里没有「设备安装」这一册，现有：'}`，
+    异常压根没抛；`if not raised: return False` 就判失败，门禁长期报
+    「generate_volume 未用 try/finally，异常会漏锁」—— 而 finally 明明白白写着。
+    一条假红灯比没有红灯更坏：它教人忽略红灯。
+
+    现在改成**自建临时项目**：真有「设备安装」册的登记表 + 1 台该车间的设备，
+    保证 _book_items 真被调到、异常真从 generate_volume 里冒出来。
     """
     orig = si._book_items
+    tmp = tempfile.mkdtemp(prefix="lock_")
+    _root = _pm.PROJECTS_ROOT
+    _cur = _pm.CURRENT_PROJECT_FILE
+    pid = "lock_proj"
+    ws = "测试车间_锁"
+    hit = [0]
 
     def boom(*a, **k):
+        hit[0] += 1
         raise RuntimeError("测试用：模拟出卷中途异常")
 
-    si._book_items = boom
-    raised = False
     try:
-        si.generate_volume("e75e857c", "设备安装", "测试车间_锁")
-    except Exception:  # noqa: BLE001
-        raised = True
+        _pm.PROJECTS_ROOT = os.path.join(tmp, "projects")
+        _pm.CURRENT_PROJECT_FILE = os.path.join(tmp, "current_project.json")
+        pd = os.path.join(_pm.PROJECTS_ROOT, pid)
+        os.makedirs(pd, exist_ok=True)
+        with open(os.path.join(pd, "project_meta.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"id": pid, "name": "槽位异常测试"}, f, ensure_ascii=False)
+        with open(os.path.join(pd, "index.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"devices": {"L1": {"name": "胶带输送机", "model": "X",
+                                          "workshop": ws, "unit": "台",
+                                          "quantity": "1"}},
+                         "files": {}, "workshops": {ws: {}}}, f, ensure_ascii=False)
+        # 关键：真有「设备安装」这一册，否则 generate_volume 会提前 return，异常抛不出来
+        with open(os.path.join(pd, "supervision_registry.json"), "w",
+                  encoding="utf-8") as f:
+            _mjson.dump([{"册": "设备安装", "序号": "1", "名称": "设备安装记录",
+                          "表号": "SH/T3503-J302", "分类": "A"}], f, ensure_ascii=False)
+
+        si._book_items = boom
+        raised = False
+        try:
+            si.generate_volume(pid, "设备安装", ws)
+        except Exception:  # noqa: BLE001
+            raised = True
+        finally:
+            si._book_items = orig
+        check("异常确实从 generate_volume 里抛出（_book_items 真被调到）",
+              raised and hit[0] == 1,
+              f"raised={raised}，_book_items 被调用 {hit[0]} 次"
+              f"（0 次说明前置校验提前 return，这条测试根本没在测它要测的东西）")
+        if not raised:
+            return
+        # 异常之后必须还能再拿到同一个槽位
+        k = si.acquire_volume_slot(pid, "设备安装", ws)
+        check("异常之后仍能占用同一槽位（finally 已释放，整卷没被封死）",
+              k is not None, f"实得 {k}（None = 槽位被异常漏锁）")
+        si.release_volume_slot(k)
     finally:
         si._book_items = orig
-    if not raised:
-        return False
-    # 异常之后必须还能再拿到同一个槽位
-    k = si.acquire_volume_slot("e75e857c", "设备安装", "测试车间_锁")
-    if k is None:
-        return False
-    si.release_volume_slot(k)
-    return True
+        _pm.PROJECTS_ROOT = _root
+        _pm.CURRENT_PROJECT_FILE = _cur
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def check(name, cond, detail=""):
@@ -869,8 +911,7 @@ def main():
             si.release_volume_slot(_k)
 
         # 异常路径：业务异常也必须释放，否则后续整卷全被拒
-        check("出卷抛异常时槽位会被释放（不会把整卷封死）",
-          _exception_releases_slot(si), "generate_volume 未用 try/finally，异常会漏锁")
+        _exception_releases_slot(si)
 
     print("\n[M3] 进度必须按**真实完成顺序**推进，不能按提交顺序排队等")
     # 实测 v0.1.190 首版缺陷（真并发探针 19 车间，185 秒）：

@@ -43,6 +43,11 @@ PHASE_SUMMARY = {}    # 阶段 -> {"passed":n,"failed":n,"skipped":n}
 # 竣工/整卷断言必须在「有设备数据的那一个项目」上跑 —— 原来没记这个 id，
 # phase3 直接在用户的当前项目上跑，结果是 0。这里把 id 记下来，phase3 显式切过去。
 TEST_PROJECT_ID = ""
+# v0.1.196：本次运行创建的**全部**测试项目 id。
+# 只清 TEST_PROJECT_ID 不够 —— phase3 的「竣工归档跨项目隔离」还会
+# 另建一个「自测隔离_HHMMSS」，实测每跑一次自测就多留一个空壳项目
+# （沙箱里累积 74 个测试残留、59 个 0 文件 0 设备）。
+CREATED_PIDS = []
 
 
 # ---------------- 后端选择：进程内 TestClient / 真实 HTTP ----------------
@@ -417,6 +422,8 @@ def phase1(samples_dir):
     _pj = (body or {}).get("project") or {}
     if _pj.get("id"):
         TEST_PROJECT_ID = _pj["id"]
+        if _pj["id"] not in CREATED_PIDS:
+            CREATED_PIDS.append(_pj["id"])
 
     # 扫描
     t0 = time.time()
@@ -809,6 +816,8 @@ def phase3(samples_dir):
                                      {"name": f"自测隔离_{time.strftime('%H%M%S')}"})
         _new_id = ((nb or {}).get("project") or {}).get("id") or ""
         if _new_id:
+            if _new_id not in CREATED_PIDS:
+                CREATED_PIDS.append(_new_id)
             call("POST", "/api/projects/switch", {"project_id": _new_id})
             # 新项目里还没生成过任何竣工资料，设备数必须为 0
             _, st_b, _ = call("GET", "/api/completion-archive/stats")
@@ -1153,6 +1162,24 @@ def main():
                                    {"project_id": _origin_pid})
             _ok_r = (_code_r == 200 and (_rb or {}).get("ok", True))
             print(f"[还原] 当前项目切回 {_origin_pid} → {'OK' if _ok_r else 'FAILED'}")
+
+        # v0.1.196：本次建的自测项目必须删掉，不能留在用户的项目列表里。
+        # 实测事故：沙箱里累积到 87 个项目、其中 74 个是「自测_xxx / _j_节自测_xxx /
+        # 实测_xxx」测试残留，59 个是 0 文件 0 设备的空壳。用户打开「选择项目」
+        # 要在几十个空壳里找自己那个工程 —— 每天跑一次自测就多一个，
+        # 这条不清理，项目列表迟早没法用。
+        # 只删本次跑出来的那个 id（TEST_PROJECT_ID），绝不按名字前缀批量删：
+        # 用户自己也可能建名字带「自测」的真实项目。且必须在切回原项目之后删，
+        # 否则中间会出现「当前指针指着刚被删的项目」。
+        _to_del = [x for x in CREATED_PIDS if x and x != _origin_pid]
+        for _tp in _to_del:
+            try:
+                _code_d, _db, _ = call("POST", "/api/projects/delete",
+                                       {"project_id": _tp, "backup": False})
+                _ok_d = (_code_d == 200 and (_db or {}).get("ok", True))
+                print(f"[清理] 删除本次测试项目 {_tp} → {'OK' if _ok_d else 'FAILED'}")
+            except Exception as _e:  # noqa: BLE001
+                print(f"[WARN] 测试项目 {_tp} 清理失败：{_e}")
 
     fails = write_report(os.path.join(here, "selftest_report.json"),
                          os.path.join(here, "selftest_report.md"), sdir)

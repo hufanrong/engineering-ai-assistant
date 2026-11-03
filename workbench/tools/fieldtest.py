@@ -38,6 +38,8 @@ import zipfile
 import urllib.error
 import urllib.request
 
+_CREATED = []   # v0.1.197：本次实测创建的全部项目 id（test + isolation）
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 WB_DIR = os.path.dirname(HERE)
 BASE = os.environ.get("FANGONG_BASE", "http://127.0.0.1:8756")
@@ -408,6 +410,8 @@ def run(args):
         return 1
     RESULT["projects"].append({"role": "test", "id": test_pid, "name": pname})
     metric("test_project_id", test_pid)
+    if test_pid:
+        _CREATED.append(test_pid)
 
     code, up, err = call_multipart("/api/upload-files", os.path.basename(inp["ledger"]),
                                    inp["ledger_bytes"], field="files",
@@ -813,6 +817,9 @@ def run(args):
     new_id = (jget(jget(nb, "project"), "id")) or ""
     if new_id:
         RESULT["projects"].append({"role": "isolation", "id": new_id})
+        # v0.1.197：把隔离项目也登记下来，收尾必须删 —— 原来只删 test_pid，
+        # 每跑一次实测就在用户的项目列表里多留一个空壳（实测累积到 90 个）。
+        _CREATED.append(new_id)
         call("POST", "/api/projects/switch", {"project_id": new_id})
         RUN_START_TS = time.time()
         # v0.1.176：24 个模块的业务数据必须隔离到项目目录。
@@ -892,13 +899,21 @@ def finish(home, test_pid, args, wd, code):
     """收尾：切回原项目、清理临时目录、写报告。"""
     if home:
         call("POST", "/api/projects/switch", {"project_id": home})
-    if not args.keep and test_pid:
-        # 只删本次建的测试项目，绝不碰使用者的真实项目
-        try:
-            call("POST", "/api/projects/delete", {"project_id": test_pid, "keep_files": False})
-            RESULT.setdefault("cleanup", {})["deleted_test_project"] = test_pid
-        except Exception:  # noqa: BLE001
-            RESULT.setdefault("cleanup", {})["delete_failed"] = test_pid
+    # 只删本次实测实际建出来的 id，绝不碰使用者的真实项目
+    _to_del = [x for x in (_CREATED + ([test_pid] if test_pid else []))
+               if x and x != home]
+    # 去重但保序
+    _seen = set()
+    _to_del = [x for x in _to_del if not (x in _seen or _seen.add(x))]
+    if not args.keep:
+        _deleted = []
+        for _tp in _to_del:
+            try:
+                call("POST", "/api/projects/delete", {"project_id": _tp, "keep_files": False})
+                _deleted.append(_tp)
+            except Exception:  # noqa: BLE001
+                RESULT.setdefault("cleanup", {}).setdefault("delete_failed", []).append(_tp)
+        RESULT.setdefault("cleanup", {})["deleted_projects"] = _deleted
     try:
         shutil.rmtree(wd, ignore_errors=True)
     except Exception:  # noqa: BLE001

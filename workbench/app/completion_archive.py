@@ -8,8 +8,35 @@ v0.1.67：设备安装位置与竣工资料联动
 import os
 import json
 import datetime
+import threading
+import uuid
 from typing import Optional
 from . import project_paths as _pp
+
+# v0.1.197：**竣工清单的读改写必须串行化，且临时文件名必须唯一**。
+#
+# 实测事故（真实项目 e75e857c，228 台设备，/api/completion-archive/all 69 秒）：
+#   返回 total_devices=222、failed_count=6，失败原因是
+#     FileNotFoundError: ... completion_archive.json.tmp -> completion_archive.json
+#     PermissionError:   Operation not permitted: ... completion_archive.json.tmp
+#   generate_device_archive_list 每台设备都做一次「读全量 → 改一项 → 写全量」，
+#   而 _save_archive 用**固定名字**的 path + ".tmp"。两个设备线程同时写时：
+#     A: dump 到 .tmp → rename 走 .tmp
+#     B: dump 到 .tmp（此时 .tmp 已被 A 挪走，open 会新建）→ rename 时报 .tmp 不存在
+#   在 Windows 上更严重：A 还没 release 句柄时 B 去 os.replace 直接报
+#   PermissionError（文件被占用），这正是现场「一键竣工偶尔少几台设备」的来源。
+#
+#   而且失败是**静默少台**：失败的 6 台被塞进 failed_devices，但 total_devices
+#   跟着变成 222 —— /stats 读磁盘得到的数字又是另一个值（实测 89→148 之间徘徊，
+#   因为每次运行都覆盖写，中断后留下的是半份清单）。
+#   竣工清单是交给监理的归档交付物，少一台就是少一份资料，不能靠并发运气。
+#
+#   两处改动：
+#     ① 临时文件名带 uuid —— 各写各的，不会互抢同一个 .tmp；
+#     ② 模块级可重入锁包住整个「读—改—写」——否则即使 tmp 不冲突，
+#        后写的线程会用自己那份**旧快照**整份覆盖，前面的写入凭空消失
+#        （实测 6 路并发最终只剩 2 条）。
+_ARCHIVE_LOCK = threading.RLock()
 
 
 def _archive_file_path() -> str:
@@ -65,12 +92,40 @@ def _load_archive() -> dict:
 
 
 def _save_archive(archive: dict):
+    """整份写回竣工清单。**临时文件名必须唯一**（并发写时不能用固定 .tmp）。
+
+    v0.1.197：固定 path+".tmp" 会在并发下互相踩踏（见文件头注释的实测证据）。
+    """
     _ensure_dirs()
     path = _archive_file()
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(archive, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    tmp = f"{path}.{uuid.uuid4().hex[:8]}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(archive, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    finally:
+        # 替换失败也要把临时文件清掉，否则现场目录会堆一堆 .tmp
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _update_archive(key, value) -> dict:
+    """原子地「读全量 → 改一条 → 写回全量」，返回写回后的整份清单。
+
+    v0.1.197：竣工清单是**整份 JSON 文件**，任何一次单条更新都是
+    read-modify-write。并发出卷（整卷按车间 3 路并发）时，两个线程各自读到
+    同一份旧快照、各写各的，后写的把先写的整份覆盖 —— 设备凭空消失。
+    所以必须把三步收进一把锁，并把整个操作封成一个函数，
+    调用方拿不到「先 load 再 save」的机会，漏锁就不可能发生。
+    """
+    with _ARCHIVE_LOCK:
+        archive = _load_archive()
+        archive[key] = value
+        _save_archive(archive)
+        return archive
 
 
 # 每类设备需要的竣工资料清单
@@ -222,12 +277,14 @@ def get_device_requirements(dev_type: str) -> list:
         DEVICE_ARCHIVE_REQUIREMENTS.get(dev_type, DEFAULT_REQUIREMENTS))
 
 
-def generate_device_archive_list(tag: str) -> dict:
+def generate_device_archive_list(tag: str, _persist: bool = True) -> dict:
     """v0.1.67：生成单台设备的竣工资料清单。
-    
+
     Args:
         tag: 设备位号
-    
+        _persist: 是否立即落盘（v0.1.197）。批量出全部设备时必须传 False ——
+                  否则 228 台设备要整份读+写 228 次全量 JSON。
+
     Returns:
         设备竣工资料清单
     """
@@ -325,10 +382,14 @@ def generate_device_archive_list(tag: str) -> dict:
     }
     
     # 保存到归档
-    archive = _load_archive()
-    archive[tag] = result
-    _save_archive(archive)
-    
+    # v0.1.197：必须走 _update_archive 这个原子入口。原来这里是
+    # `archive = _load_archive(); archive[tag] = result; _save_archive(archive)`
+    # 三步裸奔，并发出卷时后写的线程拿自己那份**旧快照**整份覆盖，
+    # 前面刚写进去的设备凭空消失（实测 6 路并发最终只剩 2 条）。
+    # 封装成函数是为了让调用方**没有机会**漏掉锁 —— 只靠约定"记得加锁"必然漏。
+    if _persist:
+        _update_archive(tag, result)
+
     return result
 
 
@@ -345,6 +406,7 @@ def generate_all_devices_archive() -> dict:
     
     all_archives = []
     failed_tags = []
+    _results_to_persist = {}
     for d in devices:
         # v0.1.177：单台设备失败不得掀翻整个接口。
         # 实测事故：矿山设备资料清单是纯字符串列表，req["type"] 抛 TypeError，
@@ -355,7 +417,10 @@ def generate_all_devices_archive() -> dict:
                 # 缺位号的记录必须显式记账，不能静默少一台
                 failed_tags.append({"tag": "", "error": "设备记录缺少 tag（位号）字段"})
                 continue
-            archive = generate_device_archive_list(_tag)
+            # v0.1.197：批量时**不逐台落盘**（_persist=False），末尾一次性写回。
+            # 实测：228 台设备各做一次「读全量 → 改一条 → 写全量」，单次往返 9.6 ms，
+            # 光是无效的全量 JSON 读写就 2.2 秒；叠加并发争抢还有 6 台失败。
+            archive = generate_device_archive_list(_tag, _persist=False)
             if "error" in archive:
                 # v0.1.177：**带 error 的也必须记账**。
                 # 实测事故：一台设备的位号取不到 → 返回 {"error": "设备不存在"} →
@@ -365,6 +430,7 @@ def generate_all_devices_archive() -> dict:
                 failed_tags.append({"tag": _tag, "error": str(archive.get("error"))[:200]})
                 continue
             all_archives.append(archive)
+            _results_to_persist[_tag] = archive
         except Exception as _e:  # noqa: BLE001
             failed_tags.append({"tag": d.get("tag", ""), "error": f"{type(_e).__name__}: {_e}"})
     
@@ -399,6 +465,20 @@ def generate_all_devices_archive() -> dict:
                 all_missing[doc_type] = []
             all_missing[doc_type].append(a["tag"])
     
+    # v0.1.197：一次性写回（一把锁、一次读、一次写），不再逐台往返。
+    # 这样即使 228 台里有几台失败，也不会因为并发写而互相踩掉已算好的结果。
+    if _results_to_persist:
+        try:
+            with _ARCHIVE_LOCK:
+                archive = _load_archive()
+                archive.update(_results_to_persist)
+                _save_archive(archive)
+        except Exception as _se:  # noqa: BLE001
+            # 落盘失败不能掀翻统计结果：清单已经算出来了，用户至少要看得到
+            failed_tags.append({"tag": "", "error":
+                                f"竣工清单写盘失败（统计结果仍然可用）："
+                                f"{type(_se).__name__}: {_se}"})
+
     return {
         "total_devices": total_devices,
         "complete_devices": complete_devices,
@@ -450,20 +530,47 @@ def update_device_doc_status(tag: str, doc_type: str, status: str,
     device_archive["missing_required"] = [r["type"] for r in requirements if r["required"] and r["status"] != "completed"]
     device_archive["missing_optional"] = [r["type"] for r in requirements if not r["required"] and r["status"] != "completed"]
     
-    archive[tag] = device_archive
-    _save_archive(archive)
+    # v0.1.197：同样是读—改—写，必须收进锁里，否则并发出卷时状态更新会被覆盖
+    with _ARCHIVE_LOCK:
+        _archive_now = _load_archive()
+        if tag not in _archive_now:
+            return {"error": "设备归档不存在", "tag": tag}
+        _archive_now[tag] = device_archive
+        _save_archive(_archive_now)
     
     return {"ok": True, "tag": tag, "doc_type": doc_type, "status": status,
             "completeness_percent": device_archive["completeness_percent"]}
 
 
 def get_archive_stats() -> dict:
-    """v0.1.67：获取竣工资料归档统计。"""
+    """v0.1.67：获取竣工资料归档统计。
+
+    v0.1.197：必须显式告诉调用方「这份统计是不是全的」。
+    实测事故：清单文件被并发写毁坏时只剩 89 条，而 /api/completion-archive/all
+    实时算出台账里的 228 台 —— 同一时刻两个接口报出 89 和 228 两个数字，
+    /stats 却一个字都不说，用户不知道少的那 139 台去哪了。
+    这里额外返回 ledger_devices（台账里实际有多少台）与 stale / coverage，
+    让「统计不全」变成一个看得见的状态，而不是悄悄变小的数字。
+    """
     archive = _load_archive()
     devices = list(archive.values())
     
+    # 台账里实际有多少设备（用于判断这份统计是否完整）
+    _ledger = 0
+    try:
+        from . import relations as _rel
+        _ledger = len((_rel.load_relations() or {}).get("devices") or [])
+    except Exception:  # noqa: BLE001
+        _ledger = 0
+
     if not devices:
-        return {"ok": True, "total_devices": 0, "message": "尚未生成竣工资料清单"}
+        _msg = "尚未生成竣工资料清单"
+        if _ledger:
+            _msg = (f"尚未生成竣工资料清单（台账里有 {_ledger} 台设备，"
+                    f"请点「一键竣工」生成）")
+        return {"ok": True, "total_devices": 0, "message": _msg,
+                "ledger_devices": _ledger, "stale": bool(_ledger),
+                "coverage": 0.0}
     
     total = len(devices)
     complete = sum(1 for d in devices if d.get("completeness_percent", 0) >= 100)
@@ -485,7 +592,9 @@ def get_archive_stats() -> dict:
         status = d.get("construction_status", "pending")
         by_status[status] = by_status.get(status, 0) + 1
     
-    return {
+    _coverage = round(total / _ledger, 3) if _ledger else (1.0 if total else 0.0)
+    _stale = bool(_ledger) and total < _ledger
+    _res = {
         "ok": True,
         "total_devices": total,
         "complete_devices": complete,
@@ -493,7 +602,16 @@ def get_archive_stats() -> dict:
         "avg_completeness_percent": avg_completeness,
         "by_workshop": by_workshop,
         "by_construction_status": by_status,
+        "ledger_devices": _ledger,
+        "coverage": _coverage,
+        "stale": _stale,
     }
+    if _stale:
+        # 清单比台账少，必须明说，不能让用户以为「设备就只有这么多」
+        _res["warning"] = (f"竣工清单只覆盖 {total}/{_ledger} 台设备（{_coverage:.0%}）。"
+                           f"请重新点「一键竣工」生成完整清单；"
+                           f"此前的残缺来自并发写冲突，v0.1.197 已修复。")
+    return _res
 
 
 def list_missing_docs() -> list:
