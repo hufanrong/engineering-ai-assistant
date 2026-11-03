@@ -1436,7 +1436,9 @@ function loadWorkshops() {
                 card.className = 'workshop-card';
                 card.onclick = function() { showWorkshopFiles(w.name || w); };
                 card.innerHTML = '<div class="name">' + (w.name || w) + '</div>' +
-                    '<div class="stats"><span>📄 ' + (w.file_count || 0) + ' 文件</span></div>';
+                    '<div class="stats"><span>📄 ' + (w.file_count || 0) + ' 文件</span>' +
+                    ((w.device_count || 0) ? '<span>🔧 ' + w.device_count + ' 台设备</span>' : '') +
+                    '</div>';
                 grid.appendChild(card);
             });
             // 更新导出车间下拉
@@ -1967,17 +1969,35 @@ function exportPackage() {
 
 // ===== 资料生成 =====
 function loadDocgenWorkshops() {
+    // v0.1.193：这个下拉是拿去**查设备预填**的（/api/docgen/prefill 按 workshop 过滤设备），
+    // 所以只能列台账里真有设备的车间。原来直接用 data.workshops，实测真实项目里
+    // 唯一的选项是「选矿厂」（设备台账文件名猜出来的），选它预填结果是 devices=0、
+    // missing 5 项 —— 生成出来的施工方案一个设备都没有，而下拉里没有别的可选。
+    // 后端已把「有设备的车间」单独放在 docgen_workshops 里。
     fetch('/api/workshops')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var sel = document.getElementById('docgenWorkshop');
+            var list = data.docgen_workshops || [];
+            var byName = {};
+            (data.workshops || []).forEach(function(w) { byName[w.name] = w; });
             sel.innerHTML = '<option value="">全部车间</option>';
-            (data.workshops || []).forEach(function(w) {
+            if (!list.length) {
+                sel.innerHTML = '<option value="">全部车间（台账里没有车间数据）</option>';
+                return;
+            }
+            list.forEach(function(n) {
                 var opt = document.createElement('option');
-                opt.value = w.name || w;
-                opt.textContent = w.name || w;
+                opt.value = n;
+                var d = byName[n] || {};
+                var nDev = d.device_count || 0;
+                opt.textContent = n + (nDev ? '（' + nDev + ' 台设备）' : '');
                 sel.appendChild(opt);
             });
+        })
+        .catch(function() {
+            var sel = document.getElementById('docgenWorkshop');
+            if (sel) sel.innerHTML = '<option value="">全部车间</option>';
         });
 }
 
@@ -2952,13 +2972,21 @@ function loadDashboard() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var workshops = data.workshops || [];
-            var max = Math.max.apply(null, workshops.map(function(w) { return w.file_count || 0; }));
+            // v0.1.193：按「文件数 + 设备数」的量取基准。原来只看 file_count，
+            // 而设备台账补充进来的车间 file_count=0 —— max 恒为 0 时
+            // Math.max.apply 返回 -Infinity，宽度会算成 NaN；且这类车间会永远显示空条。
+            var max = 0;
+            workshops.forEach(function(w) {
+                max = Math.max(max, (w.file_count || 0) + (w.device_count || 0));
+            });
+            if (!isFinite(max)) { max = 0; }
             var html = '';
             workshops.slice(0, 10).forEach(function(w) {
-                var pct = max > 0 ? Math.round(((w.file_count || 0) / max) * 100) : 0;
+                var nf = w.file_count || 0, nd = w.device_count || 0;
+                var pct = max > 0 ? Math.round(((nf + nd) / max) * 100) : 0;
                 html += '<div style="margin-bottom:6px">' +
                     '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">' +
-                    '<span>' + (w.name || w) + '</span><span>' + (w.file_count || 0) + ' 文件</span></div>' +
+                    '<span>' + (w.name || w) + '</span><span>' + nf + ' 文件' + (nd ? ' / ' + nd + ' 台设备' : '') + '</span></div>' +
                     '<div class="progress"><div class="progress-bar" style="width:' + pct + '%;background:#52C41A"></div></div></div>';
             });
             document.getElementById('dashWorkshopChart').innerHTML = html || '<div style="color:#999">暂无车间数据</div>';

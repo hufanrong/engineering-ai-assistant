@@ -81,6 +81,19 @@ EXCLUDE_REL_FILES = [
     "tools/test_ledger_units_report.json",
 ]
 
+# v0.1.193：**排除侧也必须按模式，不能逐个列名。**
+# 实测事故：v0.1.193 新增了 tools/test_workshop_source.py，它跑完会写
+# tools/test_workshop_source_report.json；EXCLUDE_REL_FILES 里没有这个名字，
+# 于是它被原样打进包，被打包门禁拦下：
+#   [FAIL] 包内混入运行期报告 1 个：['fangong-workbench/tools/test_workshop_source_report.json']
+# v0.1.186 已经把这个教训写成「改成按模式兜住」，但当时只改了**回读校验**那一段，
+# 排除这一侧仍是精确名单 —— 同一个教训的另一半。现在两侧共用这一条正则，
+# 以后新增任何 *_report.json / verify_install*.json 都会自动排除，不必再补名单。
+RUNTIME_REPORT_PAT = re.compile(
+    r"^(?:(?:test|fieldtest|selftest)[\w-]*?(?:_report)?"
+    r"|verify_install|last_install_verify|install_verify)[\w-]*\.(json|md|txt)$",
+    re.I)
+
 
 def should_skip(rel):
     rel = rel.replace("\\", "/")
@@ -89,6 +102,9 @@ def should_skip(rel):
     if "__pycache__" in rel.split("/"):
         return True
     if rel in EXCLUDE_REL_FILES:
+        return True
+    # 运行期报告：按模式排除（同 RUNTIME_REPORT_PAT，与回读校验共用一份规则）
+    if RUNTIME_REPORT_PAT.match(os.path.basename(rel)):
         return True
     for p in EXCLUDE_PREFIX:
         if rel == p or rel.startswith(p + "/"):
@@ -280,12 +296,10 @@ def main():
         # test_ledger_units_report.json）。这里改成按模式兜住，不再依赖逐个列举。
         # 名字可能是 report 结尾，也可能不带 report（verify_install.json、
         # last_install_verify.json），所以用「运行期工具名 + json/md/txt」而不是只认 report。
-        _REPORT_PAT = re.compile(
-            r"^(?:(?:test|fieldtest|selftest)[\w-]*?(?:_report)?"
-            r"|verify_install|last_install_verify|install_verify)[\w-]*\.(json|md|txt)$",
-            re.I)
+        # v0.1.193：正则抽到模块级 RUNTIME_REPORT_PAT，与 should_skip() 共用一份规则
+        # ——否则两侧必然再次分叉（上一轮就是这样漏掉 test_workshop_source_report.json）。
         _rep_stray = [n for n in names
-                      if _REPORT_PAT.match(os.path.basename(n))]
+                      if RUNTIME_REPORT_PAT.match(os.path.basename(n))]
         if _rep_stray:
             problems.append(f"包内混入运行期报告 {len(_rep_stray)} 个：{_rep_stray[:3]}")
         # v0.1.180：模板库口径改为 templates_builtin/ —— data/templates 已排除，

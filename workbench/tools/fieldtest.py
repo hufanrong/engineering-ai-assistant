@@ -519,10 +519,18 @@ def run(args):
 
     code, pf, err = call("POST", "/api/docgen/prefill", {"workshop": ws_name, "doc_type": "施工方案"})
     prefill_devs = jget(pf, "devices") or jget(pf, "设备清单") or []
-    metric("prefill_devices", len(prefill_devs) if isinstance(prefill_devs, list) else prefill_devs)
+    _n_prefill = len(prefill_devs) if isinstance(prefill_devs, list) else 0
+    metric("prefill_devices", _n_prefill)
+    # v0.1.193：原来这里只断言 code == 200 —— 实测台账 228 台设备、19 个车间，
+    # 而 /api/workshops 当时只返回 1 个由文件名猜出的「选矿厂」，
+    # 脚本取 ws_name='选矿厂' 去预填，结果是 devices=0、missing 5 项，
+    # 却照样判 PASS（「返回了 200」被当成「有内容」）。这条正是假绿灯。
+    # 现在改成：台账有设备时，预填必须真的取到设备。
+    _need = n_dev_idx > 0
     rec("按车间预填", "预填结果里有设备（预填空=生成出来的方案没内容）",
-        f"{code} devices={len(prefill_devs) if isinstance(prefill_devs,list) else prefill_devs}",
-        code == 200, err)
+        f"{code} devices={_n_prefill} workshop={ws_name!r}"
+        + ("" if _need else "（本项目无设备，不适用）"),
+        (code == 200 and _n_prefill > 0) if _need else code == 200, err)
 
     if tlist:
         dtype = "施工方案" if "施工方案" in tlist else list(tlist)[0]
@@ -971,6 +979,13 @@ def main():
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         RESULT.setdefault("fatal", traceback.format_exc()[-800:])
+        # v0.1.193：脚本自己崩了，末尾却照常打印「通过 8 / 失败 0」——
+        # 实测真出现过（NameError 之后仍输出全绿），会把一次没跑完的现场测试
+        # 报成通过。这里把致命异常显式记一条失败项，让汇总数字不再骗人。
+        RESULT["failed"] = int(RESULT.get("failed") or 0) + 1
+        RESULT.setdefault("checks", []).append(
+            {"phase": "脚本自身", "name": "实测脚本未跑完", "passed": False,
+             "detail": str(RESULT.get("fatal"))[-300:]})
         return finish("", "", args, "", 1)
 
 

@@ -3730,31 +3730,114 @@ def storage_locations_refresh():
     from . import storage_manager as sm
     return sm.get_locations()
 
+def _ledger_workshops(project_id: str = None) -> list:
+    """本项目**设备台账行**里的车间（v0.1.193）。
+
+    为什么必须单独取一份：workshop_assign 的车间是**按文件**归属的，而设备台账
+    是一份**横跨全厂的车间**的汇总表 —— 它按文件名被整体归到「选矿厂」，
+    台账行里真正的 19 个车间（粗碎站 / 磨浮车间 / 脱水车间 …）从来没有进过
+    车间清单。设备自己的 workshop 存在 index.json 的 devices 里，才是权威来源。
+    """
+    out = []
+    try:
+        from . import project_manager as _pm
+        idx_path = os.path.join(_pm.get_project_data_dir(project_id), "index.json")
+        if os.path.isfile(idx_path):
+            with open(idx_path, "r", encoding="utf-8") as f:
+                _idx = json.load(f)
+            for _d in (_idx.get("devices") or {}).values():
+                _ws = (str(_d.get("workshop") or "")).strip()
+                if _ws and _ws not in out:
+                    out.append(_ws)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _device_count_by_workshop(project_id: str = None) -> dict:
+    """各车间的设备台数（用于前端展示「N 台设备」而不是「N 个文件」）。"""
+    cnt = {}
+    try:
+        from . import project_manager as _pm
+        idx_path = os.path.join(_pm.get_project_data_dir(project_id), "index.json")
+        if os.path.isfile(idx_path):
+            with open(idx_path, "r", encoding="utf-8") as f:
+                _idx = json.load(f)
+            for _d in (_idx.get("devices") or {}).values():
+                _ws = (str(_d.get("workshop") or "")).strip()
+                if _ws:
+                    cnt[_ws] = cnt.get(_ws, 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+    return cnt
+
+
 @app.get("/api/workshops")
 def get_workshops():
-    """获取当前项目已识别的车间列表（从项目资料解析，不返回通用参考数据）。"""
+    """获取当前项目已识别的车间列表（项目资料 + 设备台账，不返回通用参考数据）。
+
+    v0.1.193：**合并设备台账的车间的**。原来只取 workshop_assign.list_by_workshop()，
+    那是「文件级」归属：一份横跨全厂的设备台账被按**文件名**整份归到「选矿厂」，
+    于是真实项目 e75e857c（228 台设备、台账行内 19 个车间）的车间清单**只有 1 项
+    「选矿厂」**，而台账里真实存在的 19 个车间一个都不出现。
+    后果在「资料生成」上实测得到：车间下拉只填得出「选矿厂」，用户选它之后
+    /api/docgen/prefill 返回 devices=0、missing=5；而留空（全部车间）时 devices=60。
+    —— 下拉里唯一的选项是错的，用户没有任何办法知道。
+    """
     from . import workshop_assign as _wa
     from . import project_manager as _pm
-    
+
     current = _pm.get_current_project()
     if not current:
         return {"ok": True, "workshops": [], "message": "未选择项目，上传资料后自动识别车间"}
-    
+
     # v0.1.137：修复车间列表恒空——原代码调用不存在的 list_workshops() 导致恒返回 []
     workshops_map = _wa.list_by_workshop()
+    file_cnt = {}
     unique = []
     for name, recs in workshops_map.items():
         name = str(name).strip()
         if not name:
             continue
-        unique.append({"name": name, "file_count": len(recs) if isinstance(recs, list) else 0})
-    unique.sort(key=lambda x: x["name"])
-    
+        file_cnt[name] = len(recs) if isinstance(recs, list) else 0
+        unique.append(name)
+
+    # v0.1.193：设备台账里的车间并入（去重，保持原有顺序在前）
+    dev_cnt = _device_count_by_workshop(current["id"])
+    _ledger_only = []
+    for _w in _ledger_workshops(current["id"]):
+        if _w not in unique:
+            unique.append(_w)
+            _ledger_only.append(_w)
+
+    rows = [{"name": n,
+             "file_count": file_cnt.get(n, 0),
+             "device_count": dev_cnt.get(n, 0),
+             # v0.1.193：没有对应资料文件的车间来自设备台账，前端要能区分
+             "from_ledger": n in _ledger_only}
+            for n in unique]
+    rows.sort(key=lambda x: x["name"])
+
+    # v0.1.193：**资料生成**的车间下拉要用另一份清单。
+    # 这个下拉是拿去查设备预填的（/api/docgen/prefill 按 workshop 过滤 relations 设备），
+    # 所以只能列「台账里真有设备」的车间。实测反例：真实项目里唯一的选项是文件名
+    # 猜出来的「选矿厂」，选它 devices=0、missing=5 项 —— 生出来的方案没有设备内容。
+    # 台账里没有设备时（没上传台账/上传的是别类资料）才回落成全部车间，不能清空。
+    _dev_ws = [r["name"] for r in rows if r["device_count"] > 0]
+    docgen_ws = _dev_ws if _dev_ws else [r["name"] for r in rows]
+
+    msg = f"当前项目已识别 {len(rows)} 个车间（项目资料 {len(file_cnt)} 个"
+    if _ledger_only:
+        msg += f"，设备台账补充 {len(_ledger_only)} 个"
+    msg += "）"
+
     return {
         "ok": True,
-        "workshops": unique,
+        "workshops": rows,
+        "docgen_workshops": docgen_ws,
         "project": current["name"],
-        "message": f"当前项目已识别 {len(unique)} 个车间（从项目资料自动解析）"
+        "ledger_only": _ledger_only,
+        "message": msg
     }
 
 @app.post("/api/mobile/combined-upload")
