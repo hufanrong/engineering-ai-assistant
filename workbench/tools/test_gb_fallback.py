@@ -22,9 +22,11 @@
 """
 import copy
 import os
+import re
 import shutil
 import sys
 import tempfile
+import time
 
 WB = os.environ.get("FANGONG_WB",
                     os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -905,6 +907,72 @@ def main():
               if "if (!d.ok && !d.result)" in _rv else False,
               "接口异常时直接 return，按钮永久停在「进行中」，用户只能刷新页面")
 
+    print("\n[M6] 看别人那一卷时，按钮不能永久卡死")
+    # 实测缺陷（静态追踪 + 真浏览器同源路径）：
+    # 后端槽位互斥拦下重复请求时走 already_running 分支，那条分支既不停轮询
+    # 也不清 __volRunning；而轮询在 !d.running 时又只是 return —— 两头都不收尾。
+    # 结果：本页并没有自己的整卷在跑，按钮却永久停在「整卷正在进行中」，
+    # 用户只能刷新页面才能再点。这与 v0.1.190 修的「接口异常永久锁死」同源。
+    if _html:
+        _i_rv2 = _html.find("function runVolume()")
+        _rv2 = _html[_i_rv2:_html.find("\nfunction ", _i_rv2 + 10)] if _i_rv2 > 0 else ""
+        check("有「本页看的是别人那一卷」的标记位",
+              "_volWatchOther" in _rv2,
+              "没有区分本页发起与他人发起的整卷，两种状态混在一起")
+        _i_ar = _rv2.find("r.already_running")
+        _ar_blk = _rv2[_i_ar:_i_ar + 700] if _i_ar > 0 else ""
+        check("already_running 分支会置上「看别人」的标记",
+              _i_ar > 0 and "_volWatchOther = true" in _ar_blk,
+              "互斥拦下重复请求时没有标记，导致结束后没人放开按钮")
+        # 轮询看到 running 翻 false 时，必须停轮询 + 放开锁
+        _i_poll = _rv2.find("if (!d.running || !p)")
+        _poll_blk = _rv2[_i_poll:_i_poll + 700] if _i_poll > 0 else ""
+        check("轮询发现那一卷已结束时会停轮询并放开按钮锁",
+              _i_poll > 0 and "_stopPoll()" in _poll_blk
+              and "window.__volRunning = false" in _poll_blk,
+              "running 翻 false 时只是 return，按钮永远卡在「进行中」")
+        check("看别人那一卷时的文案与本页发起的不一样",
+              "_volWatchOther ? 'ℹ 已有整卷在进行中（本次请求未执行）'" in _rv2,
+              "两种状态文案相同，用户以为本页在跑")
+
+    print("\n[M7] 整编面板必须真的能拿到当前项目（否则「一键整卷」永远点不动）")
+    # 实测缺陷（真浏览器 + 静态追踪）：
+    # getCurrentProjectIdForSup() 的两条取值路径**都不存在**：
+    #   ① localStorage 键 'fanGong_currentProject' —— 全仓只有这一处读，
+    #      没有任何 setItem 写入点，永远读出 null；
+    #   ② document.getElementById('projectSelector') —— DOM 里没有这个 id，
+    #      真实的下拉叫 projectSelect。
+    # 结果该函数恒返回空串 → runVolume()/checkSupervision() 一上来就
+    # alert('请先在资源管理中选择项目') 然后 return —— 「一键整卷」这条主路径
+    # 在真实浏览器里从来没跑通过（册下拉填上了也没用，点下去只会弹窗）。
+    # 页面真正的当前项目在全局 currentProject 上（对象，带 id）。
+    if _html:
+        _i_gid = _html.find("function getCurrentProjectIdForSup")
+        _gid = _html[_i_gid:_html.find("\nfunction ", _i_gid + 10)] if _i_gid > 0 else ""
+        # 只看可执行代码：注释里提到旧名字是正常的（那是在解释为什么改），
+        # 判据要落在代码上，不能把注释里的字样当成「还在依赖」。
+        _gid_code = re.sub(r'//[^\n]*', '', _gid)
+        _gid_code = re.sub(r'/\*.*?\*/', '', _gid_code, flags=re.S)
+        check("取项目 ID 的函数存在", _i_gid > 0, "找不到 getCurrentProjectIdForSup")
+        check("会从全局 currentProject 上取项目 ID",
+              "currentProject" in _gid_code and ".id" in _gid_code,
+              "没有读 currentProject —— 这是页面上真正可靠的当前项目来源")
+        check("会从真实存在的项目下拉取项目 ID（projectSelect）",
+              "projectSelect" in _gid_code,
+              "读的是不存在的 projectSelector，DOM 里根本没这个 id")
+        # 旧的死路：localStorage 键全仓无写入点，projectSelector 不存在
+        check("不再依赖从未被写入的 localStorage 键",
+              "fanGong_currentProject" not in _gid_code,
+              "全仓没有 setItem 写入这个键，读它永远是 null")
+        check("不再引用不存在的 projectSelector",
+              "projectSelector" not in _gid_code,
+              "DOM 里只有 projectSelect，projectSelector 是凭空的 id")
+        # 兜底：即便前端拿不到项目 ID，也应由后端按「当前项目」兜底，
+        # 而不是让用户对着一个永远弹出的 alert 无计可施
+        check("取不到项目时有明确提示而不是静默失败",
+              "alert(" in _gid_code or "return" in _gid_code,
+              "取不到项目时必须有明确动作")
+
     print("\n[M2] 整卷进度：长任务必须有可读进展，而不是一句静态文案")
     check("有整卷进度读取接口（get_volume_progress 存在）",
           hasattr(si, "get_volume_progress"),
@@ -912,6 +980,116 @@ def main():
     if hasattr(si, "get_volume_progress"):
         _p0 = si.get_volume_progress("e75e857c", "设备安装", "不存在的车间X")
         check("没有进行中的整卷时进度为空/空闲", not _p0, f"实得 {_p0}")
+
+    print("\n[M5] 进度记录必须有上限（工作台是长期驻留进程，不能只增不减）")
+    # 实测缺陷：_VOLUME_PROGRESS 只在 acquire 时写入、release 时把 running 置 False，
+    # **从不删除**。实测连跑 20 个不同车间后字典里留 21 条、_VOLUME_SLOTS 已归零。
+    # 工作台是长期驻留的单进程（现场一天开 8 小时、跨多项目多册多车间），
+    # 这条字典只增不减就是一条慢性内存泄漏；而且界面上「刚跑完」和
+    # 「三小时前跑完」的残留记录长得一样，出问题时没法判断。
+    check("有进度条目上限常量", hasattr(si, "_VOLUME_PROGRESS_MAX"),
+          "没有上限，字典只增不减")
+    if hasattr(si, "_VOLUME_PROGRESS_MAX"):
+        check("上限是个合理正整数（留够历史但不会失控）",
+              isinstance(si._VOLUME_PROGRESS_MAX, int) and 4 <= si._VOLUME_PROGRESS_MAX <= 200,
+              f"实得 {si._VOLUME_PROGRESS_MAX!r}")
+
+        # 连跑 3 倍上限个不同车间（必须真的越过上限才谈得上淘汰）
+        _over = si._VOLUME_PROGRESS_MAX * 3
+        si._VOLUME_PROGRESS.clear()
+        for _i in range(_over):
+            _k = si.acquire_volume_slot("pMem", "设备安装", f"车间{_i:03d}")
+            si.release_volume_slot(_k)
+        _n = len(si._VOLUME_PROGRESS)
+        check(f"连跑 {_over} 次后进度条目数不超过上限", _n <= si._VOLUME_PROGRESS_MAX,
+              f"实得 {_n} 条，上限 {si._VOLUME_PROGRESS_MAX}")
+
+        # 淘汰必须是先进先出：最后跑的那个必须在，最早的应该被淘汰
+        _last = si.get_volume_progress("pMem", "设备安装", f"车间{_over-1:03d}")
+        check("最后跑完的车间进度仍可查（不能把刚跑完的删掉）",
+              bool(_last) and _last.get("done") == 0,
+              f"实得 {_last}")
+        _first = si.get_volume_progress("pMem", "设备安装", "车间000")
+        check("最早的那条已被淘汰（确实是 FIFO 而不是拒写）",
+              _first is None, f"实得 {_first}")
+
+        # 淘汰必须是**确定的**：同一批输入再跑一遍，留下的车间集合要一致。
+        # 实测踩到过：排序键用 time.time() 浮点，连开时几乎相同，
+        # sort() 遇并列按任意顺序 → 同一批输入两次跑，被淘汰的车间都不一样。
+        def _run_batch():
+            si._VOLUME_PROGRESS.clear()
+            for _i in range(_over):
+                _kk = si.acquire_volume_slot("pDet", "设备安装", f"车间{_i:03d}")
+                si.release_volume_slot(_kk)
+            return sorted(str(k[2]) for k in si._VOLUME_PROGRESS)
+
+        _set_a, _set_b = _run_batch(), _run_batch()
+        check("淘汰顺序是确定的（同一批输入两次跑，留下的车间完全一致）",
+              _set_a == _set_b,
+              f"两次结果不同，条数 {len(_set_a)} vs {len(_set_b)}")
+
+        # 淘汰顺序必须按「谁先进来的」，不能按时间戳。
+        # 实测（时钟往回拨 2 小时后再开 3 个卷）：排序键用 started 时，
+        # 3 条刚跑完的被误淘汰 2 条、最老的旧001/旧002 反被留下。
+        # 现场机器联网校时或用户手改系统时间都会让时间戳非单调，这不是假设。
+        _now0 = time.time()
+        si._VOLUME_PROGRESS.clear()
+        for _i in range(si._VOLUME_PROGRESS_MAX):
+            _ok = si.acquire_volume_slot("pClk", "设备安装", f"旧{_i:03d}")
+            si.release_volume_slot(_ok)
+        _orig_time = si.time.time
+        si.time.time = lambda: _now0 - 7200        # 时钟被往回拨 2 小时
+        try:
+            for _i in range(3):
+                _ck = si.acquire_volume_slot("pClk", "设备安装", f"新{_i}")
+                si.release_volume_slot(_ck)
+        finally:
+            si.time.time = _orig_time
+        _keep = [str(k[2]) for k in si._VOLUME_PROGRESS]
+        _new_kept = [f"新{_i}" for _i in range(3) if f"新{_i}" in _keep]
+        check("时钟回拨后刚跑完的记录不会被误淘汰（淘汰按写入先后，不按时间戳）",
+              len(_new_kept) == 3, f"3 条新记录只剩 {_new_kept}；旧记录被误留 "
+              f"{[x for x in ('旧000', '旧001', '旧002') if x in _keep]}")
+        check("时钟回拨后仍淘汰最老的记录（不能因为时间戳更旧就全留下）",
+              all(f"旧{_i:03d}" not in _keep for _i in range(3)),
+              f"旧000/001/002 仍在：{[x for x in ('旧000','旧001','旧002') if x in _keep]}")
+
+        # 保留窗口：已结束记录超过 TTL 要被清掉（不能留到第二天还显示「已完成」）
+        check("有已结束记录的保留窗口常量", hasattr(si, "_VOLUME_PROGRESS_TTL"),
+              "没有保留窗口，上周的「已完成」会一直留在界面上")
+        if hasattr(si, "_VOLUME_PROGRESS_TTL"):
+            si._VOLUME_PROGRESS.clear()
+            _tk = si.acquire_volume_slot("pTtl", "设备安装", "旧车间")
+            si.release_volume_slot(_tk)
+            # 把收卷时间人为拨回到 TTL 之前很久，再开一个新卷触发裁剪
+            si._VOLUME_PROGRESS[si._volume_key("pTtl", "设备安装", "旧车间")]["finished"] \
+                = time.time() - si._VOLUME_PROGRESS_TTL - 60
+            _nk = si.acquire_volume_slot("pTtl", "设备安装", "新车间")
+            si.release_volume_slot(_nk)
+            check("超过保留窗口的已结束记录会被清掉",
+                  si.get_volume_progress("pTtl", "设备安装", "旧车间") is None,
+                  "旧记录仍在，界面上会一直挂着一条「已完成」")
+            check("保留窗口内刚跑完的记录不会被清（用户还要回头看耗时）",
+                  si.get_volume_progress("pTtl", "设备安装", "新车间") is not None,
+                  "刚跑完的记录被清掉了")
+
+        # 正在跑的任务绝不能被淘汰掉 —— 淘汰只针对已结束的
+        si._VOLUME_PROGRESS.clear()
+        _running_keys = []
+        for _i in range(3):
+            _rk = si.acquire_volume_slot("pRun", "设备安装", f"在跑{_i}")
+            _running_keys.append(_rk)
+        for _i in range(si._VOLUME_PROGRESS_MAX * 2):
+            _dk = si.acquire_volume_slot("pRun", "设备安装", f"已完{_i}")
+            si.release_volume_slot(_dk)
+        _still = all(si.get_volume_progress("pRun", "设备安装", f"在跑{_i}") is not None
+                     and si.get_volume_progress("pRun", "设备安装", f"在跑{_i}").get("running")
+                     for _i in range(3))
+        check("整卷进行中的记录不会被淘汰（否则界面轮询会突然查不到）",
+              _still, "在跑的 3 条被 FIFO 冲掉了")
+        for _rk in _running_keys:
+            si.release_volume_slot(_rk)
+        si._VOLUME_PROGRESS.clear()
 
     print(f"\n结果：{_PASS[0]} passed, {len(_FAIL)} failed")
     if _FAIL:

@@ -2276,11 +2276,31 @@ function saveSupConfig() {
 
 // ===== 整编联动（v0.1.151） =====
 function getCurrentProjectIdForSup() {
+    // v0.1.192 修正（真浏览器实测 + 静态追踪）：
+    // 原来这个函数读两条**都不存在**的路：
+    //   ① localStorage 键 'fanGong_currentProject' —— 全仓只有这一处读，
+    //      没有任何 setItem 写入点，永远读出 null；
+    //   ② document.getElementById('projectSelector') —— DOM 里根本没这个 id，
+    //      真实的项目下拉叫 projectSelect。
+    // 结果它恒返回空串 → runVolume() / checkSupervision() 一上来就
+    // alert('请先在资源管理中选择项目') 然后 return。
+    // 也就是说「一键整卷」这条主路径在真实浏览器里从来没跑通过：
+    // 册下拉填得再对，点下去也只会弹一个窗就结束。
+    //
+    // 现在按可靠性排序取：全局 currentProject（服务器下发的当前项目，对象）
+    // → 项目下拉的真实值（projectSelect）。
     try {
-        var p = JSON.parse(localStorage.getItem('fanGong_currentProject') || 'null');
-        if (p && p.project_id) return p.project_id;
-        var c = document.getElementById('projectSelector');
-        if (c && c.value) return c.value;
+        if (currentProject) {
+            if (typeof currentProject === 'string') {
+                if (currentProject) { return currentProject; }
+            } else if (currentProject.id) {
+                return currentProject.id;
+            } else if (currentProject.project_id) {
+                return currentProject.project_id;
+            }
+        }
+        var c = document.getElementById('projectSelect');
+        if (c && c.value) { return c.value; }
     } catch(e) {}
     return '';
 }
@@ -2399,6 +2419,11 @@ function runVolume() {
         return;
     }
     window.__volRunning = true;
+    // v0.1.192：记下「这一页是不是在看**别人**跑的那一卷」。
+    // 后端槽位互斥拦下重复请求时（already_running），本页并没有自己的整卷在跑，
+    // 但 __volRunning 已经置上了 —— 必须有一条路径把它放下来，
+    // 否则按钮永久卡在「整卷正在进行中」，用户只能刷新页面。
+    var _volWatchOther = false;
     btn.innerHTML = '整卷生成中，请稍候（A/B 项按车间生成，C 类建归集目录）...';
     // v0.1.190：**长任务要有可读进展**。
     // 原来这 130 秒里界面就一句静态文案，用户看不出死没死。
@@ -2409,9 +2434,27 @@ function runVolume() {
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 var p = d.progress;
-                if (!d.running || !p) { return; }
+                // v0.1.192：**这一页在看别人那一卷**时（already_running），
+                // 后端那卷跑完 running 会翻成 false。这里必须收尾：
+                // 停轮询 + 放开 __volRunning，并把话说清楚是「别人的那卷跑完了」。
+                // 原来这里无条件 return，两头都不收尾 →
+                // 按钮永久卡在「整卷正在进行中」，用户只能刷新页面。
+                if (!d.running || !p) {
+                    if (_volWatchOther) {
+                        _stopPoll();
+                        window.__volRunning = false;
+                        _volWatchOther = false;
+                        btn.innerHTML = 'ℹ 刚才那一卷已结束（本次请求未执行）。'
+                            + '<br><span style="color:#888">现在可以重新点「一键整卷」。</span>';
+                    }
+                    return;
+                }
                 var _n = p.total ? ('第 ' + (p.done || 0) + '/' + p.total + ' 个车间') : '正在准备';
-                btn.innerHTML = '⏳ 整卷进行中 ' + (p.stage || '') + '：' + _n
+                // v0.1.192：看别人那一卷时，文案要说清楚「本次请求未执行」，
+                // 不能和本页自己发起的整卷长得一样，否则用户以为本页在跑。
+                var _pfx = _volWatchOther ? 'ℹ 已有整卷在进行中（本次请求未执行）'
+                                          : '⏳ 整卷进行中';
+                btn.innerHTML = _pfx + ' ' + (p.stage || '') + '：' + _n
                     + (p.current ? '（' + p.current + '）' : '')
                     + '　已用 ' + (p.elapsed || 0) + ' 秒'
                     + '<br><span style="color:#888">整卷要逐份生成并渲染页数，'
@@ -2461,6 +2504,10 @@ function runVolume() {
         // 注意：这时**不能**清 __volRunning —— 原来那次还在跑，本页仍在轮询进度。
         if (r && r.already_running) {
             var _p2 = r.progress || {};
+            // v0.1.192：标记「本页看的是别人那一卷」。
+            // 这一页并没有自己的整卷在跑，__volRunning 却已经置上了；
+            // 必须让轮询在看到那一卷结束时把锁放下来，否则按钮永久卡死。
+            _volWatchOther = true;
             btn.innerHTML = '⚠ 该册已有整卷正在进行中，本次请求未执行。'
                 + '<br>进度：' + (_p2.stage || '') + '　第 ' + (_p2.done || 0) + '/'
                 + (_p2.total || 0) + ' 个车间　已用 ' + (_p2.elapsed || 0) + ' 秒'

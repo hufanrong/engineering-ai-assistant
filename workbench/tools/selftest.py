@@ -602,9 +602,42 @@ def phase3(samples_dir):
 
     code, body, err = call("GET", "/api/completeness/check")
     phases = (body or {}).get("phases") or []
-    filled = [ph for ph in phases if ph.get("existing")]
-    record(P, "完整性检查", "200 且至少一个阶段有已存在的资料",
-           f"{code} phases={len(phases)} 有资料的阶段={len(filled)}", code == 200 and bool(filled), err)
+    # v0.1.192：原来这条断言要求「至少一个阶段有已存在的资料」。
+    # 实测：自测新建的项目是空项目（只有几个通用样本），六个阶段的资料本来就不存在，
+    # 完整性检查报「全部缺失」是**正确**行为 —— 这条 FAIL 是测试自己的前置条件错了，
+    # 与 v0.1.173 记的「竣工资料统计」同一类问题，不是产品缺陷。
+    # 改成断言产品真正承诺、任何项目都成立的东西：
+    #   ① 六个阶段都在；
+    #   ② completed == len(existing)；
+    #   ③ existing 与 missing 的资料类型不重叠（不能既算有又算缺）；
+    #   ④ completion（百分比）与 completed/total_required 对得上；
+    #   ⑤ 项目有设备时，「设备到货」阶段的必查项数不得为 0 ——
+    #      这一条专门抓「设备级检查恒为 0、恒报 100% 完成」的假绿灯
+    #      （v0.1.192 修掉的正是这个：两个阶段一台设备都没查过）。
+    _bad = []
+    for _ph in phases:
+        _ex = _ph.get("existing") or []
+        _ms = _ph.get("missing") or []
+        _ext = {x.get("type") for x in _ex if x.get("level") == "项目级"}
+        _mst = {x.get("type") for x in _ms if x.get("level") == "项目级"}
+        if (_ph.get("completed") or 0) != len(_ex):
+            _bad.append("%s completed≠len(existing)" % _ph.get("phase"))
+        _tr = _ph.get("total_required") or 0
+        if _tr < (_ph.get("completed") or 0):
+            _bad.append("%s total_required<completed" % _ph.get("phase"))
+        if _ext & _mst:
+            _bad.append("%s 类型重叠:%s" % (_ph.get("phase"), sorted(_ext & _mst)))
+        _exp = 100.0 if _tr == 0 else round(100.0 * (_ph.get("completed") or 0) / _tr, 1)
+        if abs(float(_ph.get("completion") or 0) - _exp) > 0.1:
+            _bad.append("%s completion(%s)≠%s" % (_ph.get("phase"), _ph.get("completion"), _exp))
+    _code_s, _st_s, _ = call("GET", "/api/completion-archive/stats")
+    _ndev = (_st_s or {}).get("total_devices") or 0
+    _arrive = [p for p in phases if p.get("phase") == "设备到货"]
+    if _arrive and _ndev and not (_arrive[0].get("total_required") or 0):
+        _bad.append("设备到货阶段必查项数=0（有 %d 台设备却一项没查）" % _ndev)
+    record(P, "完整性检查", "200 且六阶段齐全、计数自洽、设备级不是假绿灯",
+           f"{code} phases={len(phases)} 设备数={_ndev} 问题={_bad or '无'}",
+           code == 200 and len(phases) == 6 and not _bad, err)
 
     code, body, err = call("GET", "/api/completion-archive/requirements")
     reqs = (body or {}).get("requirements") or []

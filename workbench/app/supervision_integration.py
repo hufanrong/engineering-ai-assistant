@@ -362,8 +362,48 @@ _VOLUME_WORKERS = int(os.environ.get("FANGONG_VOLUME_WORKERS", "3"))
 _VOLUME_SLOT_LOCK = threading.Lock()
 _VOLUME_SLOTS = {}       # key -> {'started': ts, 'total': n, 'done': [...], 'current': str}
 _VOLUME_PROGRESS = {}    # key -> 进度字典（与 slot 同生命周期）
+# v0.1.192：进度记录必须有上限。
+# 实测缺陷：原来 release 只把 running 置 False，**从不删除**条目 ——
+# 连跑 20 个不同车间后字典留 21 条（_VOLUME_SLOTS 已归零）。
+# 工作台是长期驻留的单进程（现场一天开 8 小时、跨多项目多册多车间），
+# 只增不减就是一条慢性内存泄漏；而且界面分不清「刚跑完」和「三小时前跑完」。
+_VOLUME_PROGRESS_MAX = 64
+# 已结束的记录只留 30 分钟：够用户回头看「刚才那卷跑了多久」，
+# 又不至于第二天打开还看到一个上周的「已完成」。
+_VOLUME_PROGRESS_TTL = 1800
+# 写入序号：淘汰顺序必须看「谁先进来的」，不能看时间戳。
+# 实测（时钟回拨 2 小时后再开 3 个卷）：排序键用 time.time() 的 started 时，
+# 3 条刚跑的记录被误淘汰 2 条、最老的旧001/旧002 反而被留下；
+# 改用单调递增的写入序号后，3 条新记录全在、最老的 3 条被正确淘汰。
+# 触发场景不罕见：现场机器联网校时、用户手改系统时间，都会让时间戳非单调。
+_VOLUME_PROGRESS_SEQ = [0]
 
 _FACTORY_WORDS = ('', '全厂', '全部', '各车间', '所有车间')
+
+
+def _trim_volume_progress():
+    """淘汰过期的已结束记录，再按先进先出裁到上限。**正在跑的一律不动。**
+
+    必须调用方已持有 _VOLUME_SLOT_LOCK。
+
+    为什么两把刀（TTL + 上限）都要：
+    - 只有 TTL：一天跑 40 个车间，30 分钟内全部活着，仍然是一路涨。
+    - 只有 FIFO 上限：留着 64 条很旧的记录，界面分不清哪条是刚跑完的。
+    """
+    _now = time.time()
+    for _k, _v in list(_VOLUME_PROGRESS.items()):
+        if _v.get('running'):
+            continue
+        _fin = _v.get('finished')
+        if _fin and (_now - _fin) > _VOLUME_PROGRESS_TTL:
+            _VOLUME_PROGRESS.pop(_k, None)
+    if len(_VOLUME_PROGRESS) <= _VOLUME_PROGRESS_MAX:
+        return
+    _done = [(v.get('seq') or 0, k) for k, v in _VOLUME_PROGRESS.items()
+             if not v.get('running')]
+    _done.sort()
+    for _, k in _done[:max(0, len(_VOLUME_PROGRESS) - _VOLUME_PROGRESS_MAX)]:
+        _VOLUME_PROGRESS.pop(k, None)
 
 
 def _volume_key(project_id, book, workshop):
@@ -385,11 +425,15 @@ def acquire_volume_slot(project_id, book, workshop):
         if key in _VOLUME_SLOTS:
             return None
         _VOLUME_SLOTS[key] = {'started': time.time()}
+        _VOLUME_PROGRESS_SEQ[0] += 1
         _VOLUME_PROGRESS[key] = {
             'key': list(key), 'running': True, 'total': 0, 'done': 0,
             'current': '', 'started': time.time(), 'finished': None,
             'generated': 0, 'errors': 0, 'stage': '准备中',
+            'seq': _VOLUME_PROGRESS_SEQ[0],
         }
+        # v0.1.192：每次开新卷顺手清一次历史记录（已持锁，满足裁剪函数前提）。
+        _trim_volume_progress()
         return key
 
 
@@ -404,6 +448,9 @@ def release_volume_slot(key):
             _p['running'] = False
             _p['finished'] = time.time()
             _p['stage'] = '已完成'
+        # v0.1.192：收卷后也裁一次。只靠 acquire 那次是不够的 ——
+        # 一批并发车间各自 release，条目数是 release 之后才涨上去的。
+        _trim_volume_progress()
 
 
 def set_volume_progress(key, **kw):
@@ -417,9 +464,20 @@ def set_volume_progress(key, **kw):
 
 
 def get_volume_progress(project_id, book, workshop):
-    """读整卷进度。没有进行中的整卷时返回 None（界面据此显示空闲）。"""
+    """读整卷进度。
+
+    返回语义（v0.1.192 把注释和代码对齐 —— 原来注释写「没有进行中的整卷时返回 None」，
+    实测整卷结束后仍然返回一份 running=False 的残留字典，两套说法对不上）：
+    - 这个「项目+册+车间」从来没跑过整卷 → None
+    - 跑过（正在跑或刚跑完）→ 进度字典，**判断是否在跑要看 running 字段**，
+      不要拿「有没有返回」当判据。
+    整卷结束后保留一段时间供用户回看耗时，过期或超上限由 _trim_volume_progress 清掉。
+    """
     key = _volume_key(project_id, book, workshop)
     with _VOLUME_SLOT_LOCK:
+        # v0.1.192：读的时候也清一次。只在 acquire/release 清是不够的 ——
+        # 工作台可能一整天不再开新卷，那上周的「已完成」就会一直挂在接口上。
+        _trim_volume_progress()
         _p = _VOLUME_PROGRESS.get(key)
         if not _p:
             return None

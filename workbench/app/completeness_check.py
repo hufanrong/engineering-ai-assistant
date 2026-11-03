@@ -112,6 +112,50 @@ def _load_index_docs() -> set:
     return found
 
 
+def _current_project_ledger() -> tuple:
+    """当前项目的设备清单（位号列表, 车间列表），取自项目自己的 index.json。
+
+    v0.1.192：完整性检查的**设备级**与**车间级**两个阶段原来恒报「100% 完成」——
+    根因是 _get_devices() / _get_workshops() 只读全局的 spatial_model.json /
+    relations_graph.json，而真实部署里这两个文件根本不存在：设备台账是**项目自己的**
+    index.json（supervision_integration._project_workshops 读的就是它）。
+    结果 devices=[]、workshops=[]，「设备到货」「施工过程」两个阶段的
+    total_required 恒为 0，界面直接显示 100% 完成 ——
+    一台设备、一个车间都没查过，这是假绿灯。
+    实测：真实项目 e75e857c（228 台设备 / 19 个车间）查出来
+    「设备到货」required=0、completion=100%，而同一项目的竣工归档统计
+    说 228 台设备全部缺件（complete_devices=0）—— 两个接口自相矛盾。
+    这里补上项目台账这条取数路径。
+    """
+    try:
+        from . import project_manager as _pm
+        try:
+            ddir = _pm.get_project_data_dir()
+        except TypeError:  # noqa: BLE001
+            ddir = _pm.get_project_data_dir(None)
+        if not ddir:
+            return [], []
+        idx_path = os.path.join(ddir, "index.json")
+        if not os.path.isfile(idx_path):
+            return [], []
+        with open(idx_path, "r", encoding="utf-8") as f:
+            idx = json.load(f)
+        devs = idx.get("devices") or {}
+        tags, wss = [], []
+        for _k, _d in devs.items():
+            _tag, _ws = _k, ""
+            if isinstance(_d, dict):
+                _tag = _d.get("tag") or _d.get("位号") or _d.get("code") or _k
+                _ws = (_d.get("workshop") or "").strip()
+            if _tag:
+                tags.append(str(_tag))
+            if _ws and _ws not in wss:
+                wss.append(_ws)
+        return tags, sorted(wss)
+    except Exception:  # noqa: BLE001
+        return [], []
+
+
 def _get_devices() -> list:
     """从空间模型或关系图谱获取设备列表。"""
     spatial_path = os.path.join(config.DATA_DIR, "spatial_model.json")
@@ -131,7 +175,9 @@ def _get_devices() -> list:
             return [d["tag"] for d in rel.get("devices", [])]
         except Exception:  # noqa: BLE001
             pass
-    return []
+    # v0.1.192：再回退到当前项目的设备台账（真实部署里前面两条路都是空的）。
+    _tags, _wss = _current_project_ledger()
+    return _tags
 
 
 def _get_workshops() -> list:
@@ -144,7 +190,10 @@ def _get_workshops() -> list:
             return list(spatial.get("workshops", {}).keys())
         except Exception:  # noqa: BLE001
             pass
-    return []
+    # v0.1.192：空间模型没有时用当前项目的设备台账推车间
+    # （台账里每台设备都带车间，车间列表就是台账里出现过的车间）。
+    _tags, _wss = _current_project_ledger()
+    return _wss
 
 
 def check_completeness(phase_filter: str = None) -> dict:
