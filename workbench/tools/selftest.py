@@ -1108,6 +1108,28 @@ def main():
 
     here = os.path.dirname(os.path.abspath(__file__))
     sdir = os.path.join(here, "_samples")
+
+    # v0.1.195：自测必须把「当前项目」还原回去。
+    # 实测事故：phase1 建了自测项目并切过去，phase2 切回了原项目，但 phase3
+    # 又切到自测项目去做整卷校验，**结束时没人还原**。于是每次跑完自测，
+    # current_project.json 都停在「自测_年月日_时分秒」这个只有几份测试样本的
+    # 项目上。用户第二天打开繁工AI，看到的是空的自测项目，自己那份 228 台设备
+    # 的工程不见了 —— 对现场是「资料丢了」的观感。这里在跑之前记下原项目，
+    # 全部阶段跑完（含异常）一律切回。
+    _origin_pid = ""
+    try:
+        _, _cur0, _ = call("GET", "/api/projects/current")
+        _origin_pid = (((_cur0 or {}).get("project") or {}).get("id") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    if not _origin_pid and _INPROC is not None:
+        try:
+            from app import project_manager as _pm
+            _c = _pm.get_current_project()
+            _origin_pid = (_c or {}).get("id") or ""
+        except Exception:  # noqa: BLE001
+            pass
+
     print(f"造样本 -> {sdir}")
     build_samples(sdir, include_dwg=True)
 
@@ -1117,12 +1139,20 @@ def main():
     else:
         want = [int(x) for x in phases.split(",") if x.strip().isdigit()]
 
-    for ph in want:
-        try:
-            {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5}[ph](sdir)
-        except Exception:
-            traceback.print_exc()
-            record(ph, "阶段执行异常", "无异常", traceback.format_exc()[-300:], False)
+    try:
+        for ph in want:
+            try:
+                {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5}[ph](sdir)
+            except Exception:
+                traceback.print_exc()
+                record(ph, "阶段执行异常", "无异常", traceback.format_exc()[-300:], False)
+    finally:
+        # 即使某阶段抛异常，也必须把用户的当前项目还回去
+        if _origin_pid:
+            _code_r, _rb, _ = call("POST", "/api/projects/switch",
+                                   {"project_id": _origin_pid})
+            _ok_r = (_code_r == 200 and (_rb or {}).get("ok", True))
+            print(f"[还原] 当前项目切回 {_origin_pid} → {'OK' if _ok_r else 'FAILED'}")
 
     fails = write_report(os.path.join(here, "selftest_report.json"),
                          os.path.join(here, "selftest_report.md"), sdir)

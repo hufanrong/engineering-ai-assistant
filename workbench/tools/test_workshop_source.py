@@ -43,9 +43,13 @@ def check(name, cond, detail):
     print(f"  [{'PASS' if cond else 'FAIL'}] {name}: {detail}")
 
 
-def _make_project(devices, file_name, workshop_hint=""):
-    """造一个项目：index.json 里放设备，workshop_assign 里放文件级车间归属。"""
-    pid = "ws_src_test"
+def _make_project(devices, file_name, workshop_hint="", pid="ws_src_test"):
+    """造一个项目：index.json 里放设备，workshop_assign 里放文件级车间归属。
+
+    pid 必须可传（v0.1.194）：原来写死 "ws_src_test"，T4 再调一次就把主项目的
+    index.json **覆盖**了、随后 _cleanup 又把目录删掉，导致后面的 T5 查不到
+    任何设备（实测 T5 报 total=0）。同一个测试里造两个项目必须用两个 id。
+    """
     ddir = os.path.join(pm.PROJECTS_ROOT, pid)
     os.makedirs(ddir, exist_ok=True)
     idx = {"files": {}, "devices": devices, "workshops": {}, "updated_at": "2026-01-01"}
@@ -123,7 +127,8 @@ def run():
 
         # T4：台账没有车间列（文件级也没有归属）时不能把清单清空
         no_ws_devices = {"t1": {"name": "设备1", "quantity": "1", "unit": "台", "workshop": ""}}
-        pid2, ddir2 = _make_project(no_ws_devices, "无车间台账.xlsx", workshop_hint="")
+        pid2, ddir2 = _make_project(no_ws_devices, "无车间台账.xlsx", workshop_hint="",
+                                    pid="ws_src_test_empty")
         try:
             pm.set_current_project(pid2) if hasattr(pm, "set_current_project") else None
             rows2 = M.get_workshops()
@@ -132,6 +137,20 @@ def run():
                   f"实得 {n2} 个车间（不得因为台账没车间列就变空）")
         finally:
             _cleanup(ddir2)
+
+        # T5/T6：v0.1.194 —— 台账车间**没有上传资料**，点开卡片不能只剩「暂无文件」。
+        # 实测真实项目 20 张卡片里 19 张是这种，「中矿堆」台账里有 13 台设备，
+        # 原来点进去什么都看不到。新增 /api/workshop/devices 按车间取台账设备。
+        pm.set_current_project(pid) if hasattr(pm, "set_current_project") else None
+        d_mufu = M.workshop_devices("磨浮车间")
+        check("T5 台账车间能查到设备清单", (d_mufu.get("total") or 0) > 0,
+              f"磨浮车间 total={d_mufu.get('total')}，首台={(d_mufu.get('devices') or [{}])[0].get('name')}")
+
+        # T6：不存在的车间必须老实返回 0，不能把全厂设备倒出去（否则界面上
+        #     任何名字都能点出一堆设备，用户会以为归属是乱分的）
+        d_bad = M.workshop_devices("不存在的车间XYZ")
+        check("T6 未知车间返回 0 台（不倒全厂）", (d_bad.get("total") or 0) == 0,
+              f"total={d_bad.get('total')}")
     finally:
         _cleanup(ddir)
         if old_cur:

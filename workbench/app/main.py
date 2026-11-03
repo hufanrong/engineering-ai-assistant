@@ -3772,6 +3772,53 @@ def _device_count_by_workshop(project_id: str = None) -> dict:
     return cnt
 
 
+@app.get("/api/workshop/devices")
+def workshop_devices(workshop: str = ""):
+    """某车间的设备清单（来自设备台账，v0.1.194）。
+
+    为什么要这个接口：v0.1.193 把台账里的 19 个车间并进了车间清单，资料管理页
+    因此多出 19 张卡片。但这些车间在**项目资料**里没有对应文件（file_count=0），
+    点开卡片走 /api/files?workshop=… 只会拿到 0 条、显示「暂无文件」。
+    实测真实项目 e75e857c：20 张卡片里 19 张是这样，而「中矿堆」台账里其实有
+    13 台设备 —— 用户点进去是死路，看不到任何东西。
+
+    权威来源是 index.json 的 devices（每台设备自带 workshop），不是
+    workshop_assign（那是按文件的归属）。
+    """
+    from . import project_manager as _pm
+
+    current = _pm.get_current_project()
+    if not current:
+        return {"ok": True, "workshop": workshop, "devices": [], "total": 0}
+
+    ws = (workshop or "").strip()
+    out = []
+    try:
+        idx_path = os.path.join(_pm.get_project_data_dir(current["id"]), "index.json")
+        if os.path.isfile(idx_path):
+            with open(idx_path, "r", encoding="utf-8") as f:
+                _idx = json.load(f)
+            for _d in (_idx.get("devices") or {}).values():
+                if not isinstance(_d, dict):
+                    continue
+                _ws = (str(_d.get("workshop") or "")).strip()
+                if ws and _ws != ws:
+                    continue
+                out.append({
+                    "name": str(_d.get("name") or ""),
+                    "model": str(_d.get("model") or ""),
+                    "quantity": str(_d.get("quantity") or ""),
+                    "unit": str(_d.get("unit") or ""),
+                    "workshop": _ws,
+                    "manufacturer": str(_d.get("manufacturer") or ""),
+                    "source_file": str(_d.get("source_file") or ""),
+                })
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {"ok": True, "workshop": ws, "devices": out, "total": len(out)}
+
+
 @app.get("/api/workshops")
 def get_workshops():
     """获取当前项目已识别的车间列表（项目资料 + 设备台账，不返回通用参考数据）。
@@ -5024,6 +5071,7 @@ def files_tree():
     """v0.1.157：三级归属树（L1 项目级 / L2 车间级 / L3 设备级 / 待确认 + L0 平台规范）。
     未归级文件会即时自动判定并落盘；返回供前端折叠树渲染。"""
     from . import file_level as _fl, workshop_assign as _wa, device_workshop as _dw
+    from . import project_manager as _pm
     raw = _frontend_index_items()
     wa_map = {}
     try:
@@ -5038,6 +5086,33 @@ def files_tree():
     except Exception:  # noqa: BLE001
         device_tags = []
     tree = _fl.build_tree(raw, workshop_map=wa_map, device_tags=device_tags)
+
+    # v0.1.194：把**设备台账里的车间**并进 L2（真正的用户可见入口就在这里）。
+    # 实测事故：v0.1.193 只把台账车间加进了 /api/workshops，而那个卡片网格自
+    # v0.1.157 起就被三级树取代、一直是 display:none —— 用户实际看到的
+    # /api/files/tree 里**仍然只有「选矿厂」一个节点**（文件名猜出来的），
+    # 台账行内 19 个真实车间（粗碎站 / 磨浮车间 / 中矿堆 …）一个都不显示。
+    # 所以修了接口却没修到用户眼前，等于没修。
+    # L3 位号在这份真实台账里是空的（228 台设备全部没有位号），因此设备按
+    # 「按车间的设备清单」挂到 L2，用 count 展示，点「批量管理」看明细。
+    try:
+        _cur = _pm.get_current_project()
+        if _cur:
+            _dcnt = _device_count_by_workshop(_cur["id"])
+            _l2 = tree.setdefault("L2", {})
+            for _w, _n in _dcnt.items():
+                _node = _l2.setdefault(_w, {"files": [], "devices": {}})
+                _node["device_count"] = _n
+                _node["from_ledger"] = True
+            tree.setdefault("device_ledger", {})["by_workshop"] = _dcnt
+            tree.setdefault("device_ledger", {})["total"] = sum(_dcnt.values())
+            # 排序：资料多的车间在前，同数按名称，保证每次渲染一致
+            cnt = tree.setdefault("counts", {})
+            cnt["L2_workshops"] = len(_l2)
+            cnt["LEDGER_devices"] = sum(_dcnt.values())
+    except Exception:  # noqa: BLE001
+        pass
+
     # L0 平台规范库（跨项目只读引用）
     l0 = {"count": 0, "items": []}
     try:

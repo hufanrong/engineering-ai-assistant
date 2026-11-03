@@ -14,17 +14,23 @@ import shutil
 from typing import Optional, List, Dict
 
 
+# v0.1.195：项目目录必须跟随 config.DATA_DIR，不能再写死安装目录。
+# 实测事故：PROJECTS_ROOT / CURRENT_PROJECT_FILE 原来是按 __file__ 推导的
+# 模块级常量，config.DATA_DIR 改了它们也不动。后果有两个：
+#   ① 用户把数据目录设到 D:\（或装在只读目录）时，项目照样往安装目录里写，
+#      「数据目录可配置」对项目管理完全失效 —— 对可分发部署是硬伤；
+#   ② tools/test_gb_fallback.py 的 J 段本来用临时 DATA_DIR 起服务、
+#      意图不碰真实 data/，但实际上新建的自测项目落进了真实 projects/，
+#      还把 current_project.json 指到这个空项目且没还原 → 下次开程序
+#      看到的是空的「_j_节自测_xxxx」，同时 E 段（project_id=None 走当前
+#      项目）跟着漂移，断言数从 189 变 188。
+from . import config as _config
+
 # 项目根目录
-PROJECTS_ROOT = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "projects"
-)
+PROJECTS_ROOT = os.path.join(_config.DATA_DIR, "projects")
 
 # 当前项目配置文件
-CURRENT_PROJECT_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "current_project.json"
-)
+CURRENT_PROJECT_FILE = os.path.join(_config.DATA_DIR, "current_project.json")
 
 
 def _ensure_root():

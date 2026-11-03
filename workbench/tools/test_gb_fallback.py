@@ -36,6 +36,8 @@ os.environ.setdefault("FANGONG_NO_BROWSER", "1")
 from app import gb_form as gb  # noqa: E402
 from app import supervision_templates as st  # noqa: E402
 from app import supervision_integration as si  # noqa: E402
+from app import project_manager as _pm  # noqa: E402  E/G/H 段改临时项目根
+import json as _mjson  # noqa: E402  main() 内有局部 import json，避开作用域陷阱
 
 _PASS = [0]
 _FAIL = []
@@ -264,22 +266,63 @@ def main():
           [c for c in cats if "设备安装记录" in c] == ["防爆电气设备安装记录"],
           str([c for c in cats if "设备安装记录" in c]))
 
-    # 再验证入口：不管当前环境有没有设备数据，都不得落到防爆那张表上。
-    r_alias = st.render_supervision_doc(category="设备安装记录",
-                                        workshop="", project_id=None)
-    _blob = " ".join(str(r_alias.get(k) or "") for k in ("output_file", "output_path", "warning", "error"))
-    check("入口结果不含「防爆电气设备安装记录」", "防爆电气" not in _blob, _blob[:80])
-    if r_alias.get("ok"):
+    # 再验证入口：不得落到防爆那张表上。
+    # v0.1.195：原来这里传 project_id=None（走「当前项目」），再用 if/else 分叉
+    # 出 2 条或 1 条断言 —— 断言总数会随**机器上当前选中的项目**漂移，
+    # 同一份代码同一份数据，这次跑 189 条、下次跑 188 条，而且 else 分支
+    # 把「别名真的生效了没有」这条关键覆盖漏掉了。
+    # 改成用临时项目根 + 显式 project_id，两个场景都跑，条数固定。
+    _etmp = tempfile.mkdtemp(prefix="alias_")
+    _e_root = _pm.PROJECTS_ROOT
+    _e_cur = _pm.CURRENT_PROJECT_FILE
+    try:
+        _pm.PROJECTS_ROOT = os.path.join(_etmp, "projects")
+        _pm.CURRENT_PROJECT_FILE = os.path.join(_etmp, "current_project.json")
+        _pid_a = "ep_ok"
+        _pd_a = os.path.join(_pm.PROJECTS_ROOT, _pid_a)
+        os.makedirs(_pd_a, exist_ok=True)
+        with open(os.path.join(_pd_a, "project_meta.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"id": _pid_a, "name": "别名测试"}, f, ensure_ascii=False)
+        with open(os.path.join(_pd_a, "index.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"devices": {"A1": {"name": "胶带输送机A", "model": "X",
+                                          "workshop": "甲车间", "unit": "台",
+                                          "quantity": "1"}},
+                       "files": {}, "workshops": {"甲车间": {}}}, f, ensure_ascii=False)
+
+        # 场景一：有设备 → 别名必须真的生效
+        r_alias = st.render_supervision_doc(category="设备安装记录",
+                                            workshop="", project_id=_pid_a)
+        _blob = " ".join(str(r_alias.get(k) or "")
+                         for k in ("output_file", "output_path", "warning", "error"))
+        check("入口结果不含「防爆电气设备安装记录」", "防爆电气" not in _blob, _blob[:80])
+        check("有设备时别名生效、真的出表", r_alias.get("ok") is True,
+              f"实得 ok={r_alias.get('ok')} error={str(r_alias.get('error'))[:80]}")
         check("实际用的是「设备安装检查记录」而不是「防爆电气设备安装记录」",
               "设备安装检查记录" in (r_alias.get("output_file") or ""),
-              r_alias.get("output_file"))
+              str(r_alias.get("output_file")))
         check("返回 name_alias 账目（请求 vs 借用）",
-              (r_alias.get("name_alias") or {}).get("借用表") == "设备安装检查记录")
-    else:
-        check("无数据时给出可判读的拦截原因（不是「未找到模板」）",
-              "防爆" not in (r_alias.get("error") or "")
-              and "未找到表类型" not in (r_alias.get("error") or ""),
-              str(r_alias.get("error"))[:80])
+              (r_alias.get("name_alias") or {}).get("借用表") == "设备安装检查记录",
+              str(r_alias.get("name_alias")))
+
+        # 场景二：没有设备 → 不得硬报「未找到模板」，要给可判读的拦截原因
+        _pid_b = "ep_empty"
+        _pd_b = os.path.join(_pm.PROJECTS_ROOT, _pid_b)
+        os.makedirs(_pd_b, exist_ok=True)
+        with open(os.path.join(_pd_b, "project_meta.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"id": _pid_b, "name": "空项目"}, f, ensure_ascii=False)
+        with open(os.path.join(_pd_b, "index.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"devices": {}, "files": {}, "workshops": {}}, f, ensure_ascii=False)
+        r_empty = st.render_supervision_doc(category="设备安装记录",
+                                            workshop="", project_id=_pid_b)
+        check("无设备时给出可判读的拦截原因（不是「未找到模板」）",
+              r_empty.get("ok") is False
+              and "防爆" not in (r_empty.get("error") or "")
+              and "未找到表类型" not in (r_empty.get("error") or ""),
+              f"ok={r_empty.get('ok')} error={str(r_empty.get('error'))[:80]}")
+    finally:
+        _pm.PROJECTS_ROOT = _e_root
+        _pm.CURRENT_PROJECT_FILE = _e_cur
+        shutil.rmtree(_etmp, ignore_errors=True)
 
     print("\n[F] 待办清单渲染：两本新账都要能写进去")
     md = si._render_todo([], [], [], None, None, workshop="某车间",
@@ -306,7 +349,6 @@ def main():
     print("\n[G] 项目配置按 project_id 读取（不串项目）")
     import json
     from app import supervision_templates as _st
-    from app import project_manager as _pm
 
     gtmp = tempfile.mkdtemp(prefix="cfg_")
     _was_root = _pm.PROJECTS_ROOT

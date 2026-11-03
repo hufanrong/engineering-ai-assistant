@@ -288,7 +288,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     <div id="workshopFiles" style="display:none;margin-top:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="font-weight:600;font-size:14px" id="workshopFilesTitle"></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <div style="display:flex;gap:6px;flex-wrap:wrap" id="workshopFileActions">
           <button class="btn btn-warning btn-sm" onclick="batchEditWorkshop()">📝 批量改车间</button>
           <button class="btn btn-success btn-sm" onclick="reAutoAssign()">🔁 重新识别车间</button>
           <button class="btn btn-primary btn-sm" onclick="batchReParse()">🔄 批量重解析</button>
@@ -297,7 +297,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
         </div>
       </div>
       <table class="table">
-        <thead><tr><th style="width:30px"><input type="checkbox" id="selectAllFiles" onchange="toggleSelectAll(this)"></th><th>文件名</th><th>类型</th><th>版本</th><th>解析状态</th><th>上传时间</th><th>操作</th></tr></thead>
+        <thead><tr id="workshopFilesHead"><th style="width:30px"><input type="checkbox" id="selectAllFiles" onchange="toggleSelectAll(this)"></th><th>文件名</th><th>类型</th><th>版本</th><th>解析状态</th><th>上传时间</th><th>操作</th></tr></thead>
         <tbody id="workshopFilesBody"></tbody>
       </table>
       <div id="selectedCount" style="margin-top:8px;font-size:12px;color:#666;display:none">已选择 <span id="selectedNum">0</span> 个文件</div>
@@ -1368,6 +1368,12 @@ function renderTree(kw) {
         var wsFiles = files.length;
         var devCount = 0;
         Object.keys(devices).forEach(function(t) { devCount += devices[t].length; });
+        // v0.1.194：设备台账里的车间（没有文件，但有「N 台设备」）。
+        // 实测真实项目：台账行内 19 个车间、228 台设备，而树上只有一个「选矿厂」
+        // （文件名猜的）。后端已把台账车间并进 L2 并给出 device_count，这里必须显示，
+        // 否则用户看到的「车间级」永远是缺的。
+        var ledgerDev = (node.device_count || 0) || 0;
+        if (ledgerDev > devCount) { devCount = ledgerDev; }
         var wsTotal = wsFiles + devCount;
         l2total += wsFiles; l3total += devCount;
         var wsNameHit = !kw || ws.toLowerCase().indexOf(kw.toLowerCase()) >= 0;
@@ -1376,7 +1382,14 @@ function renderTree(kw) {
         var matchedFiles = files.filter(function(f) { return _fileMatches(f, kw); });
         if (wsNameHit || matchedFiles.length) {
             if (wsNameHit) {
-                inner += files.length ? files.map(function(f) { return _fileRow(f, kw); }).join('') : '<div class="lt-empty">车间下无直接文件</div>';
+                if (files.length) {
+                    inner += files.map(function(f) { return _fileRow(f, kw); }).join('');
+                } else if (!(node.device_count > 0)) {
+                    // v0.1.194：有台账设备时不能先说「车间下无直接文件」——
+                    // 实测这一句会把下面的设备说明顶掉（inner 已非空，追加分支不再生效），
+                    // 用户仍然只看到「无文件」。
+                    inner += '<div class="lt-empty">车间下无直接文件</div>';
+                }
             } else {
                 inner += matchedFiles.map(function(f) { return _fileRow(f, kw); }).join('');
             }
@@ -1394,6 +1407,12 @@ function renderTree(kw) {
                 body || '<div class="lt-empty">无设备资料</div>', false, kw, !!(kw && matched.length));
         });
         if (devInner) inner += '<div style="margin-top:6px;font-size:12px;color:#9A6A2F;font-weight:600;padding-left:10px">设备资料（L3）</div>' + devInner;
+        // v0.1.194：本车间没有文件、设备也没位号（真实台账 228 台全部无位号），
+        // 别只甩一个「无文件」，要说清设备在哪、怎么点开看。
+        if (!inner && ledgerDev > 0) {
+            inner = '<div class="lt-empty">本车间无上传资料，设备台账登记 <b>' + ledgerDev +
+                '</b> 台设备（该台账无位号列，故不按 L3 位号展开）——点「批量管理」查看设备明细</div>';
+        }
         if (kw && !inner) return;
         var head = inner || '<div class="lt-empty">无文件</div>';
         var manage = ' <span class="lt-act" style="font-weight:400;margin-left:6px" onclick="event.stopPropagation();showWorkshopFiles(\'' + String(ws).replace(/'/g, '') + '\')">批量管理</span>';
@@ -1484,7 +1503,38 @@ function showWorkshopFiles(workshopName) {
     var search = document.getElementById('treeSearch'); if (search) search.parentElement.style.display = 'none';
     document.getElementById('workshopGrid').style.display = 'none';
     document.getElementById('workshopFiles').style.display = 'block';
+    // v0.1.194：先复位成「文件模式」，否则上一个车间切到设备模式后表头和按钮会残留
+    setWorkshopFilesMode('file');
     loadWorkshopFiles(workshopName);
+}
+
+function setWorkshopFilesMode(mode) {
+    // file = 上传文件列表；device = 设备台账清单（该车间没有上传资料）
+    var head = document.getElementById('workshopFilesHead');
+    var acts = document.getElementById('workshopFileActions');
+    var selCount = document.getElementById('selectedCount');
+    if (mode === 'device') {
+        if (head) {
+            head.innerHTML = '<th style="width:40px">#</th><th>设备名称</th><th>型号/规格</th>' +
+                '<th style="width:90px">数量</th><th>制造单位</th><th style="width:100px">车间</th>' +
+                '<th style="width:90px">来源</th>';
+        }
+        // 批量改车间/重解析/删除都是对「选中的文件」操作的，设备清单下没有文件可操作
+        if (acts) {
+            acts.querySelectorAll('button').forEach(function(b) {
+                if (b.textContent.indexOf('返回') === -1) { b.style.display = 'none'; }
+            });
+        }
+        if (selCount) { selCount.style.display = 'none'; }
+        return;
+    }
+    if (head) {
+        head.innerHTML = '<th style="width:30px"><input type="checkbox" id="selectAllFiles" onchange="toggleSelectAll(this)"></th>' +
+            '<th>文件名</th><th>类型</th><th>版本</th><th>解析状态</th><th>上传时间</th><th>操作</th>';
+    }
+    if (acts) {
+        acts.querySelectorAll('button').forEach(function(b) { b.style.display = ''; });
+    }
 }
 
 function loadWorkshopFiles(workshopName) {
@@ -1495,9 +1545,14 @@ function loadWorkshopFiles(workshopName) {
             var body = document.getElementById('workshopFilesBody');
             var files = data.files || [];
             if (files.length === 0) {
-                body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">暂无文件</td></tr>';
+                // v0.1.194：这个车间**没有上传资料**，但可能来自设备台账（有设备）。
+                // 实测真实项目 20 张车间卡片里 19 张是这种：原来只显示「暂无文件」，
+                // 而「中矿堆」台账里其实有 13 台设备 —— 用户点进去什么都看不到。
+                // 改成：文件为空时回落到台账设备清单，并说清这批设备来自哪份台账。
+                loadWorkshopDevices(workshopName, body);
                 return;
             }
+            setWorkshopFilesMode('file');
             body.innerHTML = '';
             files.forEach(function(f) {
                 var tr = document.createElement('tr');
@@ -1516,6 +1571,43 @@ function loadWorkshopFiles(workshopName) {
         })
         .catch(function() {
             document.getElementById('workshopFilesBody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">文件列表加载中...</td></tr>';
+        });
+}
+
+function loadWorkshopDevices(workshopName, body) {
+    // v0.1.194：车间无上传资料时，展示设备台账里归属本车间的设备。
+    // 表头是「文件名/类型/版本/解析状态/上传时间」，这里设备清单对不上，
+    // 所以整表替换成设备列，并把「数据来自设备台账」写在首行，避免用户以为这是文件。
+    fetch('/api/workshop/devices?workshop=' + encodeURIComponent(workshopName))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var devs = (d && d.devices) || [];
+            setWorkshopFilesMode('device');
+            if (devs.length === 0) {
+                body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px">' +
+                    '本车间暂无上传资料，设备台账里也没有归属它名下的设备</td></tr>';
+                return;
+            }
+            var src = devs[0].source_file || '';
+            body.innerHTML = '<tr><td colspan="7" style="padding:8px 10px;background:#F4F7FB;color:#4A5A6A;font-size:12px">' +
+                '🔧 本车间没有上传资料，以下 <b>' + devs.length + '</b> 台设备来自设备台账' +
+                (src ? '《' + escapeHtml(src) + '》' : '') +
+                '（台账按行记车间，不是按文件归属）</td></tr>';
+            devs.forEach(function(x, i) {
+                var tr = document.createElement('tr');
+                tr.innerHTML = '<td style="color:#999">' + (i + 1) + '</td>' +
+                    '<td>' + escapeHtml(x.name || '') + '</td>' +
+                    '<td>' + escapeHtml(x.model || '') + '</td>' +
+                    '<td>' + escapeHtml((x.quantity || '') + (x.unit || '')) + '</td>' +
+                    '<td>' + escapeHtml(x.manufacturer || '—') + '</td>' +
+                    '<td>' + escapeHtml(x.workshop || '') + '</td>' +
+                    '<td><span class="badge badge-info">台账设备</span></td>';
+                body.appendChild(tr);
+            });
+            updateSelectedCount();
+        })
+        .catch(function() {
+            body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px">设备清单加载失败，请查看后台日志</td></tr>';
         });
 }
 
