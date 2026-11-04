@@ -6,6 +6,7 @@ v0.1.76：设备安装位置与设计变更联动
 验收要求、参加人员等完整要素。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -37,8 +38,7 @@ def _load_changes() -> dict:
 
 def _save_changes(changes: dict):
     _ensure_dirs()
-    with open(_change_file_path(), "w", encoding="utf-8") as f:
-        json.dump(changes, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_change_file_path(), changes, indent=2)
 
 
 # 设备类型设计变更要点

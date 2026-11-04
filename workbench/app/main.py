@@ -2,6 +2,7 @@
 # 启动：python start.py（或双击 run_workbench.bat）
 # 访问：http://127.0.0.1:8756
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import threading
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 import datetime
 
 from . import config
+from . import project_scope as _scope
 from . import telemetry
 from . import scanner
 from .vector_store import VectorStore
@@ -818,7 +820,7 @@ def cloud_pull_field(force: bool = False):
     pull_dir = os.path.join(config.DATA_DIR, "field_pull")
     os.makedirs(pull_dir, exist_ok=True)
     # v0.1.40：本地拉取追踪（去重）
-    pulled_file = os.path.join(config.DATA_DIR, "field_pulled.json")
+    pulled_file = _scope.path("field_pulled.json")
     pulled = {}
     if os.path.exists(pulled_file):
         try:
@@ -951,8 +953,7 @@ def cloud_pull_field(force: bool = False):
         pass
     # v0.1.40：保存拉取追踪
     try:
-        with open(pulled_file, "w", encoding="utf-8") as pf:
-            json.dump(pulled, pf, ensure_ascii=False, indent=2)
+        _atomic_io.write_json(pulled_file, pulled, indent=2)
     except Exception:  # noqa: BLE001
         pass
     return {"pulled": n, "skipped": skipped, "errors": errors[:20],
@@ -1402,8 +1403,11 @@ def chat_rejected():
 
 @app.get("/api/chat/list")
 def chat_list():
-    """列出已解析的群聊文件（从 index 中 parser=chat 的文件）。"""
-    idx_path = os.path.join(config.DATA_DIR, "index.json")
+    """列出已解析的群聊文件（从 index 中 parser=chat 的文件）。
+
+    v0.1.199：索引改读当前项目（原来读全局 data/index.json，真实部署里不存在，
+    接口恒返回空列表）。"""
+    idx_path = os.path.join(_scope.project_dir() or config.DATA_DIR, "index.json")
     if not os.path.exists(idx_path):
         return {"items": []}
     with open(idx_path, encoding="utf-8") as f:
@@ -1516,7 +1520,7 @@ def doc_relations_scan():
 @app.get("/api/cloud/field-pulled")
 def cloud_field_pulled():
     """v0.1.40：本地已拉取的现场记录清单（去重追踪）。"""
-    pulled_file = os.path.join(config.DATA_DIR, "field_pulled.json")
+    pulled_file = _scope.path("field_pulled.json")
     if not os.path.exists(pulled_file):
         return {"ok": True, "count": 0, "items": []}
     try:
@@ -1532,7 +1536,7 @@ def cloud_field_pulled():
 @app.post("/api/cloud/field-pulled/clear")
 def cloud_field_pulled_clear():
     """v0.1.40：清空本地拉取追踪（下次拉取会重新下载所有现场记录）。"""
-    pulled_file = os.path.join(config.DATA_DIR, "field_pulled.json")
+    pulled_file = _scope.path("field_pulled.json")
     if os.path.exists(pulled_file):
         os.remove(pulled_file)
     return {"ok": True, "message": "已清空拉取追踪"}
@@ -4837,6 +4841,19 @@ def run():
     print(f"  数据目录: {config.DATA_DIR}")
     print(f"  解析节点: {config.NODE_NAME}")
     print("=" * 56)
+    # v0.1.199：启动时清扫历史遗留的孤儿临时文件。
+    # 早期几处写盘用手写 mkstemp 却没在异常里删临时文件，进程被强杀后
+    # 临时文件永久留在项目目录。实测现场 data/projects/e75e857c/ 下积了
+    # 3 个 index.*.tmp，每个 127304 B（各一份完整的 228 台设备索引），
+    # 白占 380 KB 还把设备数据在用户目录里重复了三份。
+    # 只在启动时扫一次，且只删「超过 1 小时」的，避免误删正在写的文件。
+    try:
+        from . import atomic_io as _aio
+        _n = _aio.sweep_orphan_tmp(config.DATA_DIR)
+        if _n:
+            print(f"  [清理] 已清除 {_n} 个历史遗留临时文件")
+    except Exception as _e:  # noqa: BLE001
+        print(f"  [清理] 跳过：{_e}")
     # v0.1.188：原来这里连着调了两次 _start_guardian()，起了两个守护线程。
     # 卡死超时后两个线程会在同一分钟内各自判一次「卡死」并同时调
     # retry_failed_files(shas=None)，同一批失败文件被重试两遍、retry_count 加倍

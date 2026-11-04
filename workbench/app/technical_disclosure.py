@@ -5,6 +5,7 @@ v0.1.70：设备安装位置与技术交底联动
 包括工程概况、施工准备、施工工艺、质量标准、安全注意事项、环保要求。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -36,8 +37,7 @@ def _load_disclosures() -> dict:
 
 def _save_disclosures(disclosures: dict):
     _ensure_dirs()
-    with open(_disclosure_file_path(), "w", encoding="utf-8") as f:
-        json.dump(disclosures, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_disclosure_file_path(), disclosures, indent=2)
 
 
 # 设备类型技术交底模板

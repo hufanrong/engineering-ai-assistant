@@ -5,6 +5,7 @@ v0.1.59：多电脑并库时竣工资料合并
 车间冲突处理、合并日志记录、合并后完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import hashlib
@@ -57,8 +58,7 @@ def _load_merge_log() -> list:
 def _save_merge_log(log: list):
     """保存合并日志。"""
     _ensure_dirs()
-    with open(_merge_log_file_path(), "w", encoding="utf-8") as f:
-        json.dump(log, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_log_file_path(), log, indent=2)
 
 
 def _load_pending() -> list:
@@ -75,8 +75,7 @@ def _load_pending() -> list:
 def _save_pending(pending: list):
     """保存待人工确认的冲突。"""
     _ensure_dirs()
-    with open(_merge_pending_file_path(), "w", encoding="utf-8") as f:
-        json.dump(pending, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_pending_file_path(), pending, indent=2)
 
 
 def scan_source_folder(source_path: str) -> dict:

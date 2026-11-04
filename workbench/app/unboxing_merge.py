@@ -5,6 +5,7 @@ v0.1.78：多电脑并库时开箱验收记录合并
 合并后写回开箱验收记录，合并日志，待人工确认，合并统计，完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import hashlib
@@ -37,8 +38,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_merge_file_path(), "w", encoding="utf-8") as f:
-        json.dump(merge, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_file_path(), merge, indent=2)
 
 
 def _calculate_record_md5(record: dict) -> str:
@@ -84,8 +84,7 @@ def _write_back_records(records: dict):
     """v0.1.78：将合并后的开箱验收记录写回。"""
     record_file = _pp.data_file_with_legacy("unboxing_records.json")
     _pp.data_dir()
-    with open(record_file, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(record_file, records, indent=2)
 
 
 def merge_unboxing_records(source_records: dict, source_pc: str = "",

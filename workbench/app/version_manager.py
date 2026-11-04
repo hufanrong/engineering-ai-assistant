@@ -10,30 +10,36 @@
 # 存储：data/version_map.json
 #   {file_name: [{sha256, status, ts, source_node, size, is_latest, note}]}
 
+from . import atomic_io as _atomic_io
 import os
 import re
 import json
 import datetime
 
 from . import config
+from . import project_scope as _scope
 
-_VERSION_FILE = os.path.join(config.DATA_DIR, "version_map.json")
+_VERSION_NAME = "version_map.json"
+
+
+def _version_file() -> str:
+    """v0.1.199：文件版本记录随项目隔离。
+
+    原实现写死 data/version_map.json（模块级常量），实测里那个全局文件已经
+    攒了 12 个文件名、198 条版本记录，却不属于 projects/ 下任何一个项目——
+    换项目后看到的还是上一批文件的版本历史。"""
+    return _scope.path(_VERSION_NAME)
 
 
 def _load() -> dict:
-    if os.path.exists(_VERSION_FILE):
-        try:
-            with open(_VERSION_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:  # noqa: BLE001
-            return {}
+    data, _src = _scope.load_with_migration(_VERSION_NAME)
+    if isinstance(data, dict) and data:
+        return data
     return {}
 
 
 def _save(m: dict):
-    os.makedirs(os.path.dirname(_VERSION_FILE), exist_ok=True)
-    with open(_VERSION_FILE, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_version_file(), m, indent=2)
 
 
 def _norm_name(name: str) -> str:

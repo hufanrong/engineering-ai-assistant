@@ -5,6 +5,7 @@ v0.1.81：多电脑并库时货损报告合并
 合并后写回货损报告，合并日志，待人工确认，合并统计，完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import hashlib
@@ -37,8 +38,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_merge_file_path(), "w", encoding="utf-8") as f:
-        json.dump(merge, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_file_path(), merge, indent=2)
 
 
 def _calculate_report_md5(report: dict) -> str:
@@ -84,8 +84,7 @@ def _write_back_reports(reports: dict):
     """v0.1.81：将合并后的货损报告写回。"""
     report_file = _pp.data_file_with_legacy("damage_reports.json")
     _pp.data_dir()
-    with open(report_file, "w", encoding="utf-8") as f:
-        json.dump(reports, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(report_file, reports, indent=2)
 
 
 def merge_damage_reports(source_reports: dict, source_pc: str = "",

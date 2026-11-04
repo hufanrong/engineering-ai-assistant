@@ -5,6 +5,7 @@ v0.1.80：多电脑并库时设计变更合并
 合并后写回设计变更，合并日志，待人工确认，合并统计，完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import hashlib
@@ -37,8 +38,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_merge_file_path(), "w", encoding="utf-8") as f:
-        json.dump(merge, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_file_path(), merge, indent=2)
 
 
 def _calculate_change_md5(change: dict) -> str:
@@ -83,8 +83,7 @@ def _write_back_changes(changes: dict):
     """v0.1.80：将合并后的设计变更写回。"""
     change_file = _pp.data_file_with_legacy("design_changes.json")
     _pp.data_dir()
-    with open(change_file, "w", encoding="utf-8") as f:
-        json.dump(changes, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(change_file, changes, indent=2)
 
 
 def merge_design_changes(source_changes: dict, source_pc: str = "",

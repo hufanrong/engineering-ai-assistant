@@ -5,6 +5,7 @@
 # AI 检索子项目库时可同时检索平台库（引用规范正文内容，而非只有名称）。
 # 新电脑安装时：导出 .fpglib 平台库包 → 导入即可复用全部规范库。
 
+from . import atomic_io as _atomic_io
 import os
 import io
 import re
@@ -56,8 +57,7 @@ def _load_index() -> dict:
 
 def _save_index(idx: dict):
     _ensure()
-    with open(INDEX_PATH, "w", encoding="utf-8") as f:
-        json.dump(idx, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(INDEX_PATH, idx, indent=1)
 
 
 def _save_cache(res):

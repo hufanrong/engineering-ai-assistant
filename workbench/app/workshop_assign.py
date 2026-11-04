@@ -1,6 +1,7 @@
 # 繁工AI 本地解析工作台 - 车间资料自动划分（v0.1.27）
 # 优先级：manual(人工) > cad_title(CAD标题栏/图名,设计院) > filename(文件名) > content(正文关键词)
 # 平票/无法确认 → 待人工，不报错；人工修正后重建图谱即生效。
+from . import atomic_io as _atomic_io
 import datetime
 import json
 import os
@@ -69,8 +70,7 @@ def _migrate_legacy():
                     target[sha] = rec
                     moved += 1
             if target:
-                with open(tpath, "w", encoding="utf-8") as f:
-                    json.dump(target, f, ensure_ascii=False, indent=1)
+                _atomic_io.write_json(tpath, target, indent=1)
         # 迁移后全局文件改名备份（保留可追溯）
         if moved > 0 or True:
             os.rename(legacy, legacy + ".migrated_bak")
@@ -92,8 +92,7 @@ def _load() -> dict:
 
 def _save(m: dict):
     f = _assign_file()
-    with open(f, "w", encoding="utf-8") as fh:
-        json.dump(m, fh, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(f, m, indent=1)
 
 
 # v0.1.141：空间单元识别增强——不只识别「N号车间」，还覆盖命名车间（磨浮车间）

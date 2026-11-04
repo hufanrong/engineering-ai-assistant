@@ -5,6 +5,7 @@ v0.1.75：多电脑并库时施工日志合并
 合并后写回施工日志，合并日志，待人工确认，合并统计，完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import hashlib
@@ -37,8 +38,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_merge_file_path(), "w", encoding="utf-8") as f:
-        json.dump(merge, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_file_path(), merge, indent=2)
 
 
 def _calculate_log_md5(log: dict) -> str:
@@ -83,8 +83,7 @@ def _write_back_logs(logs: dict):
     """v0.1.75：将合并后的施工日志写回。"""
     log_file = _pp.data_file_with_legacy("site_logs.json")
     _pp.data_dir()
-    with open(log_file, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(log_file, logs, indent=2)
 
 
 def merge_site_logs(source_logs: dict, source_pc: str = "",

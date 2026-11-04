@@ -6,6 +6,7 @@
 - generate_volume: 一键整卷（A 全自动 + B 预填结构 + C 建归集目录）
 - export_todo: 待补字段清单导出
 """
+from . import atomic_io as _atomic_io
 import os, json, re
 import threading
 import time
@@ -1547,8 +1548,7 @@ def save_registry(items: list, project_id=None) -> dict:
             shutil.copy2(path, path + ".bak")
         except Exception:  # noqa: BLE001
             pass
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(clean, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(path, clean, indent=1)
     info = registry_info(project_id)
     info.update({"ok": True, "imported": len(clean), "items_without_book": len(bad)})
     return info

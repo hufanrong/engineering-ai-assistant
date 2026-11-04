@@ -15,37 +15,33 @@ v0.1.45：设备台账多版本合并去重
 - 多版本字段冲突（如重量不同）→ 留人工确认，默认取最新版
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import threading
 import re
 import datetime
 from . import config
+from . import project_scope as _scope
 
-MERGE_FILE = None
+_MERGE_NAME = "equipment_merge.json"
 
 
-def _ensure():
-    global MERGE_FILE
-    if MERGE_FILE is None:
-        MERGE_FILE = os.path.join(config.DATA_DIR, "equipment_merge.json")
+def _merge_file() -> str:
+    """v0.1.199：设备合并/别名确认结果随项目隔离（原来写死全局 data/，
+    且常量首次赋值后不再复算，切项目仍写旧路径）。"""
+    return _scope.path(_MERGE_NAME)
 
 
 def _load() -> dict:
-    _ensure()
-    if os.path.exists(MERGE_FILE):
-        try:
-            with open(MERGE_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:  # noqa: BLE001
-            return {}
+    data, _src = _scope.load_with_migration(_MERGE_NAME)
+    if isinstance(data, dict) and data:
+        return data
     return {"merged": {}, "pending": [], "confirmed_alias": {}, "rejected_alias": {}}
 
 
 def _save(m: dict):
-    _ensure()
-    with open(MERGE_FILE, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(_merge_file(), m, indent=1)
 
 
 # ---------------- 设备提取 ----------------
@@ -567,13 +563,14 @@ def sync_devices_to_index(data_dir: str) -> dict:
     if ws_map:
         idx["workshops"] = {k: {"devices": v} for k, v in sorted(ws_map.items())}
 
-    # 唯一临时名 + 进程内锁：并发线程不会互相覆盖半成品文件
-    import tempfile as _tf
-    _fd, tmp = _tf.mkstemp(prefix="index.", suffix=".tmp", dir=os.path.dirname(idx_path))
-    os.close(_fd)
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(idx, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, idx_path)
+    # v0.1.199：改用统一的 atomic_io.write_json。
+    # 原来这里手写 mkstemp + os.replace，但没有 finally 清理临时文件 ——
+    # 进程在 open→dump→replace 之间被杀（合并在真实台账上要跑几十秒，
+    # 用户很容易以为卡死就关掉），临时文件就永久留在项目目录里。
+    # 实测现场：data/projects/e75e857c/ 下积了 3 个 index.*.tmp，
+    # 每个 127304 B、各存一份完整的 228 台设备索引（11-02 的三个时间点），
+    # 白占 380 KB，而且把 228 台设备的数据在用户目录里重复了三份。
+    _atomic_io.write_json(idx_path, idx, indent=1)
     sources = sorted({d.get("source_file", "") for d in merged if d.get("source_file")})
     return {"devices": len(devices),
             "with_workshop": sum(1 for d in devices.values() if d.get("workshop")),

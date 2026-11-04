@@ -13,6 +13,7 @@ v0.1.108：模板引擎
         根据设备数量自动复制行并填充。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import re
 import json

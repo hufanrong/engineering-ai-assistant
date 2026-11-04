@@ -5,6 +5,7 @@ v0.1.63：多电脑并库时设备关系合并
 设备属性冲突处理、车间冲突处理、合并日志记录、合并后关系完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -40,8 +41,7 @@ def _load_merge_log() -> list:
 
 def _save_merge_log(log: list):
     _ensure_dirs()
-    with open(_merge_log_file_path(), "w", encoding="utf-8") as f:
-        json.dump(log, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_log_file_path(), log, indent=2)
 
 
 def _load_pending() -> list:
@@ -56,8 +56,7 @@ def _load_pending() -> list:
 
 def _save_pending(pending: list):
     _ensure_dirs()
-    with open(_merge_pending_file_path(), "w", encoding="utf-8") as f:
-        json.dump(pending, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_pending_file_path(), pending, indent=2)
 
 
 def load_relations_from_file(filepath: str) -> dict:

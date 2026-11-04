@@ -20,6 +20,7 @@ v0.1.147：监理确认模板库（车间级整合版+设备安装册28模板）
 - list_by_category(): 按表类型分组返回可用模板
 """
 
+from . import atomic_io as _atomic_io
 import os
 import re
 import json
@@ -583,8 +584,7 @@ def save_project_config(project_id: str = None, config: Dict = None) -> Dict:
             changed.append(cn)
     project["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     meta_path = _pm._get_project_meta_path(pid)
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(project, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(meta_path, project, indent=2)
     return {
         "ok": True,
         "project": project,

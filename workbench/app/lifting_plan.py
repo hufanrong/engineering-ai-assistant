@@ -5,6 +5,7 @@ v0.1.68：设备安装位置与吊装方案联动
 包括吊装环境分析、吊装参数建议、吊装顺序建议、安全注意事项。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import math
@@ -37,8 +38,7 @@ def _load_plans() -> dict:
 
 def _save_plans(plans: dict):
     _ensure_dirs()
-    with open(_plan_file_path(), "w", encoding="utf-8") as f:
-        json.dump(plans, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_plan_file_path(), plans, indent=2)
 
 
 # 设备类型吊装参数参考

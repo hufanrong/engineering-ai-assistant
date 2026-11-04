@@ -6,6 +6,7 @@ v0.1.73：设备安装位置与开箱验收记录联动
 验收结论、参加人员等完整要素。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -37,8 +38,7 @@ def _load_records() -> dict:
 
 def _save_records(records: dict):
     _ensure_dirs()
-    with open(_record_file_path(), "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_record_file_path(), records, indent=2)
 
 
 # 设备类型开箱验收要点

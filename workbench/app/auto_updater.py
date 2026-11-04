@@ -7,6 +7,7 @@ v0.1.112：自动更新模块
 2. 非Git仓库：从GitHub下载最新zip，解压覆盖（保留数据目录）
 """
 
+from . import atomic_io as _atomic_io
 import os
 import sys
 import json
@@ -957,8 +958,7 @@ def schedule_staged_apply(staging: str = "") -> Dict:
             "staging": staging,
             "created": datetime.datetime.now().isoformat(),
         }
-        with open(PENDING_FILE, "w", encoding="utf-8") as f:
-            json.dump(pending, f, ensure_ascii=False)
+        _atomic_io.write_json(PENDING_FILE, pending, indent=None)
         # 分离进程执行（主进程立即返回）
         log_path = os.path.join(WORKSPACE_ROOT, "updates", "apply.log")
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -1061,8 +1061,7 @@ def perform_update(backup: bool = True, force: bool = False) -> Dict:
                     logs = json.load(f)
             logs.insert(0, log_entry)
             logs = logs[:50]
-            with open(UPDATE_LOG_FILE, "w", encoding="utf-8") as f:
-                json.dump(logs, f, ensure_ascii=False, indent=2)
+            _atomic_io.write_json(UPDATE_LOG_FILE, logs, indent=2)
         except Exception:  # noqa: BLE001
             pass
         return {
@@ -1094,8 +1093,7 @@ def perform_update(backup: bool = True, force: bool = False) -> Dict:
                 logs = json.load(f)
         logs.insert(0, log_entry)
         logs = logs[:50]  # 只保留最近50条
-        with open(UPDATE_LOG_FILE, "w", encoding="utf-8") as f:
-            json.dump(logs, f, ensure_ascii=False, indent=2)
+        _atomic_io.write_json(UPDATE_LOG_FILE, logs, indent=2)
     except Exception:
         pass
     

@@ -3,6 +3,7 @@
 # 配置 CLOUD_ENDPOINT 后，可手动/定时上传到云端主库合并（SHA256 去重由云端负责）。
 # 上传记录写入 data/upload_log.jsonl，全程留痕。
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import time
@@ -173,8 +174,7 @@ def _enqueue_locked(parse_result) -> str:
             "chunks": parse_result.chunks,
         },
     }
-    with open(os.path.join(QUEUE_DIR, f"{key}.json"), "w", encoding="utf-8") as f:
-        json.dump(pkg, f, ensure_ascii=False)
+    _atomic_io.write_json(os.path.join(QUEUE_DIR, f"{key}.json"), pkg, indent=None)
     idx[parse_result.sha256] = key
     _save_idx(idx)
     _log("enqueue", key, parse_result.file_name, "ok", None)

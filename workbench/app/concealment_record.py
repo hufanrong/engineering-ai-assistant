@@ -5,6 +5,7 @@ v0.1.74：设备安装位置与隐蔽工程验收记录联动
 包括工程名称、隐蔽部位、隐蔽内容、隐蔽日期、验收依据、质量检查、验收结论、参加人员。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -36,8 +37,7 @@ def _load_records() -> dict:
 
 def _save_records(records: dict):
     _ensure_dirs()
-    with open(_record_file_path(), "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_record_file_path(), records, indent=2)
 
 
 # 设备类型隐蔽工程内容

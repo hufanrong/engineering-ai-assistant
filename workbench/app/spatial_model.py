@@ -8,16 +8,14 @@
 #   - 有些时候图纸上没有标注设备，台账中会有记录
 #   - 将有关联的数据联系起来，建立一个类似3d效果的数据库，Ai可以读取
 
+from . import atomic_io as _atomic_io
 import math
 import os
 import json
 import datetime
 from . import config
 from . import elevation as _elev
-import json
-import os
-
-from . import config
+from . import project_scope as _scope
 
 
 # 相邻设备判定阈值（米）。CAD 坐标按毫米计，除以 1000 得米。
@@ -341,20 +339,25 @@ def generate_ai_summary(spatial: dict) -> str:
     return "\n".join(lines)
 
 
+def _spatial_file() -> str:
+    """v0.1.199：空间模型随项目隔离（原来默认写全局 data/spatial_model.json，
+    项目 A 的设备坐标会画到项目 B 的图上）。"""
+    return _scope.path("spatial_model.json")
+
+
 def save_spatial(spatial: dict, path: str = None):
     """保存空间模型到文件。"""
     if path is None:
-        path = os.path.join(config.DATA_DIR, "spatial_model.json")
+        path = _spatial_file()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(spatial, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(path, spatial, indent=2)
     return path
 
 
 def load_spatial(path: str = None) -> dict:
     """加载空间模型。"""
     if path is None:
-        path = os.path.join(config.DATA_DIR, "spatial_model.json")
+        path = _spatial_file()
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as f:

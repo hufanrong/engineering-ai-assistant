@@ -13,6 +13,7 @@ import glob
 
 from . import config
 from . import docgen
+from . import project_scope as _scope
 
 
 # 工程阶段定义（按时间顺序）
@@ -94,17 +95,35 @@ def _load_generated_docs() -> dict:
 
 
 def _load_index_docs() -> set:
-    """从上传文件索引中检测已有的资料类文件（按文件名关键词匹配）。"""
-    idx_path = os.path.join(config.DATA_DIR, "index.json")
-    if not os.path.exists(idx_path):
-        return set()
+    """从上传文件索引中检测已有的资料类文件（按文件名关键词匹配）。
+
+    v0.1.199：原来读全局 data/index.json——真实部署里文件索引都在
+    项目目录（projects/<id>/index.json），全局那个根本不存在，
+    这个函数于是恒返回空集，导致「已有资料」永远检测不到。
+    """
+    idx = {}
     try:
-        with open(idx_path, encoding="utf-8") as f:
-            idx = json.load(f)
+        from . import project_manager as _pm
+        p = _pm.get_project_index_path(None)
+        if p and os.path.isfile(p):
+            with open(p, encoding="utf-8") as f:
+                idx = json.load(f)
     except Exception:  # noqa: BLE001
-        return set()
+        idx = {}
+    if not idx:
+        # 兜底：旧全局索引（迁移期）
+        idx_path = os.path.join(config.DATA_DIR, "index.json")
+        if not os.path.exists(idx_path):
+            return set()
+        try:
+            with open(idx_path, encoding="utf-8") as f:
+                idx = json.load(f)
+        except Exception:  # noqa: BLE001
+            return set()
     found = set()
     for info in idx.values():
+        if not isinstance(info, dict):
+            continue
         fname = info.get("file_name", "")
         for doc_type in docgen.TYPES:
             if doc_type in fname:
@@ -157,8 +176,12 @@ def _current_project_ledger() -> tuple:
 
 
 def _get_devices() -> list:
-    """从空间模型或关系图谱获取设备列表。"""
-    spatial_path = os.path.join(config.DATA_DIR, "spatial_model.json")
+    """从空间模型或关系图谱获取设备列表。
+
+    v0.1.199：路径改走项目隔离（原来读全局 data/spatial_model.json、
+    data/relations_graph.json，真实部署里这两个文件不存在，恒走空分支）。
+    """
+    spatial_path = _scope.path("spatial_model.json")
     if os.path.exists(spatial_path):
         try:
             with open(spatial_path, encoding="utf-8") as f:
@@ -167,7 +190,7 @@ def _get_devices() -> list:
         except Exception:  # noqa: BLE001
             pass
     # 回退：从 relations 图谱
-    rel_path = os.path.join(config.DATA_DIR, "relations_graph.json")
+    rel_path = _scope.path("relations_graph.json")
     if os.path.exists(rel_path):
         try:
             with open(rel_path, encoding="utf-8") as f:
@@ -181,8 +204,11 @@ def _get_devices() -> list:
 
 
 def _get_workshops() -> list:
-    """从空间模型获取车间列表。"""
-    spatial_path = os.path.join(config.DATA_DIR, "spatial_model.json")
+    """从空间模型获取车间列表。
+
+    v0.1.199：路径改走项目隔离。
+    """
+    spatial_path = _scope.path("spatial_model.json")
     if os.path.exists(spatial_path):
         try:
             with open(spatial_path, encoding="utf-8") as f:

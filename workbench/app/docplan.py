@@ -8,20 +8,20 @@
 # 双输入：① 已解析库 data/index.json（自动判断"库里已有什么、缺什么"）
 #        ② 人工新增资料任务 data/docplan_tasks.json（现场进度到哪、手动登记要做的资料）
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
 
 from . import config
+from . import project_scope as _scope
 
-TASKS_PATH = None  # 延迟初始化
+_TASKS_NAME = "docplan_tasks.json"
 
 
-def _ensure():
-    global TASKS_PATH
-    if TASKS_PATH is None:
-        TASKS_PATH = os.path.join(config.DATA_DIR, "docplan_tasks.json")
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+def _tasks_path() -> str:
+    """v0.1.199：资料任务清单随项目隔离（原来写死全局 data/，切项目仍写旧路径）。"""
+    return _scope.path(_TASKS_NAME)
 
 
 # ---------- 1. 文件名校验规则：文件名/类型 → 资料类别 ----------
@@ -88,7 +88,16 @@ def classify_file(file_name: str):
 
 
 def _load_index():
-    idx_path = os.path.join(config.DATA_DIR, "index.json")
+    """读当前项目的文件索引。
+
+    v0.1.199：原来读全局 data/index.json，真实部署里不存在（索引在项目目录），
+    plan_status() 于是永远判定「什么都没准备」，待办清单全部误报缺项。
+    """
+    try:
+        from . import project_manager as _pm
+        idx_path = _pm.get_project_index_path(None)
+    except Exception:  # noqa: BLE001
+        idx_path = os.path.join(config.DATA_DIR, "index.json")
     if os.path.exists(idx_path):
         try:
             with open(idx_path, encoding="utf-8") as f:
@@ -101,7 +110,6 @@ def _load_index():
 # ---------- 3. 资料计划状态：库里已有什么、每类缺什么 ----------
 def plan_status():
     """返回每类资料的准备度：ready=齐可生成；partial=缺部分（列出缺什么）；missing=完全没有前置。"""
-    _ensure()
     idx = _load_index()
     have_classes = {}
     for info in idx.values():
@@ -141,20 +149,14 @@ def plan_status():
 
 # ---------- 4. 人工资料任务：现场进度登记/待办（缺项补完再生成） ----------
 def load_tasks():
-    _ensure()
-    if os.path.exists(TASKS_PATH):
-        try:
-            with open(TASKS_PATH, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:  # noqa: BLE001
-            return []
+    data, _src = _scope.load_with_migration(_TASKS_NAME)
+    if isinstance(data, list):
+        return data
     return []
 
 
 def save_tasks(tasks):
-    _ensure()
-    with open(TASKS_PATH, "w", encoding="utf-8") as f:
-        json.dump(tasks, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(_tasks_path(), tasks, indent=1)
 
 
 def add_task(doc_type: str, name: str = "", fields: dict = None, status: str = "待补充"):

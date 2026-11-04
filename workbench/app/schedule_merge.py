@@ -5,6 +5,7 @@ v0.1.69：多电脑并库时施工进度合并
 合并后写回施工进度，合并日志，待人工确认，合并统计，完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -36,8 +37,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_merge_file_path(), "w", encoding="utf-8") as f:
-        json.dump(merge, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_file_path(), merge, indent=2)
 
 
 def load_schedule_from_file(file_path: str) -> dict:

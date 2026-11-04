@@ -7,6 +7,7 @@
 #   - device_workshop：一台设备（位号）归到哪个车间（台账行/位号前缀/人工）
 #   跨车间箱单文件本身归"未归车间"，但其中每台设备有明确车间归属。
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import re
@@ -45,8 +46,7 @@ def _load() -> dict:
 def _save(m: dict):
     p = _store_path()
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(p, m, indent=2)
 
 
 def _norm_workshop(name: str) -> str:

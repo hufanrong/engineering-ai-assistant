@@ -5,6 +5,7 @@ v0.1.98：矿山设备多电脑并库现场记录合并
 （latest/keep_existing/manual），合并日志，待人工确认管理，完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import hashlib
@@ -48,8 +49,7 @@ def _load_json(filepath: str, default=None):
 def _save_json(filepath: str, data):
     """保存JSON文件。"""
     _ensure_dir()
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(filepath, data, indent=2)
 
 
 def merge_field_records(

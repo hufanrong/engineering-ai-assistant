@@ -5,6 +5,7 @@ v0.1.110：项目间设备数据对比与合并
 并支持将一个项目的设备数据合并到另一个项目。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -274,8 +275,7 @@ def merge_devices(source_project_id: str, target_project_id: str,
     idx_target["devices"] = devices_target
     
     idx_path = os.path.join(target_dir, "index.json")
-    with open(idx_path, "w", encoding="utf-8") as f:
-        json.dump(idx_target, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(idx_path, idx_target, indent=2)
     
     # 更新项目统计
     _pm.update_project_stats(
@@ -347,7 +347,6 @@ def resolve_manual_conflict(target_project_id: str, device_name: str,
     target_dir = _pm.get_project_data_dir(target_project_id)
     idx_target["devices"] = devices_target
     idx_path = os.path.join(target_dir, "index.json")
-    with open(idx_path, "w", encoding="utf-8") as f:
-        json.dump(idx_target, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(idx_path, idx_target, indent=2)
     
     return {"ok": True, "message": message}

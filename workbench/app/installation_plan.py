@@ -5,6 +5,7 @@ v0.1.65：设备安装位置与施工方案联动
 包括施工环境分析、施工顺序建议、安全注意事项、质量控制要点。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -50,8 +51,7 @@ def _load_plans() -> dict:
 
 def _save_plans(plans: dict):
     _ensure_dirs()
-    with open(_plan_file_path(), "w", encoding="utf-8") as f:
-        json.dump(plans, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_plan_file_path(), plans, indent=2)
 
 
 def get_device_spatial_info(tag: str) -> dict:

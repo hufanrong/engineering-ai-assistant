@@ -6,6 +6,7 @@ v0.1.107：项目管理模块
 包含 index.json、relations.json、向量库、解析缓存等。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import uuid
@@ -93,14 +94,11 @@ def create_project(name: str, description: str = "", client: str = "",
         "workshop_count": 0,
         "status": "active",
     }
-    with open(_get_project_meta_path(project_id), "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_get_project_meta_path(project_id), meta, indent=2)
     
     # 初始化空的 index.json 和 relations.json
-    with open(os.path.join(project_dir, "index.json"), "w", encoding="utf-8") as f:
-        json.dump({"files": [], "devices": {}, "workshops": {}}, f, ensure_ascii=False, indent=2)
-    with open(os.path.join(project_dir, "relations.json"), "w", encoding="utf-8") as f:
-        json.dump({"devices": {}, "workshops": {}, "relations": []}, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(os.path.join(project_dir, "index.json"), {"files": [], "devices": {}, "workshops": {}}, indent=2)
+    _atomic_io.write_json(os.path.join(project_dir, "relations.json"), {"devices": {}, "workshops": {}, "relations": []}, indent=2)
     
     # 自动设为当前项目
     set_current_project(project_id)
@@ -214,8 +212,7 @@ def rename_project(project_id: str, new_name: str) -> Dict:
     old_name = project.get("name", "")
     project["name"] = new_name
     project["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(project, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(meta_path, project, indent=2)
 
     return {
         "ok": True,
@@ -309,8 +306,7 @@ def update_project_stats(project_id: str, file_count: int = None,
     
     project["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    with open(_get_project_meta_path(project_id), "w", encoding="utf-8") as f:
-        json.dump(project, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_get_project_meta_path(project_id), project, indent=2)
     
     return {"ok": True, "project": project}
 

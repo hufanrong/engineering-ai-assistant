@@ -10,12 +10,14 @@
 #   4) 设备位号跨图纸/台账关联（CAD 块属性 ↔ 台账行 ↔ 文本实体）
 #   5) 无法确认的冲突 → human_confirm 人工确认队列
 
+from . import atomic_io as _atomic_io
 import os
 import re
 import json
 import datetime
 
 from . import config
+from . import project_scope as _scope
 
 RELATIONS_FILE = None
 _WORKSHOP_RE = re.compile(r"(\d{1,2}|[一二三四五六七八九十]+)\s*号?\s*车间")
@@ -78,8 +80,7 @@ def _load_confirmed() -> dict:
 
 def _save_confirmed(m: dict):
     _ensure_confirm()
-    with open(CONFIRM_FILE, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(CONFIRM_FILE, m, indent=1)
 
 
 def confirm_candidate(tag: str, workshop: str, note: str = "") -> dict:
@@ -93,30 +94,23 @@ def confirm_candidate(tag: str, workshop: str, note: str = "") -> dict:
 
 
 # v0.1.43：群聊提及设备候选——人工确认/拒绝
-REJECT_FILE = None
+# v0.1.199：改随项目隔离（原来写死全局 data/，常量首次赋值后不再复算）。
+_REJECT_NAME = "rejected_candidates.json"
 
 
-def _ensure_reject():
-    global REJECT_FILE
-    if REJECT_FILE is None:
-        REJECT_FILE = os.path.join(config.DATA_DIR, "rejected_candidates.json")
+def _reject_file() -> str:
+    return _scope.path(_REJECT_NAME)
 
 
 def _load_rejected() -> dict:
-    _ensure_reject()
-    if os.path.exists(REJECT_FILE):
-        try:
-            with open(REJECT_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:  # noqa: BLE001
-            return {}
+    data, _src = _scope.load_with_migration(_REJECT_NAME)
+    if isinstance(data, dict) and data:
+        return data
     return {}
 
 
 def _save_rejected(m: dict):
-    _ensure_reject()
-    with open(REJECT_FILE, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(_reject_file(), m, indent=1)
 
 
 def list_chat_candidates() -> list:
@@ -828,8 +822,7 @@ def _load_cache_by_name(fname: str, idx: dict):
 
 def _save(graph: dict, data_dir=None):
     _ensure(data_dir)
-    with open(RELATIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(graph, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(RELATIONS_FILE, graph, indent=1)
 
 
 def _append_spatial_summary(graph: dict, docs: dict, idx: dict):
@@ -982,5 +975,4 @@ def load_relations() -> dict:
 def save_relations(relations: dict):
     """v0.1.63：保存关系图谱到文件。"""
     _ensure()
-    with open(RELATIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(relations, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(RELATIONS_FILE, relations, indent=2)

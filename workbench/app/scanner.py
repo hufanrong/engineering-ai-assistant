@@ -1,6 +1,7 @@
 # 繁工AI 本地解析工作台 - 文件夹扫描 + 解析 + 入库 + 上传队列 一体化
 # 幂等：按 sha256 记录已处理文件（data/index.json），重复扫描自动跳过，不重复入库。
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import threading

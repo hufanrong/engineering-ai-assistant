@@ -5,6 +5,7 @@ v0.1.64：设备安装位置与施工进度联动
 管理设备施工状态，识别关键路径。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -40,8 +41,7 @@ def _load_schedule() -> dict:
 
 def _save_schedule(schedule: dict):
     _ensure_dirs()
-    with open(_schedule_file_path(), "w", encoding="utf-8") as f:
-        json.dump(schedule, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_schedule_file_path(), schedule, indent=2)
 
 
 def _load_device_status() -> dict:
@@ -56,8 +56,7 @@ def _load_device_status() -> dict:
 
 def _save_device_status(status: dict):
     _ensure_dirs()
-    with open(_device_status_file_path(), "w", encoding="utf-8") as f:
-        json.dump(status, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_device_status_file_path(), status, indent=2)
 
 
 def auto_schedule_devices(start_date: str = None,

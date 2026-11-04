@@ -6,6 +6,7 @@ v0.1.71：设备安装位置与施工日志联动
 质量检查、安全情况、问题及处理、明日计划。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -37,8 +38,7 @@ def _load_logs() -> dict:
 
 def _save_logs(logs: dict):
     _ensure_dirs()
-    with open(_log_file_path(), "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_log_file_path(), logs, indent=2)
 
 
 # 设备类型施工日志模板

@@ -5,6 +5,7 @@ v0.1.97：矿山设备移动端资料上传与解析联动
 自动归类到项目/车间/设备，上传记录管理。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -408,7 +409,6 @@ def _save_upload_records(records: list):
     """保存上传记录列表。"""
     try:
         os.makedirs(os.path.dirname(UPLOAD_RECORDS_FILE), exist_ok=True)
-        with open(UPLOAD_RECORDS_FILE, "w", encoding="utf-8") as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
+        _atomic_io.write_json(UPLOAD_RECORDS_FILE, records, indent=2)
     except Exception:
         pass

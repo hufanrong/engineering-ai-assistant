@@ -11,15 +11,27 @@
 #   data/tag_alias.json          已确认映射 {primary: {aliases:[...], source, confidence, ts}}
 #   data/tag_alias_pending.json  待人工确认 [{primary, alias, source, confidence, evidence, ts}]
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import re
 import datetime
 
 from . import config
+from . import project_scope as _scope
 
-_ALIAS_FILE = os.path.join(config.DATA_DIR, "tag_alias.json")
-_PENDING_FILE = os.path.join(config.DATA_DIR, "tag_alias_pending.json")
+_ALIAS_NAME = "tag_alias.json"
+_PENDING_NAME = "tag_alias_pending.json"
+
+
+def _alias_file() -> str:
+    """v0.1.199：位号别名随项目隔离（原来写死全局 data/ 模块级常量，
+    项目 A 的厂家编号↔设计位号对照会串到项目 B）。"""
+    return _scope.path(_ALIAS_NAME)
+
+
+def _pending_file() -> str:
+    return _scope.path(_PENDING_NAME)
 
 # 厂家编号字段名（CAD 块属性 / Excel 表头）
 _MANUFACTURER_KEYS = ["厂家编号", "厂家位号", "设备编号", "合同号", "订货号", "出厂编号",
@@ -43,8 +55,7 @@ def _load(path: str, default):
 
 def _save(path: str, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(path, data, indent=2)
 
 
 def _norm_tag(tag: str) -> str:
@@ -135,7 +146,7 @@ def add_alias(primary: str, alias: str, source: str = "auto",
     alias = (alias or "").strip()
     if not primary or not alias or _norm_tag(alias) == primary:
         return False
-    confirmed = _load(_ALIAS_FILE, {})
+    confirmed = _load(_alias_file(), {})
     # 已存在则跳过
     if primary in confirmed and alias in confirmed[primary].get("aliases", []):
         return False
@@ -151,26 +162,26 @@ def add_alias(primary: str, alias: str, source: str = "auto",
         info["source"] = source
         info["confidence"] = max(info.get("confidence", 0), confidence)
         info["ts"] = datetime.datetime.now().isoformat()
-        _save(_ALIAS_FILE, confirmed)
+        _save(_alias_file(), confirmed)
         return True
     else:
         # 低置信 → 待人工确认
-        pending = _load(_PENDING_FILE, [])
+        pending = _load(_pending_file(), [])
         if not any(p["primary"] == primary and p["alias"] == alias for p in pending):
             pending.append({"primary": primary, "alias": alias, "source": source,
                             "confidence": confidence, "evidence": evidence,
                             "ts": datetime.datetime.now().isoformat()})
-            _save(_PENDING_FILE, pending)
+            _save(_pending_file(), pending)
         return False
 
 
 def confirm(primary: str, alias: str) -> bool:
     """人工确认映射：从待确认移到已确认。"""
     primary = _norm_tag(primary)
-    pending = _load(_PENDING_FILE, [])
+    pending = _load(_pending_file(), [])
     pending = [p for p in pending if not (p["primary"] == primary and p["alias"] == alias)]
-    _save(_PENDING_FILE, pending)
-    confirmed = _load(_ALIAS_FILE, {})
+    _save(_pending_file(), pending)
+    confirmed = _load(_alias_file(), {})
     info = confirmed.setdefault(primary, {"aliases": [], "source": "manual",
                                             "confidence": 1.0, "ts": ""})
     if alias not in info["aliases"]:
@@ -178,23 +189,23 @@ def confirm(primary: str, alias: str) -> bool:
     info["source"] = "manual"
     info["confidence"] = 1.0
     info["ts"] = datetime.datetime.now().isoformat()
-    _save(_ALIAS_FILE, confirmed)
+    _save(_alias_file(), confirmed)
     return True
 
 
 def reject(primary: str, alias: str) -> bool:
     """人工拒绝映射：从待确认移除，不再自动建议。"""
     primary = _norm_tag(primary)
-    pending = _load(_PENDING_FILE, [])
+    pending = _load(_pending_file(), [])
     pending = [p for p in pending if not (p["primary"] == primary and p["alias"] == alias)]
-    _save(_PENDING_FILE, pending)
+    _save(_pending_file(), pending)
     return True
 
 
 def get_primary(tag: str) -> str:
     """解析别名→主位号。如果 tag 本身是主位号或无映射，返回原 tag。"""
     t = _norm_tag(tag)
-    confirmed = _load(_ALIAS_FILE, {})
+    confirmed = _load(_alias_file(), {})
     if t in confirmed:
         return t  # 本身就是主位号
     for primary, info in confirmed.items():
@@ -204,12 +215,12 @@ def get_primary(tag: str) -> str:
 
 
 def list_confirmed() -> list:
-    confirmed = _load(_ALIAS_FILE, {})
+    confirmed = _load(_alias_file(), {})
     return [{"primary": k, **v} for k, v in confirmed.items()]
 
 
 def list_pending() -> list:
-    return _load(_PENDING_FILE, [])
+    return _load(_pending_file(), [])
 
 
 def stats() -> dict:

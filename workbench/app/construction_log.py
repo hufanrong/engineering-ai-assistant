@@ -16,36 +16,32 @@ v0.1.46：施工日志自动生成
 - 生成后支持人工修改再导出
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import re
 import datetime
 from . import config
+from . import project_scope as _scope
 
-LOG_FILE = None
+_LOG_NAME = "construction_logs.json"
 
 
-def _ensure():
-    global LOG_FILE
-    if LOG_FILE is None:
-        LOG_FILE = os.path.join(config.DATA_DIR, "construction_logs.json")
+def _log_file() -> str:
+    """v0.1.199：施工日志随项目隔离。原来写死 config.DATA_DIR 模块级常量，
+    项目 A 的日志会出现在项目 B；且常量首次赋值后不再复算，切项目仍写旧路径。"""
+    return _scope.path(_LOG_NAME)
 
 
 def _load() -> dict:
-    _ensure()
-    if os.path.exists(LOG_FILE):
-        try:
-            with open(LOG_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:  # noqa: BLE001
-            return {}
+    data, _src = _scope.load_with_migration(_LOG_NAME)
+    if isinstance(data, dict) and data:
+        return data
     return {"logs": {}, "daily_summary": {}}
 
 
 def _save(m: dict):
-    _ensure()
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(_log_file(), m, indent=1)
 
 
 # ---------------- 现场记录汇总 ----------------

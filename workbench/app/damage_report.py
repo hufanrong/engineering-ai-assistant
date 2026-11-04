@@ -6,6 +6,7 @@ v0.1.77：设备安装位置与货损报告联动
 原因分析、处理措施、责任认定、索赔要求、参加人员等完整要素。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -37,8 +38,7 @@ def _load_reports() -> dict:
 
 def _save_reports(reports: dict):
     _ensure_dirs()
-    with open(_report_file_path(), "w", encoding="utf-8") as f:
-        json.dump(reports, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_report_file_path(), reports, indent=2)
 
 
 # 设备类型货损要点

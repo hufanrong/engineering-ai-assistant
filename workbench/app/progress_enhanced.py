@@ -4,6 +4,7 @@ v0.1.82：设备安装位置与施工进度联动增强
 关键路径分析、施工进度预警、设备状态与位置联动、施工顺序优化。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -35,8 +36,7 @@ def _load_progress() -> dict:
 
 def _save_progress(progress: dict):
     _ensure_dirs()
-    with open(_progress_file_path(), "w", encoding="utf-8") as f:
-        json.dump(progress, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_progress_file_path(), progress, indent=2)
 
 
 def _get_all_devices_with_position() -> List[dict]:

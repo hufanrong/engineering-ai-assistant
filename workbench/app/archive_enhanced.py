@@ -4,6 +4,7 @@ v0.1.83：设备安装位置与竣工资料联动增强
 竣工资料清单自动生成、完整性检查、组卷优化、与设备状态联动。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -35,8 +36,7 @@ def _load_archive() -> dict:
 
 def _save_archive(archive: dict):
     _ensure_dirs()
-    with open(_archive_file_path(), "w", encoding="utf-8") as f:
-        json.dump(archive, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_archive_file_path(), archive, indent=2)
 
 
 # 设备类型竣工资料要求清单

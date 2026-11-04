@@ -5,6 +5,7 @@ v0.1.67：设备安装位置与竣工资料联动
 按车间/标高分组，资料缺失提醒。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime

@@ -1,6 +1,7 @@
 # 繁工AI 本地解析工作台 - 存储位置管理（v0.1.124）
 # 解析资源储存位置设置管理：查看/设置/迁移/恢复默认。
 # 配置持久化到 data/storage_config.json，config.py 加载时优先读取。
+from . import atomic_io as _atomic_io
 import os
 import shutil
 import json
@@ -37,8 +38,7 @@ def get_platform_root() -> str:
 def _save_config(cfg: dict) -> bool:
     try:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        _atomic_io.write_json(CONFIG_FILE, cfg, indent=2)
         return True
     except Exception:
         return False

@@ -237,7 +237,33 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #      而正常实现下 20 路并发「0 错误 / 索引 20 条 / 队列包 20 个 / 无残留 tmp」。
 #      改为 uuid 临时名 + 可重入锁 + 失败留痕；enqueue 的「查重—建包—写索引」
 #      整体进锁（_enqueue_locked），避免两个线程同时判定「没传过」。
-APP_VERSION = "0.1.198"
+# v0.1.199：把「原子写」收成一个唯一实现，全仓库统一调用（不再逐模块抄）。
+# v0.1.200：业务数据项目隔离收成一个实现（app/project_scope.py）。
+#   实测缺陷：construction_logs / doc_relations / docplan_tasks / equipment_merge /
+#   piping_network / rejected_candidates / tag_alias / version_map 这 8 个业务文件
+#   全写进全局 data/，且路径是模块级常量或 lazy-init 常量——① 项目 A 的数据出现在
+#   项目 B；② 切项目后常量不复算，仍写旧路径（与 v0.1.195 的 PROJECTS_ROOT 事故同源）。
+#   证据：projects/ 下 91 个项目目录里这 8 个文件一个都没有，而全局 data/ 的
+#   version_map.json 躺着 12 个文件名 / 200+ 条版本记录，不属于任何项目。
+#   v0.1.197/v0.1.198 连着修了三处同源缺陷，说明问题不在某个模块写错，
+#   而在「每个模块自己写一遍落盘逻辑」这种结构 —— 只要还分散着，
+#   下次新增模块照样会重犯。所以新增 app/atomic_io.py：
+#       write_json(path, obj, indent)  唯一原子写实现
+#       path_lock(path)                读改写要用的同一把锁
+#       read_json(path, default)       读失败留痕（不再无声兜底成 {}）
+#       sweep_orphan_tmp(root)         启动时清扫历史遗留临时文件
+#   全仓 69 处「直接 open(...,"w") 写最终文件 + json.dump」全部换成 write_json，
+#   涉及 50 个模块（设备台账/资料库索引/施工日志/隐蔽验收/方案清单/
+#   上传队列/关系图/空间模型/项目元数据/模板索引…）。语义完全不变：
+#   indent 与原样一致、返回行为不变、异常照旧向上抛。
+#
+#   顺带查到一个真实现场问题：equipment_merge 手写 mkstemp 却没在异常里
+#   清理临时文件。实测 data/projects/e75e857c/ 下积了 3 个 index.*.tmp，
+#   每个 127304 B、各存一份完整的 228 台设备索引（11-02 的三个时间点），
+#   白占 380 KB 并把设备数据在用户目录里重复了三份。改为 write_json，
+#   并在 run() 启动时调 sweep_orphan_tmp 自愈用户机器上已有的历史垃圾
+#   （实测已清除 3 个，228 台设备数据完好、coverage=1.0）。
+APP_VERSION = "0.1.200"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

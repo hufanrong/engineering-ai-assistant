@@ -3,6 +3,7 @@
 # 去重口径（v3.7 锁定）：SHA256 相同 → 去重；同名不同哈希（多版本）→ 保留全部，最新时间戳为准。
 # 合并后自动重建关联图谱 relations.json。
 
+from . import atomic_io as _atomic_io
 import os
 import io
 import json
@@ -117,8 +118,7 @@ def import_library(raw: bytes) -> dict:
             idx[sha] = info
             stats["index_added"] += 1
         os.makedirs(ddir, exist_ok=True)
-        with open(idx_path, "w", encoding="utf-8") as f:
-            json.dump(idx, f, ensure_ascii=False, indent=1)
+        _atomic_io.write_json(idx_path, idx, indent=1)
 
         # 2) 合并 parsed_cache（同 sha 内容一致即跳过；不一致以导入库为准覆盖，旧版备份 .conflict.json）
         cache_dir = os.path.join(ddir, "parsed_cache")

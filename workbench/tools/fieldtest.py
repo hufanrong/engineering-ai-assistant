@@ -847,18 +847,51 @@ def run(args):
             "新项目里施工日志/隐蔽/吊装/安装方案记录数均为 0（旧版会读到上个项目的）",
             "；".join(iso_detail), iso_all_zero)
 
-        # 本轮不许再往全局 data/ 写这些文件
+        # v0.1.199：全局 data/ 里不许再出现**业务数据**文件。
+        # 原来只查 mtime > RUN_START_TS，「早就躺在全局目录里的旧文件」全部漏检；
+        # 实测：data/ 根目录长期存在 version_map.json（12 个文件 / 200+ 条版本记录），
+        # 它不属于 projects/ 下任何一个项目，换项目看到的还是上一批的版本历史。
+        # 拆成两条记录，避免把「历史遗留待迁移」和「本轮新写」混为一谈：
+        #   · 本轮新写入全局 → 硬失败（说明代码路径仍在写全局）
+        #   · 历史遗留业务数据 → 只列清单不判失败（是否迁走/删除要用户确认，不擅自处理）
         gdir = data_dir()
-        stray = []
-        for _, _, _, fname in iso_probe:
-            gp = os.path.join(gdir, fname)
+        project_owned = [
+            "construction_logs.json", "doc_relations.json", "docplan_tasks.json",
+            "equipment_merge.json", "piping_network.json", "rejected_candidates.json",
+            "tag_alias.json", "tag_alias_pending.json", "version_map.json",
+            "spatial_model.json", "device_workshop.json", "workshop_assign.json",
+            "field_pulled.json", "field_record_results.json", "relations.json",
+            "relations_graph.json", "confirmed_relations.json", "file_level.json",
+        ]
+        APP_LEVEL = ("current_project.json", "storage_config.json", "operation_log.jsonl")
+        legacy_stray = []
+        for fname in project_owned:
             try:
-                if os.path.exists(gp) and os.path.getmtime(gp) > RUN_START_TS:
-                    stray.append(fname)
+                if os.path.exists(os.path.join(gdir, fname)):
+                    legacy_stray.append(fname)
             except Exception:  # noqa: BLE001
                 pass
-        rec("业务数据不写全局 data", "本轮新写入不落全局 data/（旧版全部写这里）",
-            ("本轮写入全局的：" + "、".join(stray)) if stray else "无", not stray)
+        # 本轮新写的（含清单外的未登记文件）：mtime 晚于本轮启动
+        fresh_stray = []
+        try:
+            for fn in os.listdir(gdir):
+                if not (fn.endswith(".json") or fn.endswith(".jsonl")):
+                    continue
+                if fn in APP_LEVEL:
+                    continue  # 应用级配置，按设计就该在全局
+                gp = os.path.join(gdir, fn)
+                if os.path.isfile(gp) and os.path.getmtime(gp) > RUN_START_TS:
+                    fresh_stray.append(fn)
+        except Exception:  # noqa: BLE001
+            pass
+        fresh_stray = sorted(set(fresh_stray))
+        legacy_stray = sorted(set(legacy_stray) - set(fresh_stray))
+        rec("业务数据不写全局 data", "本轮没有业务数据写进全局 data/（旧版全部写这里）",
+            ("本轮写入全局：" + "、".join(fresh_stray)) if fresh_stray else "无",
+            not fresh_stray)
+        rec("全局 data 历史遗留业务数据清单",
+            "列出全局 data/ 下尚未归属任何项目的业务数据文件（不判失败，是否迁走由用户确认）",
+            ("遗留：" + "、".join(legacy_stray)) if legacy_stray else "无", None)
 
         _, st_b, _ = call("GET", "/api/completion-archive/stats")
         dev_b = jget(st_b, "total_devices")

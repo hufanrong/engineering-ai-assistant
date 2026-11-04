@@ -14,6 +14,7 @@ v0.1.87：多电脑并库时矿山设备数据合并
 - 完整性检查
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import datetime
@@ -52,8 +53,7 @@ def _save_merge_log(log: list):
     _ensure_dirs()
     # 保留最近100条
     log = log[-100:]
-    with open(_merge_log_file_path(), "w", encoding="utf-8") as f:
-        json.dump(log, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_log_file_path(), log, indent=2)
 
 
 def _add_merge_log(action: str, details: dict, source_node: str = "unknown"):
@@ -79,8 +79,7 @@ def _load_pending() -> list:
 
 def _save_pending(pending: list):
     _ensure_dirs()
-    with open(_pending_file_path(), "w", encoding="utf-8") as f:
-        json.dump(pending, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_pending_file_path(), pending, indent=2)
 
 
 def _calculate_device_md5(device: dict) -> str:

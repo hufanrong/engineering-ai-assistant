@@ -8,15 +8,16 @@
 #   3. 资料内容中的位号/车间（正则扫描 docx 文本）
 #   4. 已上传资料文件的文件名匹配
 
+from . import atomic_io as _atomic_io
 import os
 import re
 import json
 import datetime
 
 from . import config
+from . import project_scope as _scope
 
-
-_RELATIONS_FILE = os.path.join(config.DATA_DIR, "doc_relations.json")
+_REL_NAME = "doc_relations.json"
 
 # 位号正则：P-101, V-201, E-101A, T-301 等
 _TAG_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{1,4}-\d{2,4}[A-Z]?)(?![A-Z0-9])")
@@ -26,20 +27,21 @@ _WORKSHOP_RE = re.compile(
 )
 
 
+def _relations_file() -> str:
+    """v0.1.199：资料-设备关联随项目隔离（原来写死全局 data/，
+    项目 A 关联的资料会算进项目 B 的完整性检查）。"""
+    return _scope.path(_REL_NAME)
+
+
 def _load() -> dict:
-    if os.path.exists(_RELATIONS_FILE):
-        try:
-            with open(_RELATIONS_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:  # noqa: BLE001
-            return {}
+    data, _src = _scope.load_with_migration(_REL_NAME)
+    if isinstance(data, dict) and data:
+        return data
     return {}
 
 
 def _save(data: dict):
-    os.makedirs(os.path.dirname(_RELATIONS_FILE), exist_ok=True)
-    with open(_RELATIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_relations_file(), data, indent=2)
 
 
 def extract_from_text(text: str) -> dict:

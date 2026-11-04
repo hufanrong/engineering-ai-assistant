@@ -16,13 +16,15 @@ v0.1.47：设备间管线/连接关系
 - 无法确定的连接留人工确认
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import re
 import math
 from . import config
+from . import project_scope as _scope
 
-PIPING_FILE = None
+_PIPING_NAME = "piping_network.json"
 
 # 管线介质前缀映射（常见PID图例）
 PIPE_MEDIUM_MAP = {
@@ -40,27 +42,20 @@ PIPE_MEDIUM_MAP = {
 }
 
 
-def _ensure():
-    global PIPING_FILE
-    if PIPING_FILE is None:
-        PIPING_FILE = os.path.join(config.DATA_DIR, "piping_network.json")
+def _piping_file() -> str:
+    """v0.1.199：管线网络随项目隔离（原来写死全局 data/，切项目仍写旧路径）。"""
+    return _scope.path(_PIPING_NAME)
 
 
 def _load() -> dict:
-    _ensure()
-    if os.path.exists(PIPING_FILE):
-        try:
-            with open(PIPING_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:  # noqa: BLE001
-            return {}
+    data, _src = _scope.load_with_migration(_PIPING_NAME)
+    if isinstance(data, dict) and data:
+        return data
     return {"pipes": {}, "connections": [], "device_pipes": {}}
 
 
 def _save(m: dict):
-    _ensure()
-    with open(PIPING_FILE, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=1)
+    _atomic_io.write_json(_piping_file(), m, indent=1)
 
 
 # ---------------- 管线提取 ----------------

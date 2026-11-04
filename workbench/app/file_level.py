@@ -17,6 +17,7 @@
 - 人工登记(source=manual) 不被自动覆盖；
 - 存储按项目隔离（与 workshop_assign 一致）。
 """
+from . import atomic_io as _atomic_io
 import datetime
 import json
 import os
@@ -156,8 +157,7 @@ def _load() -> dict:
 def _save(m: dict):
     p = _level_file()
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(p, m, indent=2)
 
 
 def detect_level(file_name: str = "", file_type: str = "", workshop: str = "",

@@ -5,6 +5,7 @@ v0.1.72：多电脑并库时竣工资料合并增强
 增强冲突处理，合并后自动触发完整性检查。
 """
 
+from . import atomic_io as _atomic_io
 import os
 import json
 import hashlib
@@ -37,8 +38,7 @@ def _load_merge() -> dict:
 
 def _save_merge(merge: dict):
     _ensure_dirs()
-    with open(_merge_file_path(), "w", encoding="utf-8") as f:
-        json.dump(merge, f, ensure_ascii=False, indent=2)
+    _atomic_io.write_json(_merge_file_path(), merge, indent=2)
 
 
 def _calculate_md5(content: str) -> str:
@@ -77,8 +77,7 @@ def _write_back_archive(archive: dict):
     try:
         archive_file = _pp.data_file_with_legacy("completion_archive.json")
         _pp.data_dir()
-        with open(archive_file, "w", encoding="utf-8") as f:
-            json.dump(archive, f, ensure_ascii=False, indent=2)
+        _atomic_io.write_json(archive_file, archive, indent=2)
     except Exception:
         pass
 
