@@ -5,6 +5,7 @@ import os
 import json
 import threading
 import datetime
+import uuid
 
 from . import config
 from parsers.engines import parse_file, ParseResult
@@ -50,10 +51,53 @@ def _load_index(data_dir=None) -> dict:
     return {}
 
 
+# v0.1.198：索引写盘必须**原子替换**，且并发写要串行化。
+#
+# 实测事故（同一份 2000 条文件的索引，121831 B）：
+#   原来 `open(idx_file, "w")` 直接覆盖写 —— 写到一半断电/进程被杀（现场是
+#   用户在扫描大目录时关机、或笔记本电池耗尽），磁盘上留下 **半截 JSON**
+#   (实测 60915 B)，`_load_index()` 的 except 静默返回 `{}`：
+#     JSONDecodeError: Unterminated string starting at line 4075
+#     → _load_index 兜底返回 {}
+#   结果是**用户整个资料库索引全部丢失，界面上一个字都不报** ——
+#   已解析的 2000 个文件全被当成「没处理过」，重扫一遍要几小时；
+#   设备台账、"已入库"去重记录、文件状态全部归零。
+#
+#   这不是理论风险：index.json 是每 50 个文件落一次盘的**全量重写**，
+#   文件越写越大（现场上千条），写盘窗口越来越长，撞上断电的概率随之变高。
+#
+#   两处改动：
+#     ① 写临时文件再 os.replace —— 替换是原子操作，要么旧文件完整、要么新文件完整，
+#        绝不会出现半截；临时文件名带 uuid，两路并发不会互抢同一个 .tmp；
+#     ② 模块级可重入锁包住「读—改—写」——扫描线程与网页上传线程会同时改索引，
+#        不加锁时后写的用旧快照整份覆盖，先写的条目凭空消失。
+_INDEX_LOCK = threading.RLock()
+
+
 def _save_index(idx: dict, data_dir=None):
+    """原子写索引：先写唯一临时文件、再 os.replace 替换。
+
+    v0.1.198：直接覆盖写在写到一半崩溃时会留下半截 JSON，
+    _load_index 静默返回 {} → 用户整个资料库索引全部丢失（实测复现见上方注释）。
+    """
     idx_file = _ensure(data_dir)
-    with open(idx_file, "w", encoding="utf-8") as f:
-        json.dump(idx, f, ensure_ascii=False, indent=1)
+    with _INDEX_LOCK:
+        tmp = f"{idx_file}.{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(idx, f, ensure_ascii=False, indent=1)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())   # 落盘再替换，断电后新文件也是完整的
+                except OSError:
+                    pass
+            os.replace(tmp, idx_file)
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
 
 
 # 支持处理的扩展名集合（含未启用解析的类型，便于状态展示）

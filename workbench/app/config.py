@@ -219,7 +219,25 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #        （实测 6 路并发最终只剩 2 条）。
 #   改为 uuid 临时名 + 模块级可重入锁 + _update_archive 原子入口；
 #   批量接口(_all)只读一次、只写一次，不再逐台落盘。
-APP_VERSION = "0.1.197"
+# v0.1.198：把 v0.1.197 的「整份 JSON 读改写」缺陷在另外两处一并扫掉。
+#   同一缺陷模式横向排查，又找到两个高频写盘点，都跟竣工清单同一根因：
+#   ① app/scanner.py::_save_index —— 资料库索引（用户全部已入库文件清单）
+#      原来 open(path,"w") 直接覆盖写。实测：2000 条 / 121831 B 的索引，
+#      写到第 4075 行附近中断 → 文件剩 60915 B 半截 JSON，json.load 抛
+#      JSONDecodeError: Unterminated string，而 _load_index 的 except 把
+#      异常吞成 {} → 用户整个资料库索引（含已解析文件、向量、标签）全部消失，
+#      但上传的原始文件还在，表现为「入库了一堆文件，列表却是空的」。
+#      改为 uuid 临时名 + os.fsync + os.replace 原子替换 + 模块级可重入锁；
+#      实测同样中断后仍是 121831 B、完整 2000 条。
+#   ② app/upload_queue.py::_save_idx —— 上传队列的 sha256 去重索引。
+#      原来 tmp 名固定为 path+".tmp"，并发上传时互相踩踏；且 except 只 pass，
+#      写盘失败连一行日志都没有，后果是去重索引悄悄失效（同一文件反复入队、
+#      反复解析）。实测反向验证：并发入队刷出
+#        [Errno 2] No such file or directory: .../_sha_index.json.tmp
+#      而正常实现下 20 路并发「0 错误 / 索引 20 条 / 队列包 20 个 / 无残留 tmp」。
+#      改为 uuid 临时名 + 可重入锁 + 失败留痕；enqueue 的「查重—建包—写索引」
+#      整体进锁（_enqueue_locked），避免两个线程同时判定「没传过」。
+APP_VERSION = "0.1.198"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

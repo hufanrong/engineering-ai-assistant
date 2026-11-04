@@ -8,6 +8,8 @@ import json
 import time
 import shutil
 import datetime
+import threading
+import uuid
 import requests
 
 from . import config
@@ -61,14 +63,36 @@ def _load_idx() -> dict:
         return {}
 
 
+# v0.1.198：队列索引与扫描器索引是同一类缺陷，一起修。
+#   ① 固定名字的 ".tmp"：两路同时上传/扫描时，A 把 .tmp rename 走了，
+#      B 再 rename 就报「不存在」→ 走 except 静默 pass，**索引更新被悄悄丢掉**；
+#      Windows 上 A 还持有句柄时 B 直接 PermissionError。
+#   ② 原来 except 一律 pass，等于把写盘失败吞掉 —— 用户看不到任何提示，
+#      只是发现"队列里明明传了文件，下次扫描又重复入队"。
+_IDX_LOCK = threading.RLock()
+
+
 def _save_idx(idx: dict) -> None:
-    try:
-        tmp = _idx_path() + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(idx, f, ensure_ascii=False)
-        os.replace(tmp, _idx_path())
-    except Exception:  # noqa: BLE001
-        pass
+    """原子写队列索引。临时文件名必须唯一，否则并发写互相踩踏（见上）。"""
+    with _IDX_LOCK:
+        path = _idx_path()
+        tmp = f"{path}.{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(idx, f, ensure_ascii=False)
+            os.replace(tmp, path)
+        except Exception as _e:  # noqa: BLE001
+            # 不再静默：索引写失败会让去重失效、文件重复入队，必须留痕
+            try:
+                print(f"[upload_queue] 索引写盘失败（去重可能失效）：{_e}")
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _rebuild_idx() -> dict:
@@ -97,6 +121,19 @@ def enqueue(parse_result) -> str:
     v0.1.138：payload 附带 project_id/project_name，云端按项目合并（同项目合并，不同项目不合并）。
     v0.1.144：按 sha256 去重——队列中已有相同内容的包时跳过（重复解析不重复入队）。"""
     _ensure()
+    # v0.1.198：整个「查去重 → 打包落盘 → 更新索引」必须在一把锁里。
+    # 原来这三步裸奔，扫描线程与网页上传线程同时入队时：
+    #   A 读到 idx（还没有 B 的 sha）→ 落盘 A 的包 → 写回 idx（只有 A）
+    #   B 同一时刻也读到同一份 idx → 落盘 B 的包 → 写回 idx（只有 B，A 被覆盖）
+    # 结果队列里有两个包（文件都在），但索引只剩 B 的条目 → A 的 sha 去重失效，
+    # 下次再扫同一个文件又入队一次，队列无限膨胀。
+    # 锁必须是可重入的：_save_idx 内部也要拿同一把锁。
+    with _IDX_LOCK:
+        return _enqueue_locked(parse_result)
+
+
+def _enqueue_locked(parse_result) -> str:
+    """enqueue 的主体。**调用方必须已持有 _IDX_LOCK。**"""
     # v0.1.144 去重；v0.1.177 改为 O(1) 索引查表（原实现逐包打开读，队列到 357 个时整站假死）
     idx = _load_idx()
     if not idx and os.path.isdir(QUEUE_DIR):
