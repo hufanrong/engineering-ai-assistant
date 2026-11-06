@@ -531,7 +531,24 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     顶层 sha 形键条目（去重），剔除 INDEX_RESERVED_KEYS 与新增的
 #     INDEX_AUX_KEYS（ledger_skipped_rows 这类非文件辅助键）；
 #     /api/status 与 project_backup 统计统一调它。
-APP_VERSION = "0.1.209"
+#
+# v0.1.210 —— 把「同一事实两个答案」挡在本地实测阶段
+#     v0.1.206~209 修的四个缺陷（版本号、待上传数、已入库文件数）有一个共性：
+#     每个接口单独看都返回 ok:true、界面点着也像正常，只有把**同一时刻的两个
+#     来源**摆在一起比才露馅。这类缺陷靠人工点界面永远发现不了 ——
+#     WORKbuddy 上一轮报告 53 项全过，可它同一份报告里 queue_pending=3、
+#     indexed_files=6 两个数字本身就是错的；它没有「交叉比对」这项断言。
+#     改动：tools/selftest.py 新增阶段⑥「同一事实交叉比对」，8 项断言成对比较
+#       /api/status.version        vs /api/update/check.current_version
+#       /api/status.queue_pending  vs /api/queue.pending vs len(queue.items)
+#       /api/status.indexed_files  vs /api/files.total vs len(files.files)
+#       /api/relations.devices     vs relations.stats.devices vs spatial.structure
+#       /api/projects.total        vs len(projects)
+#     本阶段全部只读（有 153 条写路由，其中 /api/queue/clear 会真删数据）。
+#     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
+#     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
+#     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
+APP_VERSION = "0.1.210"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

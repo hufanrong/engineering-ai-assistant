@@ -1036,6 +1036,135 @@ def phase5(samples_dir):
            json.dumps({k: pf.get(k) for k in ("total_failed", "by_ext")}, ensure_ascii=False)[:250])
 
 
+# ---------------- 阶段 6：同一事实交叉比对 ----------------
+def phase6(samples_dir):
+    """验证「同一件事，不同接口给出同一个答案」。
+
+    v0.1.210 新增。背景是本项目**反复出现**的一类缺陷：两个接口对同一
+    事实给出不同数值，而每一个接口单独看都「正常返回 ok:true」。
+    已发生的实例（都对同一份实测数据交叉比对出来的）：
+      · /api/update/check 的 current_version=0.0.0 vs /api/status 的 version=0.1.205
+      · /api/status 的 queue_pending=2 vs /api/queue 的 items=1（索引被算成包）
+      · /api/status 的 indexed_files=6 vs /api/files 的 total=1（数了顶层键）
+    上面每一个在人工点界面时都看不出来，只能靠把**同一时刻的两个来源**
+    摆在一起比。所以这里不测业务功能，只把它们成对比较。
+
+    注意：本阶段必须全部是**只读**接口。项目里有 153 条 POST/PUT/DELETE
+    路由，其中 /api/queue/clear 这类会真的删数据 —— 自测绝不能碰写接口。
+    """
+    P = 6
+    print("\n=== 阶段 6：同一事实交叉比对 ===")
+
+    # 6.1 版本号：/api/status 与 /api/update/check 的 current_version
+    code_s, st, err_s = call("GET", "/api/status")
+    code_u, up, err_u = call("GET", "/api/update/check", timeout=60)
+    v_status = (st or {}).get("version") if isinstance(st, dict) else None
+    v_current = (up or {}).get("current_version") if isinstance(up, dict) else None
+    same = bool(v_status) and bool(v_current) and str(v_status) == str(v_current)
+    record(P, "版本号两处一致",
+           "/api/status.version == /api/update/check.current_version",
+           f"status={v_status} update.current={v_current}",
+           same,
+           f"update 返回 source={(up or {}).get('source')} latest={(up or {}).get('latest_version')}")
+
+    # 6.2 版本号不得是 0.0.0（这是「检查更新永远说已是最新」的症状）
+    not_placeholder = bool(v_status) and str(v_status) != "0.0.0"
+    record(P, "版本号不是占位值",
+           "version 不等于 0.0.0",
+           f"status.version={v_status}", not_placeholder,
+           "0.0.0 说明取值路径打空了（读 config.VERSION 之类），检查更新会永远失效")
+
+    # 6.3 待上传数：/api/status.queue_pending 与 /api/queue
+    code_q, q, err_q = call("GET", "/api/queue")
+    n_pending_status = (st or {}).get("queue_pending") if isinstance(st, dict) else None
+    n_pending_api = (q or {}).get("pending") if isinstance(q, dict) else None
+    n_pending_items = len((q or {}).get("items") or []) if isinstance(q, dict) else None
+    ok3 = (isinstance(n_pending_status, int) and isinstance(n_pending_api, int)
+           and n_pending_status == n_pending_api == n_pending_items)
+    record(P, "待上传数两处一致",
+           "status.queue_pending == queue.pending == len(queue.items)",
+           f"status={n_pending_status} api={n_pending_api} items={n_pending_items}",
+           ok3, "items 里混进内部索引时，pending 会多算，items 却是真包数")
+
+    # 6.4 已入库文件数：/api/status.indexed_files 与 /api/files.total
+    code_f, fl, err_f = call("GET", "/api/files")
+    n_idx_status = (st or {}).get("indexed_files") if isinstance(st, dict) else None
+    n_files_total = (fl or {}).get("total") if isinstance(fl, dict) else None
+    n_files_list = len((fl or {}).get("files") or []) if isinstance(fl, dict) else None
+    ok4 = (isinstance(n_idx_status, int) and isinstance(n_files_total, int)
+           and n_idx_status == n_files_total == n_files_list)
+    record(P, "已入库文件数两处一致",
+           "status.indexed_files == files.total == len(files.files)",
+           f"status={n_idx_status} total={n_files_total} list={n_files_list}",
+           ok4, "status 若数索引顶层键数，会报成 6 而列表只有 1 条")
+
+    # 6.5 设备数：/api/relations 的 devices 列表与其自身 stats
+    code_r, rel, err_r = call("GET", "/api/relations", timeout=60)
+    devs = (rel or {}).get("devices") if isinstance(rel, dict) else None
+    stats = (rel or {}).get("stats") or {}
+    n_dev_list = len(devs) if isinstance(devs, list) else None
+    n_dev_stats = stats.get("devices") if isinstance(stats, dict) else None
+    ok5 = isinstance(n_dev_list, int) and isinstance(n_dev_stats, int) and n_dev_list == n_dev_stats
+    record(P, "设备数自身一致",
+           "len(relations.devices) == relations.stats.devices",
+           f"list={n_dev_list} stats={n_dev_stats}",
+           ok5, f"from_ledger={stats.get('devices_from_ledger') if isinstance(stats, dict) else '-'}")
+
+    # 6.6 设备数：/api/relations 与 /api/spatial/structure 必须同一套
+    code_sp, sp, err_sp = call("GET", "/api/spatial/structure", timeout=60)
+    sp_ok = code_sp == 200 and isinstance(sp, dict) and sp.get("ok") is True
+    if sp_ok:
+        # 结构：workshops.<ws>.devices
+        ws_map = sp.get("workshops") or {}
+        n_sp = 0
+        if isinstance(ws_map, dict):
+            for wsv in ws_map.values():
+                if isinstance(wsv, dict):
+                    n_sp += len(wsv.get("devices") or {})
+                elif isinstance(wsv, list):
+                    n_sp += len(wsv)
+        ok6 = isinstance(n_dev_list, int) and n_sp == n_dev_list
+        record(P, "设备数跨接口一致",
+               "relations.devices 条数 == spatial.structure 汇总台数",
+               f"relations={n_dev_list} spatial={n_sp}", ok6,
+               "两个接口都是给界面看的台数，不等就说明有一套统计口径错了")
+    else:
+        record(P, "设备数跨接口一致", "spatial.structure 可用",
+               f"{code_sp} ok={(sp or {}).get('ok') if isinstance(sp, dict) else '-'} msg={(sp or {}).get('message') if isinstance(sp, dict) else '-'}",
+               None, "空间模型未构建时跳过，不算失败")
+
+    # 6.7 车间数：/api/relations 的 devices 里出现的车间 vs /api/workshops 的 docgen 清单
+    # 两者不一定相等（文档级归属与设备级归属本就是两件事），所以这里只断言
+    # 「设备里出现的车间数」本身可算且不为 0，避免把假空列表当成正常。
+    if isinstance(devs, list) and devs:
+        ws_names = set()
+        for d in devs:
+            wv = d.get("workshops")
+            if isinstance(wv, list):
+                ws_names.update(x for x in wv if x)
+            elif isinstance(wv, str) and wv:
+                ws_names.add(wv)
+        n_ws_dev = len(ws_names)
+        ok7 = n_ws_dev >= 1
+        record(P, "设备车间归属可解析",
+               "至少能解析出 1 个车间名",
+               f"设备覆盖车间={n_ws_dev}", ok7,
+               f"示例={sorted(ws_names)[:5]}")
+    else:
+        record(P, "设备车间归属可解析", "relations 返回了设备", "设备列表为空", None,
+               "当前项目无设备时跳过")
+
+    # 6.8 项目数：/api/projects.total 与列表长度
+    code_p, pj, err_p = call("GET", "/api/projects")
+    n_total = (pj or {}).get("total") if isinstance(pj, dict) else None
+    n_plist = len((pj or {}).get("projects") or []) if isinstance(pj, dict) else None
+    ok8 = isinstance(n_total, int) and isinstance(n_plist, int) and n_total == n_plist
+    record(P, "项目数两处一致",
+           "projects.total == len(projects)",
+           f"total={n_total} list={n_plist}", ok8,
+           "磁盘目录数可能更多（exports 目录、只剩 exports 的空壳不算项目），属正常")
+
+
 def _walk_keys(obj, depth=0):
     """递归收集 dict 的键名，用于检查导出包里有没有不该出现的字段。"""
     out = []
@@ -1073,7 +1202,8 @@ def write_report(out_path_json, out_path_md, samples_dir):
              "| 阶段 | 通过 | 失败 | 跳过 |", "|---|---|---|---|"]
     names = {1: "① 解析/分类/资料库", 2: "② 资料生成管理",
              3: "③ 竣工资料生成", 4: "④ 竣工图清稿",
-             5: "⑤ 使用遥测/脱敏自检"}
+             5: "⑤ 使用遥测/脱敏自检",
+             6: "⑥ 同一事实交叉比对"}
     for ph in sorted(PHASE_SUMMARY):
         s = PHASE_SUMMARY[ph]
         lines.append(f"| {names.get(ph, ph)} | {s['passed']} | {s['failed']} | {s['skipped']} |")
@@ -1098,7 +1228,7 @@ def write_report(out_path_json, out_path_md, samples_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--phase", default="all",
-                    help="1/2/3/4/5/all（可逗号分隔，如 1,2）")
+                    help="1/2/3/4/5/6/all（可逗号分隔，如 1,2）")
     ap.add_argument("--keep-samples", action="store_true", help="保留样本目录")
     ap.add_argument("--base", default=None, help="工作台地址，默认 127.0.0.1:8756")
     ap.add_argument("--inproc", metavar="WORKBENCH_DIR", default=None,
@@ -1144,14 +1274,17 @@ def main():
 
     phases = a.phase
     if phases == "all":
-        want = [1, 2, 3, 4, 5]
+        # v0.1.210：加阶段 6（同一事实交叉比对）。它只读、不建样本、
+        # 不切项目，放在最后跑，前面各阶段留下的索引/队列状态正好被它验。
+        want = [1, 2, 3, 4, 5, 6]
     else:
         want = [int(x) for x in phases.split(",") if x.strip().isdigit()]
 
     try:
         for ph in want:
             try:
-                {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5}[ph](sdir)
+                {1: phase1, 2: phase2, 3: phase3, 4: phase4,
+                 5: phase5, 6: phase6}[ph](sdir)
             except Exception:
                 traceback.print_exc()
                 record(ph, "阶段执行异常", "无异常", traceback.format_exc()[-300:], False)
