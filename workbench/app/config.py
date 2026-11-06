@@ -496,7 +496,25 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     修法：raw 加两次重试（3 次机会）；API 兜底改从 contents API 取
 #           config.py 原文再读 APP_VERSION，与 raw 同一数据源；
 #           两者都取不到时明确返回 ok=false 报错，绝不拿猜的值冒充。
-APP_VERSION = "0.1.207"
+# v0.1.208：上传队列口径不一致，索引文件被当成待上传包。
+#     实测（2026-11-06，项目 322fef90 的 upload_queue 目录）：
+#       目录实际内容 = 1 个真包 + 内部索引 _sha_index.json
+#       pending_count() = 2        （错，把索引算进去）
+#       list_pending()  = 1 条     （对）
+#     同一队列、同一时刻两个接口给出不同答案；/api/status 的 queue_pending
+#     就是这个 pending_count —— WORKbuddy 本机报告 queue_pending: 3，
+#     同样是「2 个真包 + 索引」被算成 3。
+#     危害不止计数：
+#       · upload_all 会把 _sha_index.json 当包读，payload['payload'] 直接
+#         KeyError，被记进「上传失败」→ 用户看到「1 成功 1 失败」，
+#         而失败的那一条根本不存在；
+#       · clear_all 会把索引一起删掉，索引丢了下次入队要全量扫队列，
+#         正是 v0.1.177 修过的 O(n²) 假死场景；
+#       · remove_packages 若被传入索引名也会删掉它。
+#     修法：抽 _queue_files() 统一过滤（排除以 `_` 开头的内部文件），
+#           pending_count / list_pending / upload_all / clear_all /
+#           remove_packages 全部走它，口径只有一个。
+APP_VERSION = "0.1.208"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

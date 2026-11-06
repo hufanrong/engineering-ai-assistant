@@ -195,28 +195,50 @@ def _node_id() -> str:
     return nid
 
 
+def _queue_files() -> list:
+    """列出队列里真正的待上传包文件名（已排序）。
+
+    v0.1.208：三个读取点（pending_count / list_pending / upload_all / clear_all）
+    原来各自写 `f.endswith(".json")`，把内部索引文件 `_sha_index.json`
+    一起算了进去。实测（2026-11-06，项目 322fef90）：
+      队列目录实际 = 1 个真包 + _sha_index.json
+      pending_count() = 2        （错，多算 1）
+      list_pending()  = 1 条     （对）
+    同一队列、同一时刻两个接口给出不同答案；WORKbuddy 报告里
+    queue_pending: 3 同样是「2 个真包 + 索引」被算成 3。
+    更严重的是上传路径：upload_all 会把 _sha_index.json 当包读，
+    payload['payload'] 直接 KeyError，被记成「上传失败」——
+    用户看到「1 成功 1 失败」，而失败的那一条根本不存在。
+    clear_all 也会把索引一起删掉，索引丢失后下次入队全量重建。
+    统一走这里，排除以 `_` 开头的内部文件。
+    """
+    _ensure()
+    return sorted(f for f in os.listdir(QUEUE_DIR)
+                  if f.endswith(".json") and not f.startswith("_")
+                  and f != _IDX_FILE)
+
+
 def pending_count() -> int:
     _ensure()
-    return len([f for f in os.listdir(QUEUE_DIR) if f.endswith(".json")])
+    return len(_queue_files())
 
 
 def list_pending() -> list:
     _ensure()
     out = []
-    for f in sorted(os.listdir(QUEUE_DIR)):
-        if f.endswith(".json"):
-            try:
-                with open(os.path.join(QUEUE_DIR, f), encoding="utf-8") as fh:
-                    p = json.load(fh)
-                out.append({
-                    "package": f,
-                    "file_name": p["payload"]["file_name"],
-                    "sha256": p["payload"]["sha256"],
-                    "status": p["payload"]["status"],
-                    "created_at": p["created_at"],
-                })
-            except Exception:  # noqa: BLE001
-                continue
+    for f in _queue_files():
+        try:
+            with open(os.path.join(QUEUE_DIR, f), encoding="utf-8") as fh:
+                p = json.load(fh)
+            out.append({
+                "package": f,
+                "file_name": p["payload"]["file_name"],
+                "sha256": p["payload"]["sha256"],
+                "status": p["payload"]["status"],
+                "created_at": p["created_at"],
+            })
+        except Exception:  # noqa: BLE001
+            continue
     return out
 
 
@@ -246,7 +268,7 @@ def upload_all(packages: list = None, progress_cb=None) -> dict:
     headers = {}
     if config.CLOUD_API_KEY:
         headers["Authorization"] = f"Bearer {config.CLOUD_API_KEY}"
-    files = [f for f in os.listdir(QUEUE_DIR) if f.endswith(".json")]
+    files = _queue_files()
     if packages:
         want = {p if p.endswith(".json") else p + ".json" for p in packages}
         files = [f for f in files if f in want]
@@ -288,16 +310,20 @@ def _log(action: str, package: str, file_name: str, result: str, detail: str):
 
 def clear_all() -> dict:
     """清空上传队列（v0.1.144）。返回 {deleted, message}。
-    仅删除队列中的 .json 包文件，不影响已解析入库的数据和 upload_log。"""
+    仅删除队列中的 .json 包文件，不影响已解析入库的数据和 upload_log。
+
+    v0.1.208：原来用 `f.endswith(".json")` 扫目录，会把内部索引
+    `_sha_index.json` 一起删掉。索引丢失虽能自动重建，但重建要全量扫队列，
+    队列大时正是 v0.1.177 修过的那个 O(n²) 假死场景。改为只删真包。
+    """
     _ensure()
     deleted = 0
-    for f in os.listdir(QUEUE_DIR):
-        if f.endswith(".json"):
-            try:
-                os.remove(os.path.join(QUEUE_DIR, f))
-                deleted += 1
-            except Exception:  # noqa: BLE001
-                pass
+    for f in _queue_files():
+        try:
+            os.remove(os.path.join(QUEUE_DIR, f))
+            deleted += 1
+        except Exception:  # noqa: BLE001
+            pass
     _log("clear_queue", "-", "-", "ok", f"清空 {deleted} 个队列包")
     return {"deleted": deleted, "message": f"已清空 {deleted} 个待上传包"}
 
@@ -306,9 +332,10 @@ def remove_packages(packages: list) -> dict:
     """从队列中移除指定包（v0.1.144）。packages 为包文件名列表（不含 .json 也可）。"""
     _ensure()
     want = {p if p.endswith(".json") else p + ".json" for p in (packages or [])}
+    want.discard(_IDX_FILE)
     removed = 0
     for f in os.listdir(QUEUE_DIR):
-        if f.endswith(".json") and f in want:
+        if f.endswith(".json") and not f.startswith("_") and f in want:
             try:
                 os.remove(os.path.join(QUEUE_DIR, f))
                 removed += 1
