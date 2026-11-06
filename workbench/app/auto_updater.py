@@ -210,27 +210,48 @@ def _ensure_dirs():
 
 
 def get_current_version() -> str:
-    """获取当前版本号。"""
+    """获取当前版本号。
+
+    v0.1.206：这个函数此前恒返回 "0.0.0"，导致「检查更新」形同虚设。
+    实测：/api/update/check 返回 current_version=0.0.0，而 /api/status
+    同一时刻返回 version=0.1.205 —— 两个接口对同一件事给出不同答案。
+
+    根因是两条取值路径都打空了：
+      1) 读 config.VERSION —— config.py 里根本没有这个属性，
+         真实定义叫 APP_VERSION；
+      2) 回退到 main.py 里找 `version = "..."` —— main.py 里也没有这种
+         写法（版本号统一放在 config.py）。
+    两处都拿不到就落到最后的 "0.0.0"。
+
+    修法：先读 config.APP_VERSION（兼容旧名 VERSION），
+    再回退直接解析 config.py 源码里的 APP_VERSION = "..."。
+    """
     try:
         from . import config
-        if hasattr(config, 'VERSION'):
-            return config.VERSION
-    except Exception:
+        for attr in ("APP_VERSION", "VERSION"):
+            v = getattr(config, attr, None)
+            if v:
+                return str(v).strip()
+    except Exception:  # noqa: BLE001
         pass
-    
-    # 从 main.py 中读取
-    main_py = os.path.join(WORKSPACE_ROOT, "app", "main.py")
-    if os.path.isfile(main_py):
+
+    # 回退：直接解析 config.py 源码（config 导入失败时的兜底）
+    import re
+    for rel in (("app", "config.py"), ("app", "main.py")):
+        fp = os.path.join(WORKSPACE_ROOT, *rel)
+        if not os.path.isfile(fp):
+            continue
         try:
-            with open(main_py, "r", encoding="utf-8") as f:
+            with open(fp, "r", encoding="utf-8") as f:
                 content = f.read()
-            import re
-            match = re.search(r'version\s*=\s*"([^"]+)"', content)
-            if match:
-                return match.group(1)
-        except Exception:
+            for pat in (r'APP_VERSION\s*=\s*"([^"]+)"',
+                        r'VERSION\s*=\s*"([^"]+)"'):
+                match = re.search(pat, content)
+                if match:
+                    return match.group(1)
+        except Exception:  # noqa: BLE001
             pass
-    
+
     return "0.0.0"
 
 
@@ -258,17 +279,20 @@ def get_latest_version_from_github() -> Dict:
     """
     import re
     
-    # 方式1：从raw.githubusercontent.com读取main.py中的版本号（无频率限制）
+    # 方式1：从raw.githubusercontent.com读取 config.py 中的版本号（无频率限制）
+    # v0.1.206：原来这里读的是 workbench/app/main.py 里 `version = "..."`，
+    # 而版本号实际定义在 app/config.py 的 APP_VERSION —— 永远匹配不到，
+    # raw 方式必定落空、静默退回方式2。
     try:
-        raw_url = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/workbench/app/main.py"
+        raw_url = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/workbench/app/config.py"
         req = urllib.request.Request(raw_url)
         req.add_header("User-Agent", "FanGongAI-Updater")
         
         with urllib.request.urlopen(req, timeout=15) as response:
             content = response.read().decode("utf-8")
         
-        # 从main.py中提取版本号
-        version_match = re.search(r'version\s*=\s*"([^"]+)"', content)
+        # 从 config.py 中提取版本号
+        version_match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', content)
         if version_match:
             latest_version = version_match.group(1)
             current = get_current_version()
@@ -301,7 +325,11 @@ def get_latest_version_from_github() -> Dict:
         commit_date = data.get("commit", {}).get("committer", {}).get("date", "")
         
         version_match = re.search(r'v(\d+\.\d+\.\d+)', commit_msg)
-        latest_version = version_match.group(1) if version_match else "0.0.0"
+        # v0.1.206：提交信息里没有版本号时（例如 WORKbuddy 提交的是
+        # "test(workbuddy): 20261106_080711 status=passed"），原来直接填
+        # "0.0.0"，于是「最新版本」变成 0.0.0、永远显示已是最新。
+        # 改为回退到本机已知版本，绝不凭空给 0.0.0。
+        latest_version = version_match.group(1) if version_match else get_current_version()
         
         return {
             "ok": True,

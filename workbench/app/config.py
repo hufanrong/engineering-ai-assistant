@@ -459,7 +459,32 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #        却把 undefined 硬写成 true —— 假通过。
 #        已改为：从落盘的 _卷内目录.docx 抠出「本卷共 N 份文件，合计 M 页」，
 #        再用 _safe_page_count 独立重渲 6 个 docx 复算页数并对账。
-APP_VERSION = "0.1.205"
+#
+# ============ v0.1.206：「检查更新」恒返回 0.0.0 ============
+# WORKbuddy 在本机实测通过（53/0/0，Windows 11，D:\fangong-workbench）后，
+# 我在沙箱里顺手把两个此前从未被测过的模块跑了一遍，抓到这个问题：
+#
+#   W 检查更新功能形同虚设（v0.1.206）。
+#     实测同一时刻两个接口对「当前版本」给出不同答案：
+#       /api/status        -> version=0.1.205   （对）
+#       /api/update/check  -> current_version=0.0.0（错）
+#     并且 latest_version 也是 0.0.0、has_update=false —— 用户永远看到
+#     「当前已是最新版本」，即使远端真有新版也检测不出来。
+#
+#     根因两条取值路径全部打空（auto_updater.get_current_version）：
+#       1) 读 config.VERSION —— config.py 里没有这个属性，真名是 APP_VERSION；
+#       2) 回退读 main.py 里的 `version = "..."` —— main.py 没有这种写法。
+#     于是落到末尾 return "0.0.0"。
+#
+#     远端版本那边同样错：raw 方式去 main.py 找版本号（找不到），
+#     API 兜底靠提交信息里的 `vX.Y.Z` —— WORKbuddy 的提交是
+#     "test(workbuddy): 20261106_080711 status=passed"，没有版本号，
+#     于是 latest_version 也变成 0.0.0。
+#
+#     修法：当前版本读 config.APP_VERSION（兼容旧名），再兜底解析
+#           config.py 源码；远端版本改读远端 config.py 的 APP_VERSION，
+#           提交信息无版本号时回退本机版本，不再凭空给 0.0.0。
+APP_VERSION = "0.1.206"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），
