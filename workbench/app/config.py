@@ -514,7 +514,24 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     修法：抽 _queue_files() 统一过滤（排除以 `_` 开头的内部文件），
 #           pending_count / list_pending / upload_all / clear_all /
 #           remove_packages 全部走它，口径只有一个。
-APP_VERSION = "0.1.208"
+#
+# v0.1.209 ——「已入库文件数」同一个事实两个答案
+#     实测（2026-11-07，项目 322fef90，索引顶层 6 个键）：
+#       keys = files / devices / workshops / <一个 sha256> /
+#              ledger_skipped_rows / updated_at
+#       GET /api/status  indexed_files  → 6      （错，数的是顶层键数）
+#       GET /api/files   条目数          → 1      （对）
+#       真实已入库文件                    → 1 个（设备台账_真实_选矿厂.xlsx）
+#     6 对 1。WORKbuddy 本机报告里 indexed_files: 6 也是这个假数。
+#     同一处错误还藏在项目导入（project_backup）：它写
+#       len(idx["files"]) if isinstance(idx["files"], list) else len(idx)
+#     项目初始化后 files 恒为空列表 → 永远走 len(idx) 分支 → 导入完统计栏
+#     直接显示错的文件数；files 非空时又漏掉扁平 {sha: info} 写入的条目。
+#     修法：scanner 新增 count_index_files()，口径 = files 列表条目 +
+#     顶层 sha 形键条目（去重），剔除 INDEX_RESERVED_KEYS 与新增的
+#     INDEX_AUX_KEYS（ledger_skipped_rows 这类非文件辅助键）；
+#     /api/status 与 project_backup 统计统一调它。
+APP_VERSION = "0.1.209"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

@@ -110,6 +110,52 @@ SUPPORTED_EXTS = (
 # v0.1.134：索引保留键（非文件数据），遍历扁平键时必须跳过（P1 系列修复）
 INDEX_RESERVED_KEYS = ("files", "devices", "workshops", "version", "updated_at", "relations")
 
+# v0.1.209：索引里还有一类非文件键 —— 项目初始化/合并阶段会往顶层写
+# `ledger_skipped_rows` 等辅助数组。它不在 INDEX_RESERVED_KEYS 里（历史遗漏），
+# 但它同样不是文件条目。这里单独列出已知的非文件辅助键。
+INDEX_AUX_KEYS = ("ledger_skipped_rows",)
+
+
+def count_index_files(idx: dict = None) -> int:
+    """统计索引里**真正已入库的文件数**（v0.1.209）。
+
+    修的是一个口径错误：/api/status 原来写 `len(scanner._load_index())`，
+    数的是**索引顶层字典的键数**，不是文件数。
+
+    实测（2026-11-07 01:5x，项目 322fef90）：
+      索引顶层 6 个键 = files / devices / workshops / <一个 sha256> /
+                       ledger_skipped_rows / updated_at
+      /api/status 的 indexed_files → 6
+      同一时刻前端文件列表（/api/files）→ 1 条
+      真实已入库文件 → 1 个（..._设备台账_真实_选矿厂.xlsx，status=parsed）
+    6 对 1，同一件事两个答案；WORKbuddy 本机报告里的 indexed_files: 6
+    也是这个假数（它当时有 6 个保留/辅助键，实际文件数并非 6）。
+
+    口径统一为：files 列表条目 + 顶层 sha 形键条目（去重），剔除保留键与辅助键。
+    与 main.py `_frontend_index_items()`（前端文件列表用的那个）同口径。
+    传 idx 可复用已读到的索引，避免重复读盘。
+    """
+    if idx is None:
+        idx = _load_index()
+    if not isinstance(idx, dict):
+        return 0
+    skip = set(INDEX_RESERVED_KEYS) | set(INDEX_AUX_KEYS)
+    seen = set()
+    if isinstance(idx.get("files"), list):
+        for f in idx["files"]:
+            if not isinstance(f, dict):
+                continue
+            key = f.get("id") or f.get("sha256") or f.get("file_name") or ""
+            if key:
+                seen.add(key)
+    for sha, info in idx.items():
+        if not isinstance(info, dict) or sha in skip:
+            continue
+        key = sha or info.get("file_name") or ""
+        if key:
+            seen.add(key)
+    return len(seen)
+
 # v0.1.144：CAD/Office 临时锁定文件黑名单（扫描与上传均排除，避免误判为解析失败）
 _TEMP_EXTS = (".dwl", ".dwl2", ".bak", ".tmp", ".temp", ".swp", ".swo")
 

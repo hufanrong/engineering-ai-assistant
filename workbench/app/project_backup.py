@@ -200,7 +200,19 @@ def import_project(backup_path: str, new_project_name: str = None,
         if os.path.isfile(idx_path):
             with open(idx_path, "r", encoding="utf-8") as f:
                 idx = json.load(f)
-            file_count_idx = len(idx.get("files", [])) if isinstance(idx.get("files"), list) else len(idx)
+            # v0.1.209：原来写
+            #   len(idx["files"]) if isinstance(idx["files"], list) else len(idx)
+            # 两个分支都不对：
+            #  · files 为空列表时（项目初始化后就是这样）取 len(idx) = 顶层键数，
+            #    实测 6（files/devices/workshops/一个sha/ledger_skipped_rows/updated_at），
+            #    而真实文件只有 1 个 —— 导入项目后统计栏立刻显示错误文件数；
+            #  · files 非空时又漏掉扁平 {sha: info} 写入的条目（上传/扫描走的是这条路）。
+            # 改为与 /api/status、前端文件列表同一口径。
+            try:
+                from . import scanner as _sc
+                file_count_idx = _sc.count_index_files(idx)
+            except Exception:  # noqa: BLE001
+                file_count_idx = 0
             device_count = len(idx.get("devices", {}))
             workshop_count = len(idx.get("workshops", {}))
             _pm.update_project_stats(project_id, file_count_idx, device_count, workshop_count)

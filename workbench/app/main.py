@@ -151,7 +151,10 @@ def status():
         },
         "vector_count": _get_store().stats().get("count", 0),
         "queue_pending": upload_queue.pending_count(),
-        "indexed_files": len(scanner._load_index()),
+        # v0.1.209：这里原来是 len(scanner._load_index())，数的是索引顶层键数
+        # （files/devices/workshops/一个sha/ledger_skipped_rows/updated_at → 6），
+        # 而同一时刻前端文件列表只有 1 条。改为按真实文件条目计数。
+        "indexed_files": scanner.count_index_files(idx),
         "cloud_endpoint": config.CLOUD_ENDPOINT or "(未配置)",
         "data_dir": config.DATA_DIR,
     }
