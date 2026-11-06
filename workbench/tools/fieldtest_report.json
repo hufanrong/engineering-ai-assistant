@@ -1,8 +1,8 @@
 {
   "tool": "fieldtest",
-  "generated_at": "2026-10-31 21:47:57",
+  "generated_at": "2026-11-05 19:22:23",
   "env": {
-    "platform": "Linux-6.6.95.bck.3-amd64-x86_64-with-glibc2.35",
+    "platform": "Linux-6.6.95.bck.4-rc3-amd64-x86_64-with-glibc2.35",
     "python": "3.10.12",
     "install_dir": "/home/gem/.aily/workdir/task_7702014996544277777/repo/workbench",
     "data_dir": "/home/gem/.aily/workdir/task_7702014996544277777/repo/workbench/data",
@@ -20,10 +20,10 @@
     "home_project": true
   },
   "inputs": {
-    "ledger": "3b408663b2c0_设备台账_真实_选矿厂.xlsx",
+    "ledger": "3b408663b2c0_3b408663b2c0_3b408663b2c0_3b408663b2c0_3b408663b2c0_设备台账_真实_选矿厂.xlsx",
     "ledger_size": 18031,
     "book": "第一册",
-    "workshop": "选矿厂",
+    "workshop": "中矿堆",
     "book_resolved": "第一册"
   },
   "steps": [
@@ -31,7 +31,7 @@
       "phase": "环境",
       "step": "工作台可达",
       "expected": "GET /api/status 200 且 version 非空",
-      "actual": "200 version=0.1.183",
+      "actual": "200 version=0.1.204",
       "passed": true,
       "evidence": ""
     },
@@ -39,7 +39,7 @@
       "phase": "环境",
       "step": "版本号与代码一致",
       "expected": "接口 version == app/config.py 的 APP_VERSION",
-      "actual": "api=0.1.183 config=0.1.183",
+      "actual": "api=0.1.204 config=0.1.204",
       "passed": true,
       "evidence": ""
     },
@@ -47,7 +47,7 @@
       "phase": "环境",
       "step": "输入材料",
       "expected": "设备台账可用",
-      "actual": "台账=3b408663b2c0_设备台账_真实_选矿厂.xlsx (18031 字节)",
+      "actual": "台账=3b408663b2c0_3b408663b2c0_3b408663b2c0_3b408663b2c0_3b408663b2c0_设备台账_真实_选矿厂.xlsx (18031 字节)",
       "passed": true,
       "evidence": ""
     },
@@ -63,7 +63,7 @@
       "phase": "建项目并导入台账",
       "step": "新建项目",
       "expected": "200 且返回 project id",
-      "actual": "200 id=5b687099",
+      "actual": "200 id=ff895413",
       "passed": true,
       "evidence": ""
     },
@@ -81,7 +81,7 @@
       "expected": "解析后设备条数 > 0",
       "actual": "project.device_count=228 device_workshop=0",
       "passed": true,
-      "evidence": "{\"id\": \"5b687099\", \"name\": \"实测_20261031_214456\", \"description\": \"\", \"client\": \"\", \"location\": \"\", \"created_at\": \"2026-10-31 21:44:56\", \"updated_at\": \"2026-10-31 21:44:58\", \"file_count\": 1, \"device_count\": 228, \"workshop_count\": 1, \"status\": \"active\", \"pending_count\": 0}"
+      "evidence": "{\"id\": \"ff895413\", \"name\": \"实测_20261105_192117\", \"description\": \"\", \"client\": \"\", \"location\": \"\", \"created_at\": \"2026-11-05 19:21:21\", \"updated_at\": \"2026-11-05 19:21:24\", \"file_count\": 1, \"device_count\": 228, \"workshop_count\": 1, \"status\": \"active\", \"pending_count\": 0}"
     },
     {
       "phase": "资料生成",
@@ -95,7 +95,7 @@
       "phase": "资料生成",
       "step": "按车间预填",
       "expected": "预填结果里有设备（预填空=生成出来的方案没内容）",
-      "actual": "200 devices=0",
+      "actual": "200 devices=13 workshop='中矿堆'",
       "passed": true,
       "evidence": ""
     },
@@ -103,7 +103,7 @@
       "phase": "资料生成",
       "step": "生成 Word 成品",
       "expected": "施工方案 生成的是可打开的 docx（真解压核对）",
-      "actual": "size=37675 entries=17 document.xml=4123 字节",
+      "actual": "size=37678 entries=17 document.xml=4123 字节",
       "passed": true,
       "evidence": ""
     },
@@ -119,7 +119,7 @@
       "phase": "整编登记表与整卷",
       "step": "一键整卷",
       "expected": "有产出，且每个登记项都有交代（生成/待办/归集，不静默丢弃）",
-      "actual": "200 生成=36 待办=2 归集=19 错=0 空壳=0",
+      "actual": "200 生成=2 待办=0 归集=1 错=0 空壳=0",
       "passed": true,
       "evidence": ""
     },
@@ -127,7 +127,7 @@
       "phase": "整编登记表与整卷",
       "step": "整卷文件落盘",
       "expected": "每个 generated 文件都在本项目目录内",
-      "actual": "落盘 36/36，找不到 0，落在项目外 0",
+      "actual": "落盘 2/2，找不到 0，落在项目外 0",
       "passed": true,
       "evidence": ""
     },
@@ -135,7 +135,7 @@
       "phase": "整编登记表与整卷",
       "step": "成品可打开",
       "expected": "落盘的 docx 能被 zip/docx 正常读取",
-      "actual": "3/3 个可读 样例 9481 字节",
+      "actual": "2/2 个可读 样例 9178 字节",
       "passed": true,
       "evidence": ""
     },
@@ -143,7 +143,7 @@
       "phase": "整编登记表与整卷",
       "step": "成稿无模板变量残留",
       "expected": "生成的 docx 正文里不出现 {{占位符}}（未填应落成【待补充】）",
-      "actual": "残留 0 处（0 个文件）；【待补充】标记 1188 处",
+      "actual": "残留 0 处（0 个文件）；【待补充】标记 57 处",
       "passed": true,
       "evidence": ""
     },
@@ -167,7 +167,7 @@
       "phase": "整编登记表与整卷",
       "step": "页次为渲染实测",
       "expected": "页次形如 起-止 且来自真实渲染（渲不出如实标未计算，不估算）",
-      "actual": "2 格有页次，0 格标未计算；样例 ['1-15', '16-30']",
+      "actual": "2 格有页次，0 格标未计算；样例 ['1-14', '15-28']",
       "passed": true,
       "evidence": ""
     },
@@ -175,7 +175,7 @@
       "phase": "整编登记表与整卷",
       "step": "装盒清单",
       "expected": "按册汇总，一盒一行，含件数与页数",
-      "actual": "19 行：[['第1盒', '第一册', '中矿堆', 2, 30, '渲染实测', 0, '第一册／中矿堆／共2件', None]]",
+      "actual": "1 行：[['第1盒', '第一册', '中矿堆', 2, 28, '渲染实测', 0, '第一册／中矿堆／共2件', None]]",
       "passed": true,
       "evidence": ""
     },
@@ -207,7 +207,7 @@
       "phase": "竣工归档",
       "step": "导出成套资料",
       "expected": "合法 ZIP 且内含文件（真解压）",
-      "actual": "size=47639 files=4",
+      "actual": "size=47715 files=4",
       "passed": true,
       "evidence": ""
     },
@@ -222,9 +222,17 @@
     {
       "phase": "跨项目隔离",
       "step": "业务数据不写全局 data",
-      "expected": "本轮新写入不落全局 data/（旧版全部写这里）",
+      "expected": "本轮没有业务数据写进全局 data/（旧版全部写这里）",
       "actual": "无",
       "passed": true,
+      "evidence": ""
+    },
+    {
+      "phase": "跨项目隔离",
+      "step": "全局 data 历史遗留业务数据清单",
+      "expected": "列出全局 data/ 下尚未归属任何项目的业务数据文件（不判失败，是否迁走由用户确认）",
+      "actual": "遗留：version_map.json",
+      "passed": null,
       "evidence": ""
     },
     {
@@ -261,9 +269,9 @@
     }
   ],
   "metrics": {
-    "version": "0.1.183",
-    "version_config_py": "0.1.183",
-    "test_project_id": "5b687099",
+    "version": "0.1.204",
+    "version_config_py": "0.1.204",
+    "test_project_id": "ff895413",
     "devices_from_ledger_api": 228,
     "devices_device_workshop": 0,
     "docgen_types": [
@@ -278,17 +286,17 @@
       "货损报告",
       "竣工资料"
     ],
-    "prefill_devices": 0,
-    "docgen_docx_bytes": 37675,
+    "prefill_devices": 13,
+    "docgen_docx_bytes": 37678,
     "docgen_has_placeholder": false,
     "registry_total": 3,
     "registry_books": {
       "第一册": 3
     },
     "registry_class_counts": null,
-    "volume_generated": 36,
-    "volume_todo": 2,
-    "volume_collect": 19,
+    "volume_generated": 2,
+    "volume_todo": 0,
+    "volume_collect": 1,
     "volume_errors": 0,
     "volume_empty_shells": 0,
     "volume_device_source": {
@@ -320,25 +328,17 @@
     },
     "volume_error_text": "",
     "volume_accounted": 3,
-    "volume_files_landed": 36,
+    "volume_files_landed": 2,
     "volume_files_missing": 0,
     "volume_files_outside_project": 0,
     "volume_landed_paths": [
       "volumes/第一册/中矿堆/1_设备开箱检查记录.docx",
-      "volumes/第一册/中矿堆/2_设备安装检查记录.docx",
-      "volumes/第一册/中矿堆/1_设备开箱检查记录.docx",
-      "volumes/第一册/中矿堆/2_设备安装检查记录.docx",
-      "volumes/第一册/中矿堆/1_设备开箱检查记录.docx",
-      "volumes/第一册/中矿堆/2_设备安装检查记录.docx",
-      "volumes/第一册/中矿堆/1_设备开箱检查记录.docx",
-      "volumes/第一册/中矿堆/2_设备安装检查记录.docx",
-      "volumes/第一册/中矿堆/1_设备开箱检查记录.docx",
       "volumes/第一册/中矿堆/2_设备安装检查记录.docx"
     ],
-    "volume_openable_docx": 3,
+    "volume_openable_docx": 2,
     "volume_residual_placeholders": 0,
     "volume_residual_files": [],
-    "volume_pending_marks": 1188,
+    "volume_pending_marks": 57,
     "catalog_row_count": 2,
     "catalog_rows": [
       [
@@ -346,7 +346,7 @@
         "1_设备开箱检查记录.docx",
         "设备开箱检查记录",
         "JL-01",
-        "1-15",
+        "1-14",
         "【待补充】"
       ],
       [
@@ -354,7 +354,7 @@
         "2_设备安装检查记录.docx",
         "设备安装检查记录",
         "JL-02",
-        "16-30",
+        "15-28",
         "【待补充】"
       ]
     ],
@@ -364,46 +364,24 @@
     ],
     "catalog_pages_uncalculated": 0,
     "catalog_page_cells": [
-      "1-15",
-      "16-30"
+      "1-14",
+      "15-28"
     ],
-    "boxing_rows": 19,
+    "boxing_rows": 1,
     "boxing_sample": [
       [
         "第1盒",
         "第一册",
         "中矿堆",
         2,
-        30,
+        28,
         "渲染实测",
         0,
         "第一册／中矿堆／共2件",
         null
-      ],
-      [
-        "第2盒",
-        "第一册",
-        "其他辅助设备",
-        2,
-        22,
-        "渲染实测",
-        0,
-        "第一册／其他辅助设备／共2件",
-        null
-      ],
-      [
-        "第3盒",
-        "第一册",
-        "尾矿库",
-        0,
-        "未计算",
-        "未计算",
-        0,
-        "第一册／尾矿库／共0件",
-        "页数未计算时脊背标签先不印页数"
       ]
     ],
-    "todo_md_chars": 595,
+    "todo_md_chars": 661,
     "todo_md_has_counts": {
       "待补字段": 2,
       "错误": 0
@@ -420,13 +398,13 @@
         "files": [
           ".node_id",
           "completion_archive.json",
-          "index.32t3cuhu.tmp",
-          "index.iu21mxxw.tmp",
+          "doc_relations.json",
           "index.json",
           "project_meta.json",
           "relations.json",
           "supervision_registry.json",
           "upload_log.jsonl",
+          "version_map.json",
           "workshop_assign.json"
         ],
         "n_files": 10
@@ -444,7 +422,7 @@
       {
         "dir": "generated_docs/施工方案",
         "files": [
-          "繁工AI_施工方案_20261031_214458.docx"
+          "繁工AI_施工方案_20261105_192126.docx"
         ],
         "n_files": 1
       },
@@ -458,7 +436,7 @@
       {
         "dir": "upload_queue",
         "files": [
-          "3b408663b2c0eb2c_1793454297285.json",
+          "3b408663b2c0eb2c_1793877682607.json",
           "_sha_index.json"
         ],
         "n_files": 2
@@ -491,33 +469,36 @@
   "projects": [
     {
       "role": "test",
-      "id": "5b687099",
-      "name": "实测_20261031_214456"
+      "id": "ff895413",
+      "name": "实测_20261105_192117"
     },
     {
       "role": "isolation",
-      "id": "31770406"
+      "id": "63948054"
     }
   ],
   "artifacts": [
     {
-      "project": "5b687099",
+      "project": "ff895413",
       "sample": {
         "file": "1_设备开箱检查记录.docx",
-        "bytes": 9481,
-        "xml_bytes": 194476,
-        "text_chars": 121501,
+        "bytes": 9178,
+        "xml_bytes": 173045,
+        "text_chars": 108127,
         "has_pending_marks": true,
         "sample_text": "xml version10 encodingUTF8 standaloneyeswdocument xmlnsournschemasmicrosoftcomofficeoffice xmlnsrhttpschemasopenxmlformatsorgofficeDocument2006relationships xmlnsvurnschemasmicrosoftcomvml xmlnswhttpschemasopenxmlformatsorgwordprocessingml2006main xmlnsw10urnschemasmicrosoftcomofficeword xmlnswphttp"
       }
     }
   ],
   "cleanup": {
-    "deleted_test_project": "5b687099"
+    "deleted_projects": [
+      "ff895413",
+      "63948054"
+    ]
   },
   "summary": {
     "passed": 27,
     "failed": 0,
-    "skipped": 2
+    "skipped": 3
   }
 }

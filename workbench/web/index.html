@@ -340,12 +340,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
     <div class="row">
       <div style="flex:1">
         <label class="label">导出范围</label>
-        <select class="select" id="exportScope">
+        <select class="select" id="exportScope" onchange="syncExportWorkshopWrap()">
           <option value="project">整个项目解析包</option>
           <option value="workshop">指定车间解析包</option>
         </select>
       </div>
-      <div style="flex:1" id="exportWorkshopWrap" style="display:none">
+      <!-- v0.1.204：这里原来写了两个 style 属性
+           style="flex:1" ... style="display:none"，HTML 规范只认第一个，
+           display:none 被丢弃，元素一直是显示状态；而代码里又没有第二处
+           切换它的显隐，于是「指定车间」下拉的显隐完全不受控。
+           合成一个属性，并由 syncExportWorkshopWrap() 按导出范围切换。 -->
+      <div style="flex:1;display:none" id="exportWorkshopWrap">
         <label class="label">选择车间</label>
         <select class="select" id="exportWorkshop"></select>
       </div>
@@ -684,6 +689,28 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 </div>
 
 <!-- ========== 模块4：智能窗口 ========== -->
+<!-- v0.1.205：智能窗口「快捷功能入口」的结果弹窗。
+     原来 6 个入口全部是 alert('……在XX中查看') 的文字占位，后端接口其实都存在
+     （/api/search、/api/relations、/api/spatial/structure、/api/platform/list、
+      /api/equipment-merge/pending、/api/projects/backups），
+     用户点进去只能看到一句「请去别的页面看」，等于没有功能。
+     现在统一用这个弹窗承接真实数据。 -->
+<div id="quickResultModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;width:92%;max-width:860px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+    <div style="padding:16px 20px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-weight:600;font-size:15px" id="quickResultTitle">功能</div>
+      <button onclick="closeQuickResult()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999">✕</button>
+    </div>
+    <div style="flex:1;overflow:auto;padding:20px" id="quickResultBody">
+      <div style="text-align:center;color:#999;padding:40px">加载中…</div>
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid #eee;background:#f8f9fa;display:flex;gap:8px;flex-wrap:wrap">
+      <div style="flex:1;font-size:12px;color:#666" id="quickResultInfo"></div>
+      <button class="btn btn-default btn-sm" onclick="closeQuickResult()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div id="module-ai" class="module">
   <div class="card">
     <div class="card-title"><span class="icon">🤖</span>智能助手窗口</div>
@@ -872,6 +899,15 @@ function loadProjects() {
                         select.value = '';
                     }
                     updateProjectUI();
+                    // v0.1.204：找到当前项目后立刻把「资源管理」的数据拉一遍。
+                    // 页面默认就停在 module-resource，但 DOMContentLoaded 里只调了
+                    // loadProjects()，从来没人调 loadResourceData() —— 结果用户
+                    // 打开工作台，统计全是 0、车间卡片一张没有、导出车间下拉空着，
+                    // 明明项目里有 228 台设备 20 个车间，看起来像「项目是空的」。
+                    // 必须手动点一下「资源管理」页签才刷新出来。
+                    // （switchModule('resource') 里虽然调了 loadResourceData()，
+                    //   但那只在用户主动点页签时才执行，首屏不会走。）
+                    if (typeof loadResourceData === 'function') { try { loadResourceData(); } catch (e) {} }
                 });
         });
 }
@@ -2050,7 +2086,18 @@ function handleFileUpload(files) {
     enqueueUploads(items, '文件选择');
 }
 
+// v0.1.204：导出范围选「指定车间」时才显示车间下拉。
+// 原来 exportWorkshopWrap 上的 display:none 因重复 style 属性被丢弃，
+// 又没有别处切换它，导致这个下拉始终显示、且选中值对「整个项目」导出无意义。
+function syncExportWorkshopWrap() {
+    var scopeEl = document.getElementById('exportScope');
+    var wrap = document.getElementById('exportWorkshopWrap');
+    if (!scopeEl || !wrap) return;
+    wrap.style.display = (scopeEl.value === 'workshop') ? 'block' : 'none';
+}
+
 function exportPackage() {
+    syncExportWorkshopWrap();
     var scope = document.getElementById('exportScope').value;
     var workshop = document.getElementById('exportWorkshop').value;
     if (scope === 'workshop' && !workshop) { alert('请选择车间'); return; }
@@ -2879,49 +2926,371 @@ function closeArchiveDetail() {
 }
 
 // ===== 智能窗口 =====
+// v0.1.205：sendChat 原来完全在前端做关键词匹配，从不调用 /api/ai/chat ——
+// 后端 ai_chat 那一整套本地检索（项目库 + 平台库 + 关系库 + 资料待办）全都接不上。
+// 结果首屏欢迎语承诺的「或直接提问工程相关问题」实际是落空的：用户问
+// 「磨浮车间有哪些设备」，只会收到一句「我可以帮你：生成工程资料、查看项目文件……」。
+// 现在改成：先按意图跳转（保留原有体验），同时真正调用后端拿到回答。
+function chatAppend(cls, html) {
+    var messages = document.getElementById('chatMessages');
+    var wrap = document.createElement('div');
+    wrap.className = 'chat-msg ' + cls;
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = html;
+    wrap.appendChild(bubble);
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+    return wrap;
+}
+
+function chatEscape(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function chatIntentJump(msg) {
+    // 保留原有的「识别需求并跳转」体验
+    if (msg.indexOf('生成') >= 0 || msg.indexOf('施工日志') >= 0 || msg.indexOf('方案') >= 0 || msg.indexOf('交底') >= 0 || msg.indexOf('验收') >= 0) {
+        return { text: '检测到资料生成需求，正在跳转到「资料生成」模块…', mod: 'docgen' };
+    }
+    if (msg.indexOf('竣工') >= 0 || msg.indexOf('组卷') >= 0) {
+        return { text: '检测到竣工组卷需求，正在跳转到「竣工组卷」模块…', mod: 'archive' };
+    }
+    if (msg.indexOf('更新') >= 0 || msg.indexOf('版本') >= 0) {
+        return { text: '检测到版本更新需求，正在跳转到「版本更新」模块…', mod: 'update' };
+    }
+    if (msg.indexOf('车间') >= 0 || msg.indexOf('文件') >= 0 || msg.indexOf('上传') >= 0) {
+        return { text: '检测到资源管理需求，正在跳转到「资源管理」模块…', mod: 'resource' };
+    }
+    return null;
+}
+
+function chatDownloadDoc(doc) {
+    // 后端返回 base64 的 Word，这里转成 Blob 触发下载
+    if (!doc || !doc.content_b64) return;
+    try {
+        var bin = atob(doc.content_b64);
+        var buf = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = doc.file_name || '生成文档.docx';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    } catch (e) {
+        alert('文档下载失败：' + e.message);
+    }
+}
+
 function sendChat() {
     var input = document.getElementById('chatInput');
     var msg = input.value.trim();
     if (!msg) return;
-    
-    var messages = document.getElementById('chatMessages');
-    messages.innerHTML += '<div class="chat-msg user"><div class="bubble">' + msg + '</div></div>';
+
+    chatAppend('user', chatEscape(msg));
     input.value = '';
-    messages.scrollTop = messages.scrollHeight;
-    
-    // 智能识别需求并跳转
-    setTimeout(function() {
-        var reply = '收到！';
-        if (msg.indexOf('生成') >= 0 || msg.indexOf('施工日志') >= 0 || msg.indexOf('方案') >= 0 || msg.indexOf('交底') >= 0 || msg.indexOf('验收') >= 0) {
-            reply += '检测到资料生成需求，正在跳转到「资料生成」模块...';
-            setTimeout(function() { switchModuleByName('docgen'); }, 1000);
-        } else if (msg.indexOf('车间') >= 0 || msg.indexOf('文件') >= 0 || msg.indexOf('上传') >= 0) {
-            reply += '检测到资源管理需求，正在跳转到「资源管理」模块...';
-            setTimeout(function() { switchModuleByName('resource'); }, 1000);
-        } else if (msg.indexOf('竣工') >= 0 || msg.indexOf('组卷') >= 0) {
-            reply += '检测到竣工组卷需求，正在跳转到「竣工组卷」模块...';
-            setTimeout(function() { switchModuleByName('archive'); }, 1000);
-        } else if (msg.indexOf('更新') >= 0 || msg.indexOf('版本') >= 0) {
-            reply += '检测到版本更新需求，正在跳转到「版本更新」模块...';
-            setTimeout(function() { switchModuleByName('update'); }, 1000);
+
+    var pending = chatAppend('ai', '正在检索项目资料…');
+
+    // 意图跳转（与原来一致）
+    var jump = chatIntentJump(msg);
+    if (jump) {
+        setTimeout(function () { switchModuleByName(jump.mod); }, 600);
+    }
+
+    fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: msg, history: [] })
+    }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function (d) {
+        var html = '';
+        if (jump) html += '<b>' + chatEscape(jump.text) + '</b><br><br>';
+        if (d && d.answer) {
+            // 回答里的换行要保留，否则多行结构会挤成一段
+            html += '<div style="white-space:pre-wrap">' + chatEscape(d.answer) + '</div>';
         } else {
-            reply += '我可以帮你：生成工程资料、查看项目文件、检查竣工资料、检查版本更新。请告诉我你需要什么？';
+            html += '（后端未返回回答）';
         }
-        messages.innerHTML += '<div class="chat-msg ai"><div class="bubble">' + reply + '</div></div>';
-        messages.scrollTop = messages.scrollHeight;
-    }, 500);
+        if (d && d.mode === 'local_doc' && d.doc) {
+            html += '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="chatDocDownload">⬇️ 下载 ' +
+                chatEscape(d.doc.file_name || '生成的文档') + '</button></div>';
+        }
+        if (d && d.sources) {
+            var rmode = d.retrieval || (d.context && d.context.retrieval) || '';
+            html += '<div style="margin-top:8px;font-size:11px;color:#888">检索命中：项目库 ' +
+                (d.sources.project || 0) + ' 条 / 平台库 ' + (d.sources.platform || 0) + ' 条';
+            if (rmode === 'keyword') {
+                html += ' · 检索方式：关键词匹配（向量检索不可用已降级）';
+                if (d.vector_error) html += ' · 原因：' + chatEscape(String(d.vector_error).slice(0, 80));
+            } else if (rmode) {
+                html += ' · 检索方式：向量语义';
+            }
+            html += '</div>';
+        }
+        pending.querySelector('.bubble').innerHTML = html;
+        if (d && d.mode === 'local_doc' && d.doc) {
+            var btn = document.getElementById('chatDocDownload');
+            if (btn) btn.onclick = function () { chatDownloadDoc(d.doc); };
+        }
+    }).catch(function (e) {
+        pending.querySelector('.bubble').innerHTML =
+            '调用失败：' + chatEscape(e.message) + '<br>请确认后端服务已启动（默认端口 8756）。';
+    });
 }
 
 function switchModuleByName(name) {
     switchModule(name);
 }
 
-function showVectorSearch() { alert('向量检索功能：在智能窗口中输入检索内容即可'); }
-function showRelations() { alert('关系图谱功能：在资源管理中查看设备/车间关联关系'); }
-function showSpatialModel() { alert('空间模型功能：在资源管理中查看设备安装位置'); }
-function showPlatformLib() { alert('平台规范库：AI生成资料时自动引用规范内容'); }
-function showCloudMerge() { alert('云端合并：多电脑解析结果合并功能'); }
-function showProjectBackup() { alert('项目备份：在资源管理导出栏导出项目解析包'); }
+// v0.1.205：智能窗口的 6 个「快捷功能入口」原来是纯文字占位
+//   showVectorSearch()  → alert('向量检索功能：在智能窗口中输入检索内容即可')
+//   showRelations()     → alert('关系图谱功能：在资源管理中查看设备/车间关联关系')
+//   showSpatialModel()  → alert('空间模型功能：在资源管理中查看设备安装位置')
+//   showPlatformLib()   → alert('平台规范库：AI生成资料时自动引用规范内容')
+//   showCloudMerge()    → alert('云端合并：多电脑解析结果合并功能')
+//   showProjectBackup() → alert('项目备份：在资源管理导出栏导出项目解析包')
+// 后端接口其实全都存在（/api/search、/api/relations、/api/spatial/structure、
+// /api/platform/list、/api/equipment-merge/pending、/api/projects/backups），
+// 用户点进去只得到一句「请去别的页面看」—— 功能等于不存在。
+// 现在改成真实拉数据 + 渲染到统一弹窗；数据为空或接口报错时如实说明，不编造。
+function closeQuickResult() {
+    var m = document.getElementById('quickResultModal');
+    if (m) m.style.display = 'none';
+}
+
+function openQuickResult(title, html, info) {
+    var m = document.getElementById('quickResultModal');
+    document.getElementById('quickResultTitle').textContent = title;
+    document.getElementById('quickResultBody').innerHTML = html;
+    document.getElementById('quickResultInfo').textContent = info || '';
+    m.style.display = 'flex';
+}
+
+function quickResultError(title, msg) {
+    openQuickResult(title,
+        '<div style="padding:20px;color:#888;text-align:center">' + chatEscape(msg) + '</div>', '');
+}
+
+function quickTable(headers, rows) {
+    if (!rows || !rows.length) {
+        return '<div style="padding:24px;color:#888;text-align:center">暂无数据</div>';
+    }
+    var h = '<table class="table" style="width:100%"><thead><tr>';
+    headers.forEach(function (x) { h += '<th>' + chatEscape(x) + '</th>'; });
+    h += '</tr></thead><tbody>';
+    rows.forEach(function (r) {
+        h += '<tr>';
+        r.forEach(function (c) { h += '<td>' + chatEscape(c) + '</td>'; });
+        h += '</tr>';
+    });
+    return h + '</tbody></table>';
+}
+
+// 1. 向量检索：走后端 /api/search（内部已带关键词降级）
+function showVectorSearch() {
+    var q = window.prompt('输入要检索的内容（例如：磨浮车间 设备）', '');
+    if (q === null) return;
+    if (!q.trim()) { quickResultError('向量检索', '未输入检索内容'); return; }
+    openQuickResult('向量检索', '<div style="text-align:center;color:#999;padding:20px">检索中…</div>', '查询：' + q);
+    fetch('/api/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, top_k: 20 })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+        var rows = (d.results || []).filter(function (x) { return x && x.text; }).map(function (x) {
+            return [x.source || '', (x.file_name || x.std_no || ''), String(x.text || '').slice(0, 80)];
+        });
+        var mode = d.retrieval === 'keyword' ? '关键词检索（向量检索不可用，已降级）' : '向量语义检索';
+        openQuickResult('向量检索',
+            quickTable(['来源', '文件/编号', '内容片段'], rows),
+            '查询「' + q + '」命中 ' + rows.length + ' 条 · 检索方式：' + mode +
+            (d.vector_error ? ' · 向量库提示：' + String(d.vector_error).slice(0, 80) : ''));
+    }).catch(function (e) { quickResultError('向量检索', '检索失败：' + e.message); });
+}
+
+// 2. 关系图谱：/api/relations
+function showRelations() {
+    openQuickResult('关系图谱', '<div style="text-align:center;color:#999;padding:20px">加载中…</div>', '');
+    fetch('/api/relations').then(function (r) { return r.json(); }).then(function (d) {
+        var devs = d.devices || [];
+        // v0.1.205：workshops 的结构不是数组而是字典（key=车间名），
+        // 原来按数组读 length → 显示「关联车间 undefined 个」。
+        // 这里兼容两种形态：数组取元素名，字典取键名。
+        var wsRaw = d.workshops || {};
+        var wss = [];
+        if (Array.isArray(wsRaw)) {
+            wsRaw.forEach(function (w) {
+                var nm = (w && (w.workshop || w.name)) || '';
+                if (nm) wss.push(nm);
+            });
+        } else if (wsRaw && typeof wsRaw === 'object') {
+            wss = Object.keys(wsRaw);
+        }
+        // v0.1.205 修正：/api/relations 返回的 workshops 字典实测是空的（len=0），
+        // 车间名实际挂在 devices[].workshops 上（228 台设备能推出 19 个车间）。
+        // 只读字典会显示「关联车间 0 个」—— 与 AI 回答里的 19 个自相矛盾。
+        // 这里兜底从设备反推车间名，去重后补齐。
+        if (!wss.length) {
+            devs.forEach(function (x) {
+                var list = x.workshops || [];
+                if (typeof list === 'string') { list = [list]; }
+                list.forEach(function (nm) {
+                    nm = String(nm || '').trim();
+                    if (nm && wss.indexOf(nm) === -1) wss.push(nm);
+                });
+            });
+        }
+        var rows = devs.slice(0, 100).map(function (x) {
+            return [x.name || x.tag || '', x.model || '', (x.workshops || []).join('、'), x.quantity || ''];
+        });
+        var html = '<div style="margin-bottom:14px;font-size:13px">关联车间 <b>' + wss.length +
+            '</b> 个 · 关联设备 <b>' + devs.length + '</b> 台</div>';
+        html += quickTable(['设备名称', '型号', '所属车间', '数量'], rows);
+        if (devs.length > 100) html += '<div style="padding:10px;color:#888;font-size:12px">仅显示前 100 台</div>';
+        if (!wss.length) {
+            html += '<div style="padding:10px;color:#888;font-size:12px">' +
+                '关系图谱尚未生成车间节点（设备车间归属见下表「所属车间」列，' +
+                '来自台账）。</div>';
+        }
+        openQuickResult('关系图谱', html, '数据来自当前项目的 relations.json');
+    }).catch(function (e) { quickResultError('关系图谱', '加载失败：' + e.message); });
+}
+
+// 3. 空间模型：/api/spatial/structure
+function showSpatialModel() {
+    openQuickResult('空间模型', '<div style="text-align:center;color:#999;padding:20px">加载中…</div>', '');
+    fetch('/api/spatial/structure').then(function (r) { return r.json(); }).then(function (d) {
+        if (!d || d.ok === false) {
+            openQuickResult('空间模型',
+                '<div style="padding:24px;color:#888;text-align:center">' +
+                chatEscape((d && (d.message || d.error)) || '空间模型尚未构建') + '</div>',
+                '可在「资源管理」中重建关系图谱后再查看');
+            return;
+        }
+        // v0.1.205：空间模型的设备在 workshops.<车间>.devices 里（层级结构），
+        // 原来读顶层 d.devices → 永远拿到 undefined。
+        var rows = [];
+        var wsObj = d.workshops || {};
+        Object.keys(wsObj).forEach(function (wsName) {
+            var ws = wsObj[wsName] || {};
+            (ws.devices || []).forEach(function (x) {
+                rows.push([x.tag || '', wsName,
+                    x.x != null ? x.x : '', x.y != null ? x.y : '',
+                    x.coord_status || '', (x.neighbors || []).length]);
+            });
+        });
+        openQuickResult('空间模型',
+            quickTable(['设备', '车间', 'X', 'Y', '坐标状态', '相邻设备数'], rows),
+            '共 ' + Object.keys(wsObj).length + ' 个车间、' + rows.length + ' 台设备有空间坐标');
+    }).catch(function (e) { quickResultError('空间模型', '加载失败：' + e.message); });
+}
+
+// 4. 平台规范库：/api/platform/list
+function showPlatformLib() {
+    openQuickResult('平台规范库', '<div style="text-align:center;color:#999;padding:20px">加载中…</div>', '');
+    fetch('/api/platform/list').then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function (d) {
+        var items = d.items || [];
+        var rows = items.map(function (x) {
+            return [x.std_no || '待补', x.std_name || x.name || '', x.status || '', x.category || ''];
+        });
+        openQuickResult('平台规范库',
+            quickTable(['标准号', '名称', '状态', '分类'], rows),
+            '共 ' + items.length + ' 条规范 · 规范库为平台级资料，所有项目共享');
+    }).catch(function (e) {
+        quickResultError('平台规范库', '读取失败：' + e.message + '（平台库尚未初始化时属正常情况）');
+    });
+}
+
+// 5. 云端合并：/api/equipment-merge/pending（待合并项）+ 可触发扫描
+function showCloudMerge() {
+    openQuickResult('云端合并', '<div style="text-align:center;color:#999;padding:20px">加载中…</div>', '');
+    fetch('/api/equipment-merge/pending').then(function (r) { return r.json(); }).then(function (d) {
+        var items = d.items || [];
+        var rows = items.map(function (x) {
+            return [x.file_name || x.name || '', x.tag || x.device || '', x.reason || x.type || '', x.action || ''];
+        });
+        var html = '<div style="margin-bottom:12px;font-size:13px;color:#555">' +
+            '用于把多台电脑各自解析的结果合并到同一份台账。' +
+            '当前待确认 <b>' + items.length + '</b> 条。</div>';
+        html += quickTable(['文件', '设备', '原因', '处理'], rows);
+        html += '<div style="margin-top:14px"><button class="btn btn-primary btn-sm" onclick="runMergeScan()">🔄 执行台账合并去重</button></div>';
+        openQuickResult('云端合并', html, '数据来自当前项目的 uploads/ 与 index.json');
+    }).catch(function (e) { quickResultError('云端合并', '加载失败：' + e.message); });
+}
+
+// v0.1.205 修正：这里原来 POST 的是 /api/equipment-merge/scan ——
+// 后端压根没有这个路由（实测返回 404 {"detail":"Not Found"}），
+// 真正的执行入口是 POST /api/equipment-merge/run（无 body），
+// 它把当前项目 uploads/ 下的多版本台账跑一次合并去重，
+// 返回的是汇总计数而不是 items 数组，渲染逻辑同步改成按计数展示。
+function runMergeScan() {
+    openQuickResult('云端合并', '<div style="text-align:center;color:#999;padding:20px">合并中…</div>', '');
+    fetch('/api/equipment-merge/run', { method: 'POST' }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function (d) {
+        var merged = d.merged_count || 0;
+        var pending = d.pending_count || 0;
+        var dup = d.duplicate_removed || 0;
+        var total = d.total_equipment || 0;
+        var skipped = d.skipped_rows || 0;
+        var html = '<div style="margin-bottom:12px;font-size:13px;color:#555">合并执行完成（数据目录：<code>' +
+            chatEscape(String(d.data_dir || '')) + '</code>' +
+            '）：共识别设备条目 <b>' + total + '</b> 条，合并后 <b>' + merged + '</b> 台，' +
+            '去除重复 <b>' + dup + '</b> 条，待人工确认 <b>' + pending + '</b> 条，跳过非设备行 <b>' + skipped + '</b> 条。</div>';
+        var sync = d.index_sync || {};
+        if (sync.error) {
+            html += '<div style="font-size:12px;color:#c0392b;margin-bottom:10px">写回 index.json 失败：' +
+                chatEscape(String(sync.error)) + '</div>';
+        } else if (sync.devices != null) {
+            html += '<div style="font-size:12px;color:#666;margin-bottom:10px">已同步写回 index.json：' +
+                sync.devices + ' 台设备</div>';
+        }
+        html += '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="showCloudMerge()">↩ 查看待确认项</button></div>';
+        openQuickResult('云端合并', html, '合并结果已落盘到当前项目目录');
+    }).catch(function (e) { quickResultError('云端合并', '合并失败：' + e.message); });
+}
+
+// 6. 项目备份：/api/projects/backups
+function showProjectBackup() {
+    openQuickResult('项目备份', '<div style="text-align:center;color:#999;padding:20px">加载中…</div>', '');
+    fetch('/api/projects/backups').then(function (r) { return r.json(); }).then(function (d) {
+        var bs = d.backups || [];
+        var rows = bs.map(function (x) {
+            var kb = x.file_size ? Math.round(x.file_size / 1024) + ' KB' : '';
+            return [x.file_name || '', x.created_at || '', kb];
+        });
+        var html = '<div style="margin-bottom:12px;font-size:13px;color:#555">' +
+            '共 <b>' + (d.total != null ? d.total : bs.length) + '</b> 个备份文件。</div>';
+        html += quickTable(['文件名', '创建时间', '大小'], rows);
+        html += '<div style="margin-top:14px"><button class="btn btn-primary btn-sm" onclick="exportProjectNow()">💾 立即备份当前项目</button></div>';
+        openQuickResult('项目备份', html, '备份文件位于 data/backups/');
+    }).catch(function (e) { quickResultError('项目备份', '加载失败：' + e.message); });
+}
+
+function exportProjectNow() {
+    var pid = (currentProject && currentProject.id) || '';
+    openQuickResult('项目备份', '<div style="text-align:center;color:#999;padding:20px">备份中…</div>', '');
+    fetch('/api/projects/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: pid })
+    }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function (d) {
+        if (d && d.ok === false) { quickResultError('项目备份', d.error || d.message || '备份失败'); return; }
+        showProjectBackup();
+    }).catch(function (e) { quickResultError('项目备份', '备份失败：' + e.message); });
+}
 
 // ===== 版本更新 =====
 function restartService() {
@@ -3236,29 +3605,68 @@ function deleteTemplate(id) {
 }
 
 // ===== 批量生成 =====
+// v0.1.203：原来「选择车间」下拉从来没有任何代码去填充 —— 页面里只有一个
+// <option value="">全部车间</option>，而 loadBatchDevices() 又在车间为空时
+// 直接 return。两头一夹，用户在批量生成模块里**永远看不到一台设备**：
+// 实测当前项目 125 台设备可用，页面上却一直显示「请先选择车间加载设备列表」。
+// 现在从 /api/workshops 填充车间，并在初始化时就加载一次设备。
+function loadBatchWorkshops() {
+    var sel = document.getElementById('batchGenWorkshop');
+    if (!sel) return;
+    fetch('/api/workshops')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var ws = (d && d.workshops) || [];
+            var html = '<option value="">全部车间</option>';
+            ws.forEach(function(w) {
+                var n = (w && w.name) ? String(w.name) : '';
+                if (!n) return;
+                var cnt = (w && w.device_count) ? ('（' + w.device_count + ' 台）') : '';
+                html += '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + cnt + '</option>';
+            });
+            sel.innerHTML = html;
+            loadBatchDevices();
+        })
+        .catch(function() {
+            loadBatchDevices();
+        });
+}
+
 function loadBatchDevices() {
     var workshop = document.getElementById('batchGenWorkshop').value;
     var list = document.getElementById('batchDeviceList');
-    if (!workshop) { list.innerHTML = '<div style="color:#999;text-align:center;padding:12px">请先选择车间加载设备列表</div>'; return; }
-    fetch('/api/devices?workshop=' + encodeURIComponent(workshop))
+    list.innerHTML = '<div style="color:#999;text-align:center;padding:12px">正在加载设备...</div>';
+    // v0.1.203：车间留空时按「全部车间」加载，不再直接 return
+    fetch('/api/devices' + (workshop ? ('?workshop=' + encodeURIComponent(workshop)) : ''))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var devices = data.devices || [];
             if (devices.length === 0) {
-                list.innerHTML = '<div style="color:#999;text-align:center;padding:12px">该车间暂无设备数据</div>';
+                list.innerHTML = '<div style="color:#999;text-align:center;padding:12px">' +
+                    (workshop ? '该车间暂无设备数据' : '当前项目设备台账为空，请先导入设备台账') + '</div>';
                 return;
             }
             list.innerHTML = '';
             devices.forEach(function(d) {
+                var v = (d.value || d.tag || d.name || '');
                 var label = document.createElement('label');
                 label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:4px';
                 label.onmouseover = function() { this.style.background = '#f0f4fa'; };
                 label.onmouseout = function() { this.style.background = ''; };
-                label.innerHTML = '<input type="checkbox" class="batch-device" value="' + (d.tag || d.name || '') + '"> ' +
-                    '<span style="font-size:13px">' + (d.tag || '') + ' ' + (d.name || '') + '</span>' +
-                    '<span style="font-size:11px;color:#999;margin-left:auto">' + (d.model || '') + '</span>';
+                // v0.1.203：台账里同名设备有多台（渣浆泵 3 台、浮选机 3 台…），
+                // 台账本身没有位号，前端按名字去重后只留一条。这里把「同名几台」
+                // 标出来，用户不会以为数据丢了一半。
+                var dup = (d.same_name_count && d.same_name_count > 1)
+                    ? ('<span style="font-size:11px;color:#C8811E;margin-left:6px">同名 ' + d.same_name_count + ' 台</span>')
+                    : '';
+                label.innerHTML = '<input type="checkbox" class="batch-device" value="' + escapeHtml(v) + '"> ' +
+                    '<span style="font-size:13px">' + escapeHtml((d.tag || '') + (d.tag && d.name ? ' ' : '') + (d.name || '')) + '</span>' + dup +
+                    '<span style="font-size:11px;color:#999;margin-left:auto">' + escapeHtml(d.model || '') + '</span>';
                 list.appendChild(label);
             });
+        })
+        .catch(function() {
+            list.innerHTML = '<div style="color:#EA6668;text-align:center;padding:12px">设备列表加载失败，请检查工作台是否运行</div>';
         });
 }
 function batchGenerate() {
@@ -3768,6 +4176,11 @@ function batchDelete() {
 // ===== 初始化 =====
 document.addEventListener('DOMContentLoaded', function() {
     loadProjects();
+    // v0.1.203：批量生成模块的车间下拉与设备列表，进入页面就填好，
+    // 不然这个模块永远停在「请先选择车间加载设备列表」。
+    if (typeof loadBatchWorkshops === 'function') loadBatchWorkshops();
+    // v0.1.204：导出卡片的「选择车间」按导出范围决定是否显示
+    if (typeof syncExportWorkshopWrap === 'function') syncExportWorkshopWrap();
     // 启动时自动检查更新
     if (document.getElementById('autoUpdateCheck').checked) {
         setTimeout(checkUpdate, 5000);

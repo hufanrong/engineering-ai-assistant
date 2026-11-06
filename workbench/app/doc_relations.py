@@ -106,13 +106,28 @@ def register_doc(doc_id: str, doc_type: str, file_path: str = "",
         关联记录 dict
     """
     data = _load()
+    # v0.1.202：devices/workshops 里可能传进 dict（如 {"tag": "球磨机"}）。
+    # 下面 `list(set(devices or []))` 对 dict 会抛 TypeError: unhashable type，
+    # 调用方多半用 try/except 包着，于是**静默不登记** —— 实测当前项目
+    # 10 份生成文件 with_devices=0。这里先归一成字符串，函数自身不再挑输入。
+    def _norm_seq(seq):
+        out = []
+        for x in (seq or []):
+            if isinstance(x, dict):
+                v = (x.get("tag") or x.get("name") or "").strip()
+            else:
+                v = str(x or "").strip()
+            if v and v not in out:
+                out.append(v)
+        return out
+
     record = {
         "doc_id": doc_id,
         "doc_type": doc_type,
         "file_path": file_path,
         "source": source,
-        "devices": list(set(devices or [])),
-        "workshops": list(set(workshops or [])),
+        "devices": _norm_seq(devices),
+        "workshops": _norm_seq(workshops),
         "registered_at": datetime.datetime.now().isoformat(),
     }
 

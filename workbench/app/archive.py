@@ -97,20 +97,53 @@ def migrate_legacy_generated(project_id: str = None) -> dict:
 
 def _save_generated(doc_type: str, content: bytes, devices: list = None, workshops: list = None) -> str:
     """生成文档落盘存档（v0.1.24）：data/generated_docs/{类型}/繁工AI_{类型}_{时间}.docx
-    v0.1.39：保存后自动登记设备/车间关联。"""
+    v0.1.39：保存后自动登记设备/车间关联。
+
+    v0.1.201：文件名原来只精确到秒（%Y%m%d_%H%M%S），同一秒内连续生成
+    （批量生成多台设备必然如此）会得到同名路径，**后一份直接覆盖前一份**。
+    实测：连续 3 次 _save_generated 得到 2 个不同文件名，
+    第 2、3 次同名 —— 批量 30 台设备就会静默丢掉一半文件。
+    修法：基础名已存在时加序号后缀，直到不冲突。
+    """
     tdir = os.path.join(_gen_dir(), doc_type)
     os.makedirs(tdir, exist_ok=True)
-    fname = f"繁工AI_{doc_type}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+    base = f"繁工AI_{doc_type}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    fname = f"{base}.docx"
+    n = 1
+    while os.path.exists(os.path.join(tdir, fname)):
+        n += 1
+        fname = f"{base}_{n}.docx"
     path = os.path.join(tdir, fname)
     with open(path, "wb") as fh:
         fh.write(content)
     # v0.1.39：自动登记资料关联
+    # v0.1.202：devices 里传进来的可能是 {"tag": ...} 这类 dict。
+    # register_doc 内部做 set(devices or [])，dict 不可哈希 → TypeError，
+    # 而这个 try/except 把异常**静默吞掉**。实测当前项目 10 份生成文件
+    # relations.json 里 with_devices=0 —— 设备关联一条都没登记成功，
+    # 「按设备找资料」「完整性检查」全部失效，界面上却一切正常。
+    # 这里统一先把 dict 归一成位号字符串再传下去，并在失败时把原因
+    # 挂到返回值上，不再无声无息。
+    _dev_tags = []
+    for _d in (devices or []):
+        if isinstance(_d, dict):
+            _t = (_d.get("tag") or _d.get("name") or "").strip()
+        else:
+            _t = str(_d or "").strip()
+        if _t and _t not in _dev_tags:
+            _dev_tags.append(_t)
+    _rel_err = ""
     try:
         from . import doc_relations as _dr
         _dr.register_doc(f"{doc_type}/{fname}", doc_type, file_path=path,
-                         devices=devices, workshops=workshops, source="generated")
-    except Exception:  # noqa: BLE001
-        pass
+                         devices=_dev_tags, workshops=workshops, source="generated")
+    except Exception as _e:  # noqa: BLE001  关联失败不影响文件本身
+        _rel_err = f"{type(_e).__name__}: {_e}"
+    if _rel_err:
+        try:
+            print(f"[archive] 资料关联登记失败 {doc_type}/{fname}：{_rel_err}")
+        except Exception:  # noqa: BLE001
+            pass
     return path
 
 

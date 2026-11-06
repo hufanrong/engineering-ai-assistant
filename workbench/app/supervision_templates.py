@@ -1235,7 +1235,8 @@ def render_gb_fallback(category: str = "", workshop: str = "",
                         project_id: str = None,
                         form_no: str = "",
                         display_name: str = "",
-                        reason: str = "") -> Dict:
+                        reason: str = "",
+                        devices: list = None) -> Dict:
     """无模板时按国标通用格式生成表（v0.1.183，用户决策）。
 
     与 render_supervision_doc 的区别：不依赖模板库，直接按国标表格式构建 docx。
@@ -1244,10 +1245,27 @@ def render_gb_fallback(category: str = "", workshop: str = "",
 
     **一台设备一份表**；车间台账为空时出一份空白表交人工填写，
     并在 `gb_blank` 里标记，不与「模板对不上设备」的空壳混为一谈。
+
+    v0.1.202：新增 devices 参数 —— 由调用方**直接指定**要出表的设备。
+    原来这里只按 workshop 从台账里查设备，没有任何入口接受「就这一台设备」。
+    后果实测：智能生成按设备批量出「设备安装检查记录」，3 台设备（球磨机1/2/3）
+    得到 3 份**内容完全相同**的表，且「设备名称」「设备位号」两列全空 ——
+    用户拿到的三份表分不出是哪台设备的，等于白生成。
+    devices 非空时以它为准，不再查台账；为空时保持原行为（按车间取台账）。
     """
     from . import project_manager as _pm
     fill = _load_project_config(project_id)
-    devices = _get_workshop_devices(workshop, project_id) if workshop else []
+    if devices is not None and len(devices) > 0:
+        # 调用方明确指定了设备：只出这些设备，不查台账
+        _devs = []
+        for _d in devices:
+            if isinstance(_d, dict):
+                _devs.append(_d)
+            elif _d:
+                _devs.append({"tag": str(_d), "name": str(_d), "model": ""})
+        devices = _devs
+    else:
+        devices = _get_workshop_devices(workshop, project_id) if workshop else []
     _ws = workshop or '全厂'
     _sub = (fill.get('分部工程') or '').strip()
 

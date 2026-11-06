@@ -5366,99 +5366,240 @@ def frontend_smart_doc_analyze(payload: dict = None):
 
 @app.post("/api/smart-doc/batch-generate")
 def frontend_smart_doc_batch_generate(payload: dict):
-    """批量生成工程文件。payload: {file_type, devices: []}"""
+    """批量生成工程文件。payload: {file_type, devices: []}
+
+    v0.1.201：原来 success 只统计「函数没抛异常」，而生成器从不出文件，
+    于是 11 个类型里 8 个报着 success=N 却零产出。现改为以
+    **是否真的产出可下载文件** 为准，并把失败原因逐条回给前端。
+    """
     from . import smart_doc_generator as _sdg
     file_type = payload.get("file_type") or ""
     devices = payload.get("devices") or []
     success = 0
     failed = 0
+    files = []
+    errors = []
     for dev in devices:
         try:
-            r = _sdg.generate_from_natural_language(f"生成{file_type}：{dev}")
-            if isinstance(r, dict) and r.get("ok"):
+            r = _sdg.generate_from_natural_language(
+                f"生成{file_type}：{dev}", project_id=payload.get("project_id"))
+            if isinstance(r, dict) and r.get("ok") and r.get("output_path"):
                 success += 1
+                files.append({"device": dev, "file": r.get("output_file"),
+                              "path_id": f"{(r.get('result') or {}).get('doc_type', '')}/{r.get('output_file')}"})
             else:
                 failed += 1
-        except Exception:
+                errors.append({"device": dev,
+                               "error": (r or {}).get("error") or "未产出文件"})
+        except Exception as e:  # noqa: BLE001
             failed += 1
-    return {"ok": True, "success": success, "failed": failed}
+            errors.append({"device": dev, "error": str(e)})
+    return {"ok": True, "success": success, "failed": failed,
+            "files": files, "errors": errors,
+            "message": f"成功 {success} 份，失败 {failed} 份"}
 
 
 @app.get("/api/smart-doc/history")
 def frontend_smart_doc_history(limit: int = 50):
-    """生成历史（前端资料生成模块）。"""
+    """生成历史（前端资料生成模块）。
+
+    v0.1.201：原来读全局 data/generated_docs 的**平铺**目录。
+    而 v0.1.168 起生成文件实际落在 <项目目录>/generated_docs/<类型>/，
+    结构多了一层、位置也换了 —— 这个端点于是一直返回 history=[]。
+    实测：当前项目实际有 14 份 docx，/api/archive/status 报 generated_total=14，
+    本端点却返回 {"ok":true,"history":[]}，用户看不到任何生成记录。
+
+    改为复用 archive._list_generated()（项目级、按类型分目录的唯一实现），
+    不再自己拼路径。
+    """
     import time as _time
     hist = []
     try:
-        gen_dir = os.path.join(config.DATA_DIR, "generated_docs")
-        if os.path.exists(gen_dir):
-            for fn in sorted(os.listdir(gen_dir), reverse=True)[:limit]:
-                path = os.path.join(gen_dir, fn)
-                mtime = os.path.getmtime(path)
+        from . import archive as _ar
+        gen = _ar._list_generated()
+        for doc_type, paths in (gen or {}).items():
+            for p in paths:
+                fn = os.path.basename(p)
+                try:
+                    mtime = os.path.getmtime(p)
+                except Exception:
+                    mtime = 0
                 hist.append({
-                    "id": fn,
+                    "id": f"{doc_type}/{fn}",
                     "file_name": fn,
-                    "file_type": fn.split("_")[0] if "_" in fn else "文档",
+                    "file_type": doc_type,
                     "device": fn.split("_")[1] if "_" in fn and len(fn.split("_")) > 1 else "",
                     "generate_time": _time.strftime("%Y-%m-%d %H:%M", _time.localtime(mtime)),
+                    "_mtime": mtime,
                 })
-    except Exception:
-        pass
+        hist.sort(key=lambda h: h.get("_mtime", 0), reverse=True)
+        for h in hist:
+            h.pop("_mtime", None)
+        hist = hist[:limit]
+    except Exception:  # noqa: BLE001
+        hist = []
     return {"ok": True, "history": hist}
 
 
-@app.get("/api/smart-doc/download/{doc_id}")
+@app.get("/api/smart-doc/download/{doc_id:path}")
 def frontend_smart_doc_download(doc_id: str):
-    """下载生成的工程文件。"""
-    gen_dir = os.path.join(config.DATA_DIR, "generated_docs")
-    safe = os.path.basename(doc_id)
-    path = os.path.join(gen_dir, safe)
-    if os.path.exists(path):
-        return FileResponse(path, filename=safe)
+    """下载生成的工程文件。
+
+    v0.1.201：原来直接在全局 data/generated_docs 下拼文件名，找不到就报
+    「文件不存在」—— 而真实文件在项目子目录里，所以每份生成的文件都下不了。
+    改为在项目生成目录里按「类型/文件名」定位，且只允许落在生成根目录内。
+    """
+    from . import archive as _ar
+    gen_root = os.path.abspath(_ar._gen_dir())
+    raw = (doc_id or "").replace("\\", "/")
+    # 前端传来的 id 是「类型/文件名」；老记录也可能只给文件名
+    cand = []
+    if "/" in raw:
+        cand.append(os.path.join(gen_root, *[p for p in raw.split("/") if p and p not in (".", "..")]))
+    else:
+        safe = os.path.basename(raw)
+        for doc_type in os.listdir(gen_root) if os.path.isdir(gen_root) else []:
+            cand.append(os.path.join(gen_root, doc_type, safe))
+    for path in cand:
+        rp = os.path.abspath(path)
+        # 防目录穿越：必须仍在生成根目录之下
+        if not rp.startswith(gen_root + os.sep):
+            continue
+        if os.path.isfile(rp):
+            return FileResponse(rp, filename=os.path.basename(rp))
     return {"ok": False, "error": "文件不存在"}
 
 
-@app.post("/api/smart-doc/regenerate/{doc_id}")
-def frontend_smart_doc_regenerate(doc_id: str):
-    """重新生成工程文件（按文件名重跑）。"""
+@app.post("/api/smart-doc/regenerate/{doc_id:path}")
+def frontend_smart_doc_regenerate(doc_id: str, payload: dict = None):
+    """重新生成工程文件（按文件名重跑）。
+
+    v0.1.201：原来只在全局生成目录里找文件、且从文件名拆「类型_设备_时间」，
+    拆出来是 繁工AI_施工方案_20261104_192947 → file_type="繁工AI"、device="施工方案"，
+    识别结果全错。现改为在项目生成目录里定位原文件、取真实类型再重生成。
+    另两处实测出来的问题一并修掉：
+      ① 路由声明从 {doc_id} 改成 {doc_id:path}。前端传的 id 是「类型/文件名」，
+         带斜杠，单段路径参数匹配不上，实测所有下载都 404（bytes=22 的
+         {"ok":false,"error":"文件不存在"}）。
+      ② 目录名是**归档名**（焊接作业指导书/设备安装检查记录），生成器只认
+         **内部类型**（焊接方案/设备验收）。原来直接拿归档名去生成，实测
+         {"ok":false,"error":"重新生成未产出文件"}。现用 _internal_type_of()
+         反向映射，并把前端传来的 project_id 透传下去（原来是 None，丢了项目范围）。
+    """
     from . import smart_doc_generator as _sdg
-    safe = os.path.basename(doc_id)
-    # 从文件名反推类型和设备（文件名格式: 类型_设备_时间.docx）
-    parts = safe.replace(".docx", "").split("_")
-    file_type = parts[0] if parts else ""
-    device = parts[1] if len(parts) > 1 else ""
-    if file_type and device:
-        try:
-            r = _sdg.generate_from_natural_language(f"生成{file_type}：{device}")
-            return {"ok": True, "message": "已重新生成", "result": r}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-    return {"ok": False, "error": "无法从文件名识别类型/设备"}
+    from . import archive as _ar
+    gen_root = os.path.abspath(_ar._gen_dir())
+    raw = (doc_id or "").replace("\\", "/")
+    target = None
+    if "/" in raw:
+        p = os.path.abspath(os.path.join(gen_root, *[x for x in raw.split("/") if x and x not in (".", "..")]))
+        if p.startswith(gen_root + os.sep) and os.path.isfile(p):
+            target = p
+    else:
+        safe = os.path.basename(raw)
+        for dt in os.listdir(gen_root) if os.path.isdir(gen_root) else []:
+            p = os.path.join(gen_root, dt, safe)
+            if os.path.isfile(p):
+                target = p
+                break
+    if not target:
+        return {"ok": False, "error": "原文件不存在，无法重新生成"}
+
+    # 目录名是归档名，生成器只认内部类型，必须回转一次
+    archive_name = os.path.basename(os.path.dirname(target))
+    doc_type = _sdg._internal_type_of(archive_name)
+    try:
+        r = _sdg.regenerate_by_type(
+            doc_type,
+            project_id=(payload or {}).get("project_id"),
+            # v0.1.202：把原文件的 id 传进去，再生成时才能从它的关联记录里
+            # 读回原来的设备名（否则产出的新表设备列是空的）。
+            doc_id=f"{archive_name}/{os.path.basename(target)}")
+        if isinstance(r, dict) and r.get("ok") and r.get("output_path"):
+            return {"ok": True, "message": "已重新生成",
+                    "file": r.get("output_file"), "result": r}
+        return {"ok": False, "error": (r or {}).get("error") or "重新生成未产出文件"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/devices")
 def frontend_devices(workshop: str = ""):
-    """设备列表（前端批量生成模块）。"""
-    from . import device_workshop as _dw, workshop_assign as _wa
+    """设备列表（前端批量生成模块：选车间 → 勾设备 → 批量出表）。
+
+    v0.1.202：原来这里读 `workshop_assign.list_by_workshop()` 的
+    `ws_data.get("workshops")` —— 但该函数返回的是 `{车间: [记录]}`，
+    **顶层根本没有 "workshops" 这个键**，取出来永远是 None，循环体一次都不执行。
+    `dw_data` 算完之后也没被使用。
+    实测：紫金选矿厂真实台账项目（228 台设备、19 个车间）调本接口，
+    无论传不传 workshop 都返回 {"ok":true,"devices":[]}，
+    前端「批量生成」那一步的「选择设备」框永远是「该车间暂无设备数据」——
+    整个批量生成模块在真实数据下**完全不可用**，一张表也出不来。
+
+    设备台账（index.json 的 devices）才是设备的权威名单，且带名称/型号/车间；
+    车间归属登记（workshop_assign / device_workshop）只作为补充来源。
+    这里改为以台账为主源，并按用户选择同时输出两个可用值：
+    · value  ：传给后端的设备标识，优先位号，无位号时用名称
+    · name   ：设备名称（真实台账 215/228 行有位号为空，只有名称可用）
+    """
+    from . import supervision_templates as _st
+
     devices = []
-    try:
-        ws_data = _wa.list_by_workshop()
-        dw_data = _dw.list_devices() if hasattr(_dw, "list_devices") else {}
-    except Exception:
-        ws_data, dw_data = {}, {}
-    # 从车间-文件关系找设备
     seen = set()
-    for ws, files in (ws_data.get("workshops") or {}).items():
-        if workshop and ws != workshop:
+
+    # ── ① 主源：当前项目设备台账 ──
+    try:
+        ledger = _st._get_workshop_devices(workshop or "", None) or []
+    except Exception:  # noqa: BLE001
+        ledger = []
+    for d in ledger:
+        name = (d.get("name") or "").strip()
+        tag = (d.get("tag") or "").strip()
+        if not name and not tag:
             continue
-        for f in files:
-            text = str(f)
-            for m in re.finditer(config.EQUIPMENT_TAG_RE, text):
-                tag = m.group(1)
-                if tag not in seen:
+        key = f"{tag}|{name}"
+        if key in seen:
+            # v0.1.203：台账里同名设备有多台且没有位号（磨浮车间 30 台里有
+            # 渣浆泵×3、充气式机械浮选机×3、液下渣浆泵×3…），按名字折成一条
+            # 之后用户只看到 21 条，会以为台账丢了一半。这里累加同名台数，
+            # 前端标出来，用户知道「同名 N 台」。
+            for _x in devices:
+                if f"{_x.get('tag', '')}|{_x.get('name', '')}" == key:
+                    _x["same_name_count"] = _x.get("same_name_count", 1) + 1
+                    break
+            continue
+        seen.add(key)
+        devices.append({
+            "tag": tag,
+            "name": name,
+            "value": tag or name,          # v0.1.202：无位号时用名称，不再返回空标识
+            "model": d.get("model") or "",
+            "workshop": d.get("workshop") or (workshop or ""),
+            "unit": d.get("unit") or "",
+            "same_name_count": 1,
+        })
+
+    # ── ② 补充：车间-文件归属登记里能认出来的位号 ──
+    try:
+        from . import workshop_assign as _wa
+        ws_map = _wa.list_by_workshop() or {}
+        for ws, recs in ws_map.items():
+            if workshop and ws != workshop:
+                continue
+            for rec in (recs or []):
+                text = f"{rec.get('file_name', '')} {rec.get('workshop', '')}"
+                for m in re.finditer(config.EQUIPMENT_TAG_RE, text):
+                    tag = m.group(1)
+                    if tag in seen:
+                        continue
                     seen.add(tag)
-                    devices.append({"tag": tag, "name": tag, "model": "", "workshop": ws})
-    return {"ok": True, "devices": devices}
+                    devices.append({"tag": tag, "name": tag, "value": tag,
+                                    "model": "", "workshop": ws, "unit": ""})
+    except Exception:  # noqa: BLE001  补充源失败不影响主源
+        pass
+
+    return {"ok": True, "devices": devices, "total": len(devices),
+            "source": "设备台账"}
 
 
 @app.get("/api/archive")

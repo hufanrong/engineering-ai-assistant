@@ -107,12 +107,34 @@ def _load_index():
     return {}
 
 
+def _iter_index_files(idx):
+    """从 index.json 里挑出真正的「文件条目」。
+
+    v0.1.201 实测缺陷：index.json 的真实结构是**混合**的 ——
+    文件条目按内容 sha256 哈希做键平铺在顶层，同时还混着
+        files（列表）、devices（列表）、workshops、ledger_skipped_rows、
+        updated_at（字符串）
+    这些元数据键。原 plan_status() 直接 `for info in idx.values()` 后调
+    info.get(...)，一旦迭代到列表/字符串就抛
+        AttributeError: 'list' object has no attribute 'get'
+    外部接口实测 /api/docplan/status 直接 500，selftest 的「生成任务计划」
+    也就一直红。这里只认 dict 且带 file_name 的条目。
+    """
+    if not isinstance(idx, dict):
+        return []
+    out = []
+    for _key, info in idx.items():
+        if isinstance(info, dict) and info.get("file_name"):
+            out.append(info)
+    return out
+
+
 # ---------- 3. 资料计划状态：库里已有什么、每类缺什么 ----------
 def plan_status():
     """返回每类资料的准备度：ready=齐可生成；partial=缺部分（列出缺什么）；missing=完全没有前置。"""
     idx = _load_index()
     have_classes = {}
-    for info in idx.values():
+    for info in _iter_index_files(idx):
         if info.get("status") not in ("parsed", "skipped"):
             continue
         for label in classify_file(info.get("file_name", "")):

@@ -263,7 +263,203 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #   白占 380 KB 并把设备数据在用户目录里重复了三份。改为 write_json，
 #   并在 run() 启动时调 sweep_orphan_tmp 自愈用户机器上已有的历史垃圾
 #   （实测已清除 3 个，228 台设备数据完好、coverage=1.0）。
-APP_VERSION = "0.1.200"
+#
+# ============ v0.1.201 「资料生成」全链路假成功 + 产出丢失 ============
+# 用户点「智能生成资料」看到「生成成功」，去「生成历史」却是空的、下载报
+# 「文件不存在」、重新生成还把类型认错。逐层查出 7 处缺陷，全部实测复现后修掉：
+#
+#   A 报成功却没文件：前端下拉 11 个类型，8 个返回 ok=true success=1，
+#     但项目 generated_docs 下的 docx 数量 14 → 14 没变；另 3 个返回 failed。
+#     根因：_call_generator 调 mining_* 系列只返回 JSON 结构（plan/sections），
+#     没有任何一步写文件；else 分支返回 status="template_generated" 占位串；
+#     main.py 把「函数没抛异常」当成成功。修法：新增 _persist_docx() 落盘层，
+#     并把「persisted && output_path」作为唯一成功判据。
+#
+#   B 历史恒为空：GET /api/smart-doc/history 返回 ok:true history:[]，而磁盘上
+#     有 14 份真文件。根因：v0.1.168 把产出从全局 data/generated_docs（平铺）
+#     改到 <项目>/generated_docs/<类型>/（嵌套），读接口一直没跟着改。
+#     修法：改走 archive._list_generated()，与写真源同一处。
+#
+#   C 下载恒报「文件不存在」：同上，读的是不存在的平铺全局目录。
+#     修法：改按 <项目>/generated_docs 解析，并加目录穿越校验
+#     （abspath 必须落在 gen_root 内）。
+#
+#   D 再生成把类型认错：繁工AI_施工方案_20261104_192947.docx 被按 "_" 切，
+#     切成 file_type="繁工AI"、device="施工方案"。
+#     修法：doc_type 从父目录名取，文件名只用于展示。
+#
+#   E 同秒生成互相覆盖（测试跑出来才发现的）：文件名精确到秒
+#     （%Y%m%d_%H%M%S），批量生成 30 台设备必然同秒。实测连续 5 次
+#     _save_generated 只留 1 个文件，其余 4 份被覆盖。
+#     修法：基础名已存在则加 _2/_3 序号后缀；复测 5 次得 5 个不同文件。
+#
+#   F 两处产出根目录各写一半：按用户规则「有现表用现表」，表单类走
+#     supervision_templates.render_gb_fallback() 落在 <项目>/exports/，
+#     方案类走 docgen 落在 <项目>/generated_docs/。exports 里的那些
+#     对「生成历史」「下载」全部不可见。
+#     修法：把 exports 产物读成字节后重存进 generated_docs/<归档类型>/，
+#     再删掉 exports 副本，全项目只留一处产出真源。
+#
+#   G 内部短名漏到归档目录：用户选的是「设备验收记录」，归档目录却叫
+#     「设备验收」，历史里对不上用户认得的表名。
+#     修法：_ARCHIVE_TYPE 映射成用户可识别的表全名（开箱检验→开箱验收记录、
+#     隐蔽工程→隐蔽工程验收记录、设备验收/安装记录→设备安装检查记录、
+#     基础验收→设备安装基础复测记录、试运转→单机无负荷试运转记录、
+#     安全交底→安全技术交底记录、焊接方案→焊接作业指导书），
+#     与 docgen / 竣工组卷 VOLUMES 04 卷同名处保持同名。
+#
+# 回归测试 tools/test_smart_doc_persist.py 覆盖 A-F 六组，62 项断言。
+# 反向验证过两次（把缺陷注回去看测试是否真的报红）：
+#   注入「无落盘」→ 11 个类型的「产出文件」「是合法 docx」断言全部 FAIL；
+#   注入「同秒覆盖」→ [D] 组「连续 5 次落盘得到 5 个不同文件名」FAIL
+#   （实测不同=1）。两次注入后即恢复，最终 62 PASS / 0 FAIL。
+#
+# ============================================================
+# v0.1.202：按用户规则「首次在本地电脑实测」前，拿紫金选矿厂真实台账
+# （data/uploads 真实设备台账，228 行 / 215 行有设备名 / 19 个车间）
+# 把整条链路真跑了一遍，又打出 4 个真实缺陷 —— 全部是「界面点得动、
+# 真实数据下出不来能用的表」这一类，空数据测试绝对看不出来：
+#
+#   H 设备识别只认 8 类硬编码设备名，真实台账命中率 6.5%。
+#     实测 14/215 命中，未命中「Y0#胶带输送机」「金属探测器」
+#     「重型板式给料机」「液下渣浆泵」「电动单梁起重机」这些最常见的。
+#     更糟的是把设备名**改写成别的设备**：圆锥破碎机→颚式破碎机、
+#     高压辊磨机变频器→球磨机、真空带式过滤机→压滤机。给监理的表上
+#     印着另一台设备的名字，属于不可交付的错误。
+#     修法：以项目台账为权威设备名单做精确命中（原名原样返回），
+#     内置名单只整词命中，别名加冲突词拦截；认不出时用用户自己写在
+#     「：」后面的设备原名（那是用户提供的事实，不是编造）。
+#     复测：215/215 原样识别（100%），改写 0 起。
+#
+#   I 按设备批量出表，设备列全空、三份表内容完全相同。
+#     _persist_docx 的表单分支从不把 equipment 传给
+#     render_gb_fallback，后者也没有接受单台设备的入口，只按车间查台账。
+#     实测球磨机1/2/3 → 3 份字节级不同的文件，但「设备名称」「设备位号」
+#     两列全空、内容一致，用户分不出哪份是哪台设备的。
+#     修法：render_gb_fallback 新增 devices 参数；落盘层按名称从台账补全
+#     位号与规格型号再传下去。复测 3 台设备 → 3 份互不相同（sha 全不同）、
+#     每份都含自己的设备名。
+#
+#   J 资料-设备关联一条都没登记成功，且**异常被静默吞掉**。
+#     archive._save_generated → doc_relations.register_doc 内部做
+#     set(devices)，而传进来的是 {"tag": ...} 这种 dict，dict 不可哈希 →
+#     TypeError；外层 try/except 把异常吞掉，界面一切正常。
+#     实测当前项目 10 份生成文件 relations.json 里 with_devices=0，
+#     「按设备找资料」「完整性检查」全部失效。
+#     修法：register_doc 自身归一化输入（dict → 位号字符串），
+#     _save_generated 同样先归一，并把失败原因打到日志不再无声无息；
+#     表单分支落盘时也补传设备。复测 3 份表 with_devices=3。
+#
+#   K 前端「批量生成」在真实数据下**完全不可用**，选设备框永远为空。
+#     GET /api/devices 读 workshop_assign.list_by_workshop() 的
+#     ws_data.get("workshops")，但该函数返回的是 {车间: [记录]}，
+#     顶层**没有 workshops 这个键**，取出来恒为 None，循环体一次不执行；
+#     另算出来的 dw_data 根本没被使用。
+#     实测真实项目（228 台设备）无论传不传车间都返回 devices=[]。
+#     修法：改为以项目设备台账为主源（带名称/型号/车间），车间归属登记
+#     只作补充；无位号时 value 回落设备名称（真实台账 215/228 位号为空）。
+#     复测：全部车间 125 台、磨浮车间 21 台。
+#
+#   L 再生成丢掉设备名。regenerate_by_type 的 equipment 缺省为空，
+#     实测对「设备安装检查记录」点再生成，新表「设备名称」列是空的。
+#     修法：按 doc_id 从 doc_relations 取回原设备名再生成；端点把原文件
+#     的 id 传下去。复测：再生成后设备名称行=溢流型球磨机。
+#
+# 回归测试 tools/test_smart_doc_persist.py 扩到 A-I 九组，
+# 新增 [H] 设备识别（真实台账口径）/ [I] 按设备出表不串台。
+#
+#   M 批量生成模块「选择车间」下拉从来没人填充。页面里只有一个
+#     <option value="">全部车间</option>，而 loadBatchDevices() 在车间为空时
+#     直接 return —— 两头一夹，用户在批量生成模块里**永远看不到一台设备**。
+#     实测当前项目 /api/devices 有 125 台可用，页面却一直显示
+#     「请先选择车间加载设备列表」，这个模块在真实数据下等于空的。
+#     （顺带更正一处自测口径：本模块下拉里只有 设备验收记录/开箱检验记录/
+#     隐蔽工程验收记录/安全技术交底/技术交底 五个值；「设备安装检查记录」
+#     是归档名不是下拉值，拿它当入参测出来的失败不算产品缺陷。）
+#     修法：从 /api/workshops 填充车间（带台数），初始化即加载一次设备；
+#     车间留空按「全部车间」加载，不再直接 return。
+#
+#   N /api/devices 把同名设备折叠后不给任何提示。磨浮车间台账 30 台，
+#     其中 渣浆泵×3、充气式机械浮选机×3、液下渣浆泵×3、浮选配套刮板×2、
+#     电动葫芦×2、泡沫泵×2（台账本身没有位号），按 tag|name 去重后只剩 21 条。
+#     用户看到 21 台会以为台账丢了一半。
+#     修法：折叠时累加 same_name_count，前端标注「同名 N 台」，不吞数据。
+#
+#   O 首屏资源管理是空的（v0.1.204，真实浏览器实测发现）。页面默认停在
+#     module-resource，但 DOMContentLoaded 只调 loadProjects()，
+#     **从来没人调 loadResourceData()**；switchModule('resource') 里虽然有
+#     loadResourceData()，但那只在用户主动点页签时才执行。
+#     实测（Chromium headless，项目 322fef90 有 228 台设备/20 个车间）：
+#       首屏 statFiles/statWorkshops/statDevices = 0/0/0，车间卡片 0 张，
+#       导出车间下拉 0 项 —— 用户看到的是「项目是空的」；
+#       手动点一下「资源管理」页签后变成 1/20/21、20 张卡片。
+#     修法：拿到当前项目后立刻调 loadResourceData()。
+#
+#   P 导出卡片「选择车间」的显隐从来没生效过（v0.1.204）。
+#     <div style="flex:1" id="exportWorkshopWrap" style="display:none">
+#     写了两个 style 属性，按 HTML 规范只认第一个，display:none 被丢弃，
+#     元素一直是显示状态；代码里也没有第二处去切换它。
+#     修法：合并成一个 style 属性 + syncExportWorkshopWrap() 按导出范围切换，
+#     并给 exportScope 绑 onchange。
+#
+#   ⚠ 自测口径教训（必须延续）：本轮 3 次「发现缺陷」都是我的测试错的，
+#     不是产品错 —— ① 在空项目上问车间/设备数返回 0 是正确行为；
+#     ② 固定 sleep 猜异步时长（/api/supervision-templates 实测耗时 2.38s，
+#        600/900/1200ms 的等待都读到了「加载中」中间态，被误报成空下拉）；
+#     ③ DOM 桩的 appendChild 没有同步更新 innerHTML，断言永远读到 0。
+#     结论：断言前必须先确认真实数据存在、异步真的落定，再判缺陷。
+#
+# ============ v0.1.205：智能窗口（module-ai）逐项实测 ============
+# 上一轮把首屏/资料生成验完了，这一轮改验「智能窗口」——
+# 紫金矿业的工程师实际就是在这个窗口里问「磨浮车间有哪些设备」的。
+#
+#   Q 智能窗口的提问从来没真正调用过后端（v0.1.205，真实浏览器实测发现）。
+#     sendChat() 里根本没有 fetch，只有一段关键词匹配 switchModuleByName()，
+#     欢迎语却写着「或直接提问工程相关问题」—— 用户问任何问题都只得到一句
+#     「已为您跳转到XX模块」。测试办法：monkey-patch window.fetch 计数，
+#     实测请求数 = 0。
+#     修法：真的 POST /api/ai/chat，渲染 answer / sources / 文档下载按钮。
+#
+#   R AI 检索硬编码全局向量库，检索不到当前项目的资料（v0.1.205）。
+#     ai_chat._store() 写死 config.DATA_DIR/'vectordb'，而项目隔离约定
+#     （app/project_scope.py）要求业务数据一律落在 data/projects/<id>/ 下。
+#     实测项目 322fef90 有 228 台设备，问「磨浮车间有哪些设备」，
+#     返回 sources.project = 0 —— 全局 data/vectordb 目录压根不存在。
+#     修法：按当前项目取 <项目数据目录>/vector_db。
+#
+#   S 向量库不可用时没有任何降级，检索恒为 0（v0.1.205）。
+#     离线单机环境没装 chromadb，_store().search() 抛
+#     ModuleNotFoundError 被 try 吞掉，结果一条不返回还不报错。
+#     修法：降级走 vector_store.search_keyword()（直接匹配 parsed_cache/*.json），
+#     并在回答里如实写明「本次按关键词匹配检索，未使用向量语义检索」。
+#
+#   T 待办列表取错字段名，整列渲染成空（v0.1.205）。
+#     代码读 p['name'] / p['missing_summary']，而 plan 数据里是
+#     doc_type / desc / missing —— 实测 9 条待办全部显示为「  - ：资料不全」。
+#     修法：改读正确字段，缺资料时拼「缺 X、Y」。
+#
+#   U 6 个「快捷功能入口」全是 alert('……请到XX中查看') 文字占位（v0.1.205）。
+#     后端接口其实都存在（/api/search、/api/relations、/api/spatial/structure、
+#     /api/platform/list、/api/equipment-merge/pending、/api/projects/backups），
+#     用户点进去只得到一句「请去别的页面看」—— 功能等于不存在。
+#     修法：统一弹窗承接真实数据；接口报错时如实显示错误，不假装成功。
+#
+#   V 云端合并的「扫描」按钮打到了不存在的路由（v0.1.205）。
+#     前端 POST /api/equipment-merge/scan，实测 404 {"detail":"Not Found"}；
+#     真正的执行入口是 POST /api/equipment-merge/run（无 body），
+#     返回汇总计数（total_equipment / merged_count / pending_count /
+#     duplicate_removed / skipped_rows）而不是 items 数组。
+#     修法：改打真实路由并按计数渲染。
+#
+#   ⚠ 自测口径教训（必须延续）：本轮我自己的测试也犯了两次错，
+#     都是「把测试写错当成产品有缺陷」，已修正并留下证据：
+#     ① 查 /api/supervision/status 忘了带 book 参数，返回 total:0 就报警
+#        —— 实际带上 book=第一册&workshop=磨浮车间 后是 total:6、generated:6。
+#     ② verify_archive.js 里断言了一个根本不返回的字段 page_basis，
+#        却把 undefined 硬写成 true —— 假通过。
+#        已改为：从落盘的 _卷内目录.docx 抠出「本卷共 N 份文件，合计 M 页」，
+#        再用 _safe_page_count 独立重渲 6 个 docx 复算页数并对账。
+APP_VERSION = "0.1.205"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），
