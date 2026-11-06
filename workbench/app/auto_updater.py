@@ -283,32 +283,40 @@ def get_latest_version_from_github() -> Dict:
     # v0.1.206：原来这里读的是 workbench/app/main.py 里 `version = "..."`，
     # 而版本号实际定义在 app/config.py 的 APP_VERSION —— 永远匹配不到，
     # raw 方式必定落空、静默退回方式2。
-    try:
-        raw_url = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/workbench/app/config.py"
-        req = urllib.request.Request(raw_url)
-        req.add_header("User-Agent", "FanGongAI-Updater")
-        
-        with urllib.request.urlopen(req, timeout=15) as response:
-            content = response.read().decode("utf-8")
-        
-        # 从 config.py 中提取版本号
-        version_match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', content)
-        if version_match:
-            latest_version = version_match.group(1)
-            current = get_current_version()
-            return {
-                "ok": True,
-                "latest_version": latest_version,
-                "latest_commit": "",
-                "latest_commit_msg": f"v{latest_version}",
-                "latest_commit_date": "",
-                "current_version": current,
-                "has_update": _compare_versions(latest_version, current) > 0,
-                "source": "raw",
-            }
-    except Exception as e:
-        # raw方式失败，继续尝试API方式
-        pass
+    # v0.1.207：raw 会在网络抖动时返回 502。实测（2026-11-06 19:14，连续 6 次）：
+    #   OK / 502 / OK / OK / OK / 502 / 502  —— 约一半失败。
+    # 单发一次就退回方式2，导致「同一接口几秒内给出两个不同答案」。
+    # 加两次重试（共 3 次机会，间隔 1s / 2s），把抖动挡在版本号之外。
+    for attempt in range(3):
+        try:
+            raw_url = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/workbench/app/config.py"
+            req = urllib.request.Request(raw_url)
+            req.add_header("User-Agent", "FanGongAI-Updater")
+
+            with urllib.request.urlopen(req, timeout=15) as response:
+                content = response.read().decode("utf-8")
+
+            # 从 config.py 中提取版本号
+            version_match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', content)
+            if version_match:
+                latest_version = version_match.group(1)
+                current = get_current_version()
+                return {
+                    "ok": True,
+                    "latest_version": latest_version,
+                    "latest_commit": "",
+                    "latest_commit_msg": f"v{latest_version}",
+                    "latest_commit_date": "",
+                    "current_version": current,
+                    "has_update": _compare_versions(latest_version, current) > 0,
+                    "source": "raw",
+                }
+        except Exception:  # noqa: BLE001
+            if attempt < 2:
+                time.sleep(1 if attempt == 0 else 2)
+                continue
+            # raw方式三次都失败，继续尝试API方式
+            break
     
     # 方式2：使用GitHub API（有频率限制）
     try:
@@ -324,12 +332,42 @@ def get_latest_version_from_github() -> Dict:
         commit_msg = data.get("commit", {}).get("message", "")
         commit_date = data.get("commit", {}).get("committer", {}).get("date", "")
         
-        version_match = re.search(r'v(\d+\.\d+\.\d+)', commit_msg)
-        # v0.1.206：提交信息里没有版本号时（例如 WORKbuddy 提交的是
-        # "test(workbuddy): 20261106_080711 status=passed"），原来直接填
-        # "0.0.0"，于是「最新版本」变成 0.0.0、永远显示已是最新。
-        # 改为回退到本机已知版本，绝不凭空给 0.0.0。
-        latest_version = version_match.group(1) if version_match else get_current_version()
+        # v0.1.207：不再用提交信息里的 `v(\d+\.\d+\.\d+)` 猜版本号 —— 这个
+        # 假设是错的。实测（2026-11-06 19:12，本机 0.1.206 已推到 main）：
+        #   第 1~3 次 /api/update/check → latest=0.1.205 source=api
+        #   第 4~5 次 /api/update/check → latest=0.1.206 source=raw
+        # 同一接口、同一件事，几秒内给出两个答案。原因是 0.1.206 的提交
+        # 信息沿用了上一版文案 "feat(v0.1.205): ..."，正则就抓到 0.1.205。
+        # 提交信息是给人看的散文，不是版本数据源。
+        # 改为：版本号只认远端 config.py 里的 APP_VERSION（走 contents API
+        # 取同一份原文）；取不到就明确报错，绝不拿猜的值冒充。
+        latest_version = ""
+        remote_err = ""
+        try:
+            c_url = (f"{GITHUB_API_URL}/contents/workbench/app/config.py"
+                     f"?ref={GITHUB_BRANCH}")
+            req2 = urllib.request.Request(c_url)
+            req2.add_header("User-Agent", "FanGongAI-Updater")
+            req2.add_header("Accept", "application/vnd.github.raw")
+            with urllib.request.urlopen(req2, timeout=15) as r2:
+                src = r2.read().decode("utf-8", "replace")
+            m2 = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', src)
+            if m2:
+                latest_version = m2.group(1)
+        except Exception as e2:  # noqa: BLE001
+            remote_err = str(e2)[:120]
+
+        if not latest_version:
+            return {
+                "ok": False,
+                "error": "无法读取远端版本号（config.py 未取到），不做猜测",
+                "detail": remote_err,
+                "latest_commit": commit_sha,
+                "latest_commit_msg": commit_msg,
+                "latest_commit_date": commit_date,
+                "current_version": get_current_version(),
+                "suggestion": "可直接访问 https://github.com/hufanrong/engineering-ai-assistant 下载最新版",
+            }
         
         return {
             "ok": True,

@@ -482,9 +482,21 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     于是 latest_version 也变成 0.0.0。
 #
 #     修法：当前版本读 config.APP_VERSION（兼容旧名），再兜底解析
-#           config.py 源码；远端版本改读远端 config.py 的 APP_VERSION，
-#           提交信息无版本号时回退本机版本，不再凭空给 0.0.0。
-APP_VERSION = "0.1.206"
+#           config.py 源码；远端版本改读远端 config.py 的 APP_VERSION。
+#
+# v0.1.207：v0.1.206 只修了「当前版本」，远端那半边没修透，实测抓到：
+#     本机 0.1.206 已推到 main 后，连续 5 次 /api/update/check 得到
+#       第 1~3 次：latest=0.1.205  source=api
+#       第 4~5 次：latest=0.1.206  source=raw
+#     同一接口、同一件事，几秒内两个答案。两个独立根因：
+#       1) raw 路径在沙箱网络下约一半返回 502（连续 6 次：OK/502/OK/OK/OK/502/502），
+#          单发一次就掉到 API 兜底；
+#       2) API 兜底仍用提交信息里的 `vX.Y.Z` 猜版本号，而 v0.1.206 的提交
+#          沿用了上一版文案 "feat(v0.1.205): ..."，于是抓到 0.1.205。
+#     修法：raw 加两次重试（3 次机会）；API 兜底改从 contents API 取
+#           config.py 原文再读 APP_VERSION，与 raw 同一数据源；
+#           两者都取不到时明确返回 ok=false 报错，绝不拿猜的值冒充。
+APP_VERSION = "0.1.207"
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），
