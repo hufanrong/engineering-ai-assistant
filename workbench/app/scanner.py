@@ -333,6 +333,61 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
     return stats
 
 
+def reparse_file(path: str, data_dir=None) -> dict:
+    """v0.1.212：单文件重新解析（前端「重解析」按钮的真实实现）。
+
+    缺陷（实测 2026-11-07 19:2x）：/api/files/reparse 的后台线程里调用
+    `_sc.index_result(res, src, force=True)` —— **这个函数在 scanner 里根本不存在**，
+    一调用就抛 AttributeError，而外层是 `except Exception: pass` 把它彻底吞掉。
+    于是接口对用户永远返回「已加入重解析队列」，实际一个字节都没处理：
+    解析缓存没生成、索引没更新、车间没重算，界面上看不出任何异常。
+    这类「静默失败 + 谎报成功」比直接报错更难查 —— 用户会以为是自己操作不对。
+
+    这里复用 scan_folder 里那条真实链路（parse_file → 缓存 → 索引 → 车间 → 设备同步），
+    并把结果如实返回，不再吞异常。
+    """
+    res: ParseResult = parse_file(path)
+    ddir = _get_data_dir(data_dir)
+    idx = _load_index(ddir)
+    n_vec = 0
+    if res.status in ("parsed", "partial"):
+        try:
+            n_vec = VectorStore(db_path=os.path.join(ddir, "vector_db")).index_file(res)
+        except Exception as _ve:  # noqa: BLE001
+            res.structure = res.structure or {}
+            res.structure["vector_error"] = str(_ve)[:200]
+        try:
+            upload_queue.enqueue(res)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from . import workshop_assign
+            workshop_assign.assign_workshop(res.sha256, res.file_name, res.text or "",
+                                            res.structure or {}, file_path=path)
+        except Exception:  # noqa: BLE001
+            pass
+        _save_parsed_cache(res, ddir)
+    idx[res.sha256] = {
+        "file_name": res.file_name,
+        "file_path": path,
+        "status": res.status,
+        "parser": res.parser,
+        "error": res.error,
+        "entities": len(res.entities),
+        "retry_count": 0,
+        "ts": datetime.datetime.now().isoformat(),
+    }
+    _save_index(idx, ddir)
+    try:
+        sync_devices(ddir)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": res.status in ("parsed", "partial"), "status": res.status,
+            "parser": res.parser, "error": res.error,
+            "entities": len(res.entities), "vectorized": n_vec,
+            "sha256": res.sha256, "cache_saved": res.status in ("parsed", "partial")}
+
+
 def sync_devices(data_dir=None) -> dict:
     """v0.1.172：把设备台账行写进 index.json 的 devices。
     失败不影响主流程（设备同步是下游增强项，不能让解析入库回滚）。"""

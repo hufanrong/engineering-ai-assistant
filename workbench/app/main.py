@@ -5013,6 +5013,78 @@ def _frontend_index_items():
     return items
 
 
+def _fx_source_path(info):
+    """从一条索引记录里取出真实源文件路径（v0.1.212 新增）。
+
+    缺陷（实测 2026-11-07 19:2x）：「重解析 / 预览 / 下载」三个前端接口都只读
+    info["source_path"]，而扫描器写进索引里的字段名是 **file_path**，
+    索引里根本没有 source_path 这个键。于是对**每一个**由扫描器入库的文件：
+      POST /api/files/reparse        -> {"ok":false,"error":"源文件不存在，无法重解析"}
+      GET  /api/files/preview        -> 走不到文本分支时恒「无预览内容」
+      GET  /api/files/download       -> {"ok":false,"error":"源文件不存在"}
+    而文件其实好端端躺在 data/uploads/ 里（实测 18031 字节）。
+    /api/files 列表也把 source_path 恒投影成 ""，前端拿不到路径、按钮全部空转。
+    这是本项目反复出现的「同一件事两个答案」：**同一个事实（源文件在哪）**，
+    扫描器那边叫 file_path，前端接口这边叫 source_path，两边都「正常返回」。
+    这里统一成一处取值：先 source_path（外部导入写过的），再 file_path（扫描器
+    写的），都没有才空。四个调用点全部改走这里，不再各自拼字段名。
+    """
+    if not isinstance(info, dict):
+        return ""
+    for k in ("source_path", "file_path", "path"):
+        v = info.get(k)
+        # 必须是**普通文件**：目录也算 exists，如果把目录当源文件，
+        # 下游 FileResponse / parse_file 会拿到一个目录路径，行为不可预期。
+        if v and isinstance(v, str) and os.path.isfile(v):
+            return v
+    # 快路径全落空：索引里的路径已过期，但文件可能还躺在 data/uploads 里。
+    # 实测 322fef90：索引写 ..._3b408663b2c0_设备台账_真实_选矿厂.xlsx（2 个前缀），
+    # 磁盘上只有 1 个前缀和 6 个前缀的两份，索引那条路径根本不存在 ——
+    # 于是「重解析 / 预览 / 下载」全部报「源文件不存在」，而数据其实还在。
+    # 找回时必须**算全量 sha256 校验**，不能凭文件名前缀就当同一份：
+    # 前缀只是 sha 的前 12 位，猜错会把别的文件递给用户。
+    return _fx_find_upload_by_sha(info.get("sha256") or info.get("id") or "")
+
+
+_FX_SHA_CACHE = {}
+
+
+def _fx_find_upload_by_sha(sha):
+    """在 data/uploads 里按 sha 前缀找回源文件，返回前必须全量 sha256 相等。
+
+    找不到或校验不过一律返回 ""，绝不把「看起来像」的文件当源文件 ——
+    那等于用错误的资料覆盖用户的判断。
+    """
+    import hashlib
+    if not sha or not isinstance(sha, str) or len(sha) < 12:
+        return ""
+    if sha in _FX_SHA_CACHE:
+        return _FX_SHA_CACHE[sha]
+    try:
+        up = os.path.join((config.DATA_DIR or ""), "uploads")
+        if not up or not os.path.isdir(up):
+            return ""
+        for fn in sorted(os.listdir(up)):
+            if not fn.startswith(sha[:12]):
+                continue
+            p = os.path.join(up, fn)
+            if not os.path.isfile(p):
+                continue
+            try:
+                h = hashlib.sha256()
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                if h.hexdigest() == sha:
+                    _FX_SHA_CACHE[sha] = p
+                    return p
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        return ""
+    return ""
+
+
 def _frontend_index_dict():
     """将项目索引统一转换为 {sha或id: info} 字典。"""
     items = _frontend_index_items()
@@ -5147,7 +5219,7 @@ def frontend_files(workshop: str = "", status: str = "", q: str = "", limit: int
             "status": info.get("status") or "parsed",
             "upload_time": info.get("ts") or info.get("upload_time") or "",
             "size": info.get("size") or 0,
-            "source_path": info.get("source_path") or "",
+            "source_path": _fx_source_path(info),
         })
     items.sort(key=lambda x: x.get("upload_time") or "", reverse=True)
     return {"ok": True, "files": items[:limit], "total": len(items)}
@@ -5284,18 +5356,22 @@ def frontend_file_reparse(payload: dict):
     info = idx.get(file_id)
     if not info:
         return {"ok": False, "error": "文件不存在"}
-    src = info.get("source_path") or ""
+    # v0.1.212：索引里存的是 file_path，这里原来只读 source_path，恒空
+    src = _fx_source_path(info)
     if not os.path.exists(src):
         return {"ok": False, "error": "源文件不存在，无法重解析"}
-    def _run():
-        try:
-            res = _sc.parse_file(src)
-            _sc.index_result(res, src, force=True)
-        except Exception as e:
-            pass
-    import threading
-    threading.Thread(target=_run, daemon=True).start()
-    return {"ok": True, "message": "已加入重解析队列"}
+    # v0.1.212：原来这里调 _sc.index_result()，而 scanner 里根本没有这个函数，
+    # 异常被 except Exception: pass 全吞，接口却永远回「已加入重解析队列」——
+    # 用户点了重解析永远没结果，界面还显示成功。现在改调真实存在的 reparse_file()，
+    # 并且**同步执行 + 如实返回**：成功就报成功，失败就把 error 带给前端。
+    try:
+        r = _sc.reparse_file(src)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"重解析失败：{type(e).__name__}: {e}"}
+    if not r.get("ok"):
+        return {"ok": False,
+                "error": f"重解析未成功：{r.get('status')} {r.get('error') or ''}".strip()}
+    return {"ok": True, "message": "已重新解析", "result": r}
 
 
 @app.post("/api/files/batch-update")
@@ -5325,8 +5401,9 @@ def frontend_file_batch_reparse(payload: dict):
     paths = []
     for fid in ids:
         info = idx.get(fid)
-        if info and os.path.exists(info.get("source_path") or ""):
-            paths.append(info["source_path"])
+        _src = _fx_source_path(info)
+        if info and _src and os.path.exists(_src):
+            paths.append(_src)
     if not paths:
         return {"ok": False, "error": "没有可重解析的文件"}
     def _run():
@@ -5370,7 +5447,7 @@ def frontend_file_preview(name: str = ""):
     text = target.get("text") or ""
     if text:
         return {"ok": True, "text": text[:20000], "file_name": name}
-    src = target.get("source_path") or ""
+    src = _fx_source_path(target)
     if src and os.path.exists(src):
         ext = os.path.splitext(src)[1].lower()
         if ext in (".png", ".jpg", ".jpeg", ".bmp", ".gif"):
@@ -5389,7 +5466,8 @@ def frontend_file_download(name: str = ""):
     idx = _frontend_index_dict()
     for sha, info in idx.items():
         if info.get("file_name") == name or info.get("name") == name:
-            src = info.get("source_path") or ""
+            # v0.1.212：同上，统一走 _fx_source_path（file_path 兜底）
+            src = _fx_source_path(info)
             if src and os.path.exists(src):
                 return FileResponse(src, filename=name)
             break

@@ -48,6 +48,7 @@ TEST_PROJECT_ID = ""
 # 另建一个「自测隔离_HHMMSS」，实测每跑一次自测就多留一个空壳项目
 # （沙箱里累积 74 个测试残留、59 个 0 文件 0 设备）。
 CREATED_PIDS = []
+_ORIGIN_PID = ""      # run() 记下的用户原项目 id；phase6 用它切回来校验真实项目
 
 
 # ---------------- 后端选择：进程内 TestClient / 真实 HTTP ----------------
@@ -1055,6 +1056,35 @@ def phase6(samples_dir):
     P = 6
     print("\n=== 阶段 6：同一事实交叉比对 ===")
 
+    # v0.1.212：本阶段必须验**用户真实项目**，但前面几个阶段会把当前项目切到
+    # 自测项目上（phase1 建、phase3 切过去做整卷校验），而本阶段设计成「不切项目、
+    # 只读」，于是继承了那个临时项目的上下文。实测后果非常严重：
+    #   --phase all  -> 6.11 PASS（parsed=5 缺缓存=0），汇总 58/0，看起来全绿；
+    #   --phase 6    -> 6.11 FAIL（parsed=1 缺缓存=1 ['3b408663b2c0']），10/1。
+    # 同一份校验先建后验，用户项目里那条「status=parsed 但没有解析缓存」的
+    # 真实缺陷**从来没被这个阶段看见过**。这本身就是「同一件事两个答案」：
+    # 全量自测说通过、单跑说失败。所以这里显式切回用户原项目：
+    # _ORIGIN_PID 由 run() 在跑所有阶段前记下（含异常路径都会切回）。
+    _cur_before = ""
+    try:
+        _, _cb, _ = call("GET", "/api/projects/current")
+        _cur_before = (((_cb or {}).get("project") or {}).get("id") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    if _ORIGIN_PID:
+        _code_sw, _sw, _ = call("POST", "/api/projects/switch",
+                                {"project_id": _ORIGIN_PID})
+        _ok_sw = (_code_sw == 200 and (_sw or {}).get("ok", True))
+    else:
+        _ok_sw = False
+    # 无论成功与否都要落一条记录：这条断言的作用是证明「下面那些比对是在用户
+    # 真实项目上做的」，不记录就等于无法核实（全绿也可能是验错了项目）。
+    record(P, "在用户原项目上校验",
+           "切回用户原项目后再做交叉比对",
+           f"切换前={_cur_before or '?'} 目标={_ORIGIN_PID or '?'} 切换={_ok_sw}",
+           bool(_ok_sw) and bool(_ORIGIN_PID),
+           "切不回去时本阶段验的是临时项目，6.11 这类断言会假通过")
+
     # 6.1 版本号：把**所有**对外报版本的接口摆在一起比，而不是只比两点。
     # v0.1.211：原来只比 /api/status 与 /api/update/check 两处，于是漏掉了
     # /api/mobile/config 里写死的 "version": "0.1.99" —— 它藏在移动端配置接口里，
@@ -1161,6 +1191,44 @@ def phase6(samples_dir):
             elif isinstance(wv, str) and wv:
                 ws_names.add(wv)
         n_ws_dev = len(ws_names)
+        # v0.1.212：原来只断言「设备里出现的车间数 >= 1」，而真正该比的是
+        # 「/api/relations.workshops 这份车间清单」与「/api/workshops 那份」是否同一套。
+        # 实测 2026-11-07 19:0x：设备里能解析出 19 个车间、这条断言 PASS，
+        # 可同一时刻 /api/relations.workshops 是空数组 []，
+        # 于是 19 个真实车间的详情接口 GET /api/relations/workshop/<车间> 全部 404
+        # —— 又是「每个接口单独看都正常、只有摆在一起比才露馅」。
+        # 现在改成三处成对比对：设备自带车间数 / relations.workshops / api.workshops。
+        try:
+            code_w, wj, err_w = call("GET", "/api/workshops")
+            api_ws = (wj or {}).get("workshops") or [] if isinstance(wj, dict) else []
+        except Exception:  # noqa: BLE001
+            api_ws = []
+        n_api_ws = len(api_ws)
+        rel_ws = rel.get("workshops") if isinstance(rel, dict) else None
+        n_rel_ws = len(rel_ws) if isinstance(rel_ws, list) else None
+        # relations.workshops 为 None/非列表 = 接口形状坏了，算失败不算跳过
+        if n_rel_ws is None:
+            record(P, "车间清单两处一致",
+                   "relations.workshops 应为列表，且覆盖全部设备自带车间",
+                   f"relations.workshops={type(rel_ws).__name__} 设备自带={n_ws_dev}",
+                   False, "relations 接口没有返回 workshops 列表")
+        else:
+            # 口径说明：/api/workshops 是「文档级+设备级」合并清单（还会带上按文件名
+            # 推出来的车间），relations 是「设备级」图谱 —— 两者条数本来就可以不等，
+            # 上一版断言拿它们比条数，自测项目里就报 relations=3 api=4 的假失败。
+            # 真正同一件事的是：**设备自带的每个车间，relations.workshops 里都得有**。
+            # 这才是「车间详情接口不再 404」的充要条件。
+            rel_names = {w.get("workshop") for w in rel_ws
+                         if isinstance(w, dict) and w.get("workshop")}
+            missing = sorted(ws_names - rel_names)
+            ok7b = (not missing) and n_ws_dev >= 1
+            record(P, "车间清单两处一致",
+                   "设备自带的每个车间都出现在 relations.workshops 里（不得有遗漏）",
+                   f"relations={n_rel_ws}({sorted(rel_names)[:4]}…) "
+                   f"设备自带={n_ws_dev} 遗漏={missing or '无'}",
+                   ok7b,
+                   "有遗漏时该车间的详情接口会 404；/api/workshops 另含文档级车间，"
+                   "条数可比 relations 多，不算不一致")
         ok7 = n_ws_dev >= 1
         record(P, "设备车间归属可解析",
                "至少能解析出 1 个车间名",
@@ -1343,6 +1411,10 @@ def main():
             _origin_pid = (_c or {}).get("id") or ""
         except Exception:  # noqa: BLE001
             pass
+    # v0.1.212：暴露给 phase6 —— 它必须切回用户原项目校验，
+    # 否则全量自测时它验的是临时自测项目（详见 phase6 里的说明）。
+    global _ORIGIN_PID
+    _ORIGIN_PID = _origin_pid
 
     print(f"造样本 -> {sdir}")
     build_samples(sdir, include_dwg=True)

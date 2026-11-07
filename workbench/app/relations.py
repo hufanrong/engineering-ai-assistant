@@ -946,6 +946,68 @@ def _merge_index_devices(graph: dict, ledger: dict) -> dict:
         # 只修正计数，不覆盖其它统计口径；统计里的 devices 应等于实际条数
         st["devices"] = len(devs)
         st["devices_from_ledger"] = st.get("devices_from_ledger", 0) + added
+
+    # v0.1.212：把台账设备的车间也补进 graph["workshops"]。
+    #
+    # 缺陷（实测 2026-11-07 19:0x）：/api/workshops 报 19 个车间，
+    # 同一时刻 /api/relations 的 workshops 是空数组 []，而 228 台台账设备
+    # 自己身上明明带 19 个车间名。原因是上面这段合并只补 devices 与 stats，
+    # 从来没回头修 workshops —— 而 build_relations() 是唯一会建 workshops 的地方，
+    # 只导入台账、没跑图纸关联时图谱是 _blank_graph()，workshops 恒为 []。
+    # 后果是真实的、且用户直接撞上：
+    #   GET /api/relations/workshop/中矿堆    -> 404 未找到车间：中矿堆
+    #   GET /api/relations/workshop/磨浮车间  -> 404
+    #   19 个真实车间的详情接口全部 404（我逐个实测过）
+    # 下游还有一堆按车间取设备的地方（archive_enhanced / completion_archive /
+    # concealment / construction_log / damage_report 等 20 余处 load_relations()）
+    # 也一并拿不到车间。
+    # 合并口径与 build_relations() 完全一致，不臆造任何业务值：
+    #   zone 留 None（台账里没有全场图坐标，不假装有）；
+    #   docs 留空（台账不是图纸文档，不假装它产生过图纸）；
+    #   tags 用该车间的真实设备位号；
+    #   source 标 "ledger"，便于下游区分「图纸关联出来的车间」与「只在台账里的车间」。
+    ws_list = graph.get("workshops")
+    if not isinstance(ws_list, list):
+        ws_list = []
+        graph["workshops"] = ws_list
+    by_name = {w.get("workshop"): w for w in ws_list if isinstance(w, dict) and w.get("workshop")}
+    # 从当前设备集合里统计每个车间真实的设备位号
+    ws_tags: dict = {}
+    for d in devs:
+        if not isinstance(d, dict):
+            continue
+        for w in (d.get("workshops") or []):
+            if w:
+                ws_tags.setdefault(w, []).append(d.get("tag"))
+    added_ws = 0
+    for w, tags in ws_tags.items():
+        tags_sorted = sorted(t for t in tags if t)
+        if w not in by_name:
+            entry = {
+                "workshop": w,
+                "zone": None,
+                "docs": [],
+                "tags": tags_sorted,
+                "doc_count": 0,
+                "device_count": len(tags_sorted),
+                "source": "ledger",
+            }
+            ws_list.append(entry)
+            by_name[w] = entry
+            added_ws += 1
+        else:
+            # 已有车间：只把设备计数校准到真实条数（同一件事一个答案），
+            # 不动它的 zone / docs / source。
+            e = by_name[w]
+            if e.get("tags") and not isinstance(e.get("tags"), list):
+                e["tags"] = tags_sorted
+            e["device_count"] = len(tags_sorted)
+    if added_ws or ws_tags:
+        st = graph.get("stats")
+        if not isinstance(st, dict):
+            st = {}
+            graph["stats"] = st
+        st["workshops"] = len(ws_list)
     return graph
 
 

@@ -548,7 +548,16 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
 #     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
 #     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
-APP_VERSION = "0.1.211"
+APP_VERSION = "0.1.212"
+# v0.1.212：修「同一件事两个答案」的车间版本 ——
+#   /api/workshops 报 19 个车间，同一时刻 /api/relations.workshops 是空数组 []，
+#   而 228 台台账设备自己身上明明带 19 个车间名。根因在 relations._merge_index_devices()：
+#   它只补 devices 与 stats，从不重建 graph["workshops"]，而 build_relations() 是唯一
+#   会建 workshops 的地方 —— 只导入台账、没跑图纸关联时图谱是 _blank_graph()，
+#   workshops 恒为 []。用户直接撞上的后果：19 个真实车间的详情接口
+#   GET /api/relations/workshop/<车间> 全部 404（我逐个实测过）。
+#   阶段⑥ 原来只断言「设备里能解析出 >=1 个车间」，这条照样 PASS，
+#   所以缺陷一直漏过去 —— 现在改成 relations.workshops 与 api.workshops 成对比对。
 # v0.1.211：修「同一件事两个答案」的第三个来源 —— /api/mobile/config 里的 version
 #   原来写死 "version": "0.1.99"（v0.1.99 新增该路由时填的字面量，之后 111 个版本没跟着改）。
 #   实测 2026-11-07 13:1x（工作树 0.1.210）同一时刻三处：
