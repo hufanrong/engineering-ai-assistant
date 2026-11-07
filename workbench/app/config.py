@@ -548,7 +548,20 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
 #     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
 #     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
-APP_VERSION = "0.1.210"
+APP_VERSION = "0.1.211"
+# v0.1.211：修「同一件事两个答案」的第三个来源 —— /api/mobile/config 里的 version
+#   原来写死 "version": "0.1.99"（v0.1.99 新增该路由时填的字面量，之后 111 个版本没跟着改）。
+#   实测 2026-11-07 13:1x（工作树 0.1.210）同一时刻三处：
+#     /api/status.version        = 0.1.210
+#     /api/update/check.current  = 0.1.210
+#     /api/mobile/config.version = 0.1.99   ← 错
+#   移动端拿它判断「是否需要更新」，于是永远认为自己 0.1.99、永远提示有更新。
+#   为什么前几轮一直没抓到：阶段⑥ 原来只比 status 与 update/check **两点**，
+#   那条断言照样 PASS。这次做的是「把 /api/status 每个字段挨个找它的权威来源
+#   成对比较」的全量盘点，才挖出这个藏在移动端配置接口里的第三处。
+#   现在阶段⑥ 改成「列出全部版本号来源再逐一比对」，以后新增接口报版本
+#   加进列表即被自动校验。反向验证：把 mobile 这处改回 0.1.99 → 阶段⑥ 报
+#   「版本号全部来源一致」FAIL、exit=1。
 
 # ============ 本地配置覆盖机制（v0.1.127）============
 # 若存在 app/config.local.py（由自动更新模块在检测到本地修改时生成，或用户手工创建），

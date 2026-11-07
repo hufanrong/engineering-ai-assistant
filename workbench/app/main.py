@@ -350,6 +350,53 @@ def results(status_filter: str = None, limit: int = 200):
     return items[:limit]
 
 
+def _parsed_cache_dirs() -> list:
+    """解析缓存目录候选列表，**项目级在前、全局在后**。
+
+    v0.1.211：抽出来之前，同一个 `parsed_cache` 在 main.py 里有两种口径：
+      · 写入口 scanner._save_parsed_cache() → 走 _get_data_dir() → 项目级
+        data/projects/<id>/parsed_cache/
+      · 读取口至少 4 处仍写死 config.DATA_DIR/parsed_cache（全局）
+    结果就是「写进项目、全局读不到」：
+      · AI 助手降级关键词检索 search_keyword() 以 vector_db 的同级目录
+        作为 parsed_cache，即项目级 —— 而当前项目 322fef90 的
+        parsed_cache 压根没被建出来，于是 sources.project 恒为 0；
+        实测 verify_ai.js 4 项 FAIL：回答无实质内容 / 无「项目资料库命中」
+        / sources.project=0 / 检索说明缺失。
+      · 现场记录 OCR 回写（896/900）、OCR 文本收集（928）、
+        车间设备重建（1253）、聊天记录摘要（1421）同样读不到项目缓存。
+    这是本项目反复出现的「同一件事两个答案」的又一实例：路径这件事
+    有两条取值路径，而两边都「正常返回」看不出错。
+    统一口径为：当前项目目录优先，全局目录兜底（兼容升级前的老数据）。
+    """
+    dirs = []
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if cur and cur.get("id"):
+            dirs.append(os.path.join(_pm.get_project_data_dir(cur["id"]), "parsed_cache"))
+    except Exception:  # noqa: BLE001
+        pass
+    dirs.append(os.path.join(config.DATA_DIR, "parsed_cache"))
+    # 去重保序
+    out, seen = [], set()
+    for d in dirs:
+        a = os.path.abspath(d)
+        if a not in seen:
+            seen.add(a)
+            out.append(d)
+    return out
+
+
+def _find_parsed_cache(sha256: str):
+    """按项目级→全局顺序找出某个 sha 的解析缓存文件路径，找不到返回 None。"""
+    for d in _parsed_cache_dirs():
+        p = os.path.join(d, f"{sha256}.json")
+        if os.path.exists(p):
+            return p
+    return None
+
+
 @app.get("/api/results/{sha256}")
 def result_detail(sha256: str):
     """单个文件解析详情：从本地解析结果缓存读取。
@@ -358,17 +405,10 @@ def result_detail(sha256: str):
     data/projects/{id}/parsed_cache/（见 scanner._get_data_dir），
     而这里只查全局 data/parsed_cache/，导致详情接口对每个已解析文件都返回
     404「未找到缓存」。现按「项目目录 → 全局目录」顺序查找，兼容旧数据。
+    v0.1.211：候选目录改由 _parsed_cache_dirs() 统一给出，与本文件其余
+    4 处读取共用同一口径，不再各自拼路径。
     """
-    candidates = []
-    try:
-        from . import project_manager as _pm
-        cur = _pm.get_current_project()
-        if cur and cur.get("id"):
-            candidates.append(os.path.join(_pm.get_project_data_dir(cur["id"]), "parsed_cache"))
-    except Exception:  # noqa: BLE001
-        pass
-    candidates.append(os.path.join(config.DATA_DIR, "parsed_cache"))
-    for cache_dir in candidates:
+    for cache_dir in _parsed_cache_dirs():
         path = os.path.join(cache_dir, f"{sha256}.json")
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
@@ -892,25 +932,31 @@ def cloud_pull_field(force: bool = False):
     if n:
         scan_stat = scanner.scan_folder(pull_dir)
     # v0.1.23：OCR 铭牌摘要回写云端现场记录（手机端清单可见识别结果）
+    # v0.1.211：这段原来固定读全局 config.DATA_DIR/parsed_cache，而扫描器
+    # 在项目激活时把缓存写进 data/projects/<id>/parsed_cache → 项目里解析出的
+    # OCR 铭牌永远回写不上去。改为遍历统一口径的全部候选目录。
     plate_back = 0
-    for cache in os.listdir(os.path.join(config.DATA_DIR, "parsed_cache")):
-        if not cache.endswith(".json"):
+    for cache_dir in _parsed_cache_dirs():
+        if not os.path.isdir(cache_dir):
             continue
-        try:
-            with open(os.path.join(config.DATA_DIR, "parsed_cache", cache), encoding="utf-8") as f:
-                pc = json.load(f)
-        except Exception:  # noqa: BLE001
-            continue
-        if pc.get("parser") == "ocr":
-            pl = (pc.get("structure") or {}).get("plate") or {}
-            if pl.get("tags") or pl.get("params"):
-                try:
-                    requests.post(f"{base}/api/cloud/field-plate",
-                                  headers=_cloud_headers(),
-                                  json={"sha256": pc.get("sha256", ""), "plate": pl}, timeout=10)
-                    plate_back += 1
-                except Exception:  # noqa: BLE001
-                    pass
+        for cache in os.listdir(cache_dir):
+            if not cache.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(cache_dir, cache), encoding="utf-8") as f:
+                    pc = json.load(f)
+            except Exception:  # noqa: BLE001
+                continue
+            if pc.get("parser") == "ocr":
+                pl = (pc.get("structure") or {}).get("plate") or {}
+                if pl.get("tags") or pl.get("params"):
+                    try:
+                        requests.post(f"{base}/api/cloud/field-plate",
+                                      headers=_cloud_headers(),
+                                      json={"sha256": pc.get("sha256", ""), "plate": pl}, timeout=10)
+                        plate_back += 1
+                    except Exception:  # noqa: BLE001
+                        pass
     # v0.1.37：现场记录自动分析（识别类型+预填字段+缺失提醒），结果回写云库
     record_analyzed = 0
     record_generated = 0
@@ -925,8 +971,10 @@ def cloud_pull_field(force: bool = False):
             transcript = it.get("transcript", "") or ""
             ocr_text = ""
             # 从 parsed_cache 找 OCR 结果
-            cache_path = os.path.join(config.DATA_DIR, "parsed_cache", f"{sha}.json")
-            if os.path.exists(cache_path):
+            # v0.1.211：原来固定全局目录，项目级缓存读不到 → 现场记录的 OCR
+            # 文本恒为空，自动分析少一整个输入源。改用统一口径查找。
+            cache_path = _find_parsed_cache(sha)
+            if cache_path:
                 try:
                     with open(cache_path, encoding="utf-8") as cf:
                         _cache = json.load(cf)
@@ -1249,12 +1297,16 @@ def device_workshop_rebuild():
     docs = relations._load_docs() if hasattr(relations, "_load_docs") else {}
     if not docs:
         # 从 parsed_cache 重建 docs
-        import os as _os, json as _json
-        cache_dir = _os.path.join(config.DATA_DIR, "parsed_cache")
-        if _os.path.exists(cache_dir):
-            for fn in _os.listdir(cache_dir)[:2000]:
+        # v0.1.211：原来只扫全局 config.DATA_DIR/parsed_cache，项目级缓存
+        # 一概读不到 → 项目内台账「重建设备车间归属」永远 newly_assigned=0，
+        # 而界面上照样返回 ok:true。改用统一口径遍历全部候选目录。
+        import json as _json
+        for cache_dir in _parsed_cache_dirs():
+            if not os.path.isdir(cache_dir):
+                continue
+            for fn in os.listdir(cache_dir)[:2000]:
                 try:
-                    with open(_os.path.join(cache_dir, fn), encoding="utf-8") as f:
+                    with open(os.path.join(cache_dir, fn), encoding="utf-8") as f:
                         c = _json.load(f)
                     docs[c.get("sha256", fn)] = c
                 except Exception:
@@ -1418,9 +1470,11 @@ def chat_list():
     items = []
     for sha, info in idx.items():
         if info.get("parser") == "chat":
-            cache_path = os.path.join(config.DATA_DIR, "parsed_cache", f"{sha}.json")
+            # v0.1.211：原来固定全局目录，项目级缓存读不到 →
+            # 聊天记录列表的 message_count / tags / workshops 恒为空。
+            cache_path = _find_parsed_cache(sha)
             chat_info = {}
-            if os.path.exists(cache_path):
+            if cache_path:
                 try:
                     with open(cache_path, encoding="utf-8") as cf:
                         cache = json.load(cf)
@@ -3326,11 +3380,24 @@ def mining_field_merge_log(limit: int = 50):
 
 @app.get("/api/mobile/config")
 def mobile_config():
-    """v0.1.99：获取移动端配置。"""
+    """v0.1.99：获取移动端配置。
+
+    v0.1.211：这里原来写死 "version": "0.1.99" —— 是 v0.1.99 那次新增本路由时
+    填的字面量，之后 111 个版本一路没跟着改。实测（2026-11-07 13:1x，
+    工作树 0.1.210）同一时刻三个来源：
+      /api/status.version           = 0.1.210
+      /api/update/check.current     = 0.1.210
+      /api/mobile/config.version    = 0.1.99   ← 错
+    移动端拿这个 version 做「是否需要更新」的判断，于是永远认为自己是 0.1.99、
+    永远提示有更新；反过来按它去比对远端也会把版本号写错。
+    这是本项目反复出现的「同一件事两个答案」，只是这次第三个来源藏在一个
+    看起来无关的移动端配置接口里 —— 全量字段比对才挖出来。
+    根上改掉：一律读 config.APP_VERSION，不再留任何版本字面量。
+    """
     return {
         "ok": True,
         "app_name": "繁工AI · 工程助手",
-        "version": "0.1.99",
+        "version": config.APP_VERSION,
         "theme": {"primary": "#1E5AA8", "accent": "#FF7A00"},
         "features": ["upload", "records", "docs", "ai", "schedule", "merge"],
         "workshops": ["破碎车间","磨矿车间","浮选车间","脱水车间","火法冶炼车间","湿法冶炼车间","公用辅助"],

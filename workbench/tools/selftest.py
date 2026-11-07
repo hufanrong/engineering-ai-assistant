@@ -1055,17 +1055,33 @@ def phase6(samples_dir):
     P = 6
     print("\n=== 阶段 6：同一事实交叉比对 ===")
 
-    # 6.1 版本号：/api/status 与 /api/update/check 的 current_version
+    # 6.1 版本号：把**所有**对外报版本的接口摆在一起比，而不是只比两点。
+    # v0.1.211：原来只比 /api/status 与 /api/update/check 两处，于是漏掉了
+    # /api/mobile/config 里写死的 "version": "0.1.99" —— 它藏在移动端配置接口里，
+    # 看起来和版本管理毫无关系，实测同一时刻 status=0.1.210 / update=0.1.210 /
+    # mobile=0.1.99。只比两处的那条断言照样 PASS，缺陷照样漏出去。
+    # 所以这里改成「列出全部来源再逐一比对」：以后再有新接口报版本，
+    # 只要加进这个列表就会被自动校验，不需要再补一条独立的断言。
     code_s, st, err_s = call("GET", "/api/status")
     code_u, up, err_u = call("GET", "/api/update/check", timeout=60)
-    v_status = (st or {}).get("version") if isinstance(st, dict) else None
-    v_current = (up or {}).get("current_version") if isinstance(up, dict) else None
-    same = bool(v_status) and bool(v_current) and str(v_status) == str(v_current)
-    record(P, "版本号两处一致",
-           "/api/status.version == /api/update/check.current_version",
-           f"status={v_status} update.current={v_current}",
+    code_m, mc, err_m = call("GET", "/api/mobile/config")
+
+    version_sources = [
+        ("/api/status.version", (st or {}).get("version") if isinstance(st, dict) else None),
+        ("/api/update/check.current_version",
+         (up or {}).get("current_version") if isinstance(up, dict) else None),
+        ("/api/mobile/config.version",
+         (mc or {}).get("version") if isinstance(mc, dict) else None),
+    ]
+    uniq = {str(v) for _, v in version_sources if v}
+    same = len(uniq) == 1 and all(v for _, v in version_sources)
+    record(P, "版本号全部来源一致",
+           "status / update.check / mobile.config 三处版本号相等",
+           "; ".join(f"{n}={v}" for n, v in version_sources),
            same,
-           f"update 返回 source={(up or {}).get('source')} latest={(up or {}).get('latest_version')}")
+           f"去重后={sorted(uniq)}"
+           + ("" if same else "；有接口报的是它自己的开发期字面量，不是当前版本"))
+    v_status = version_sources[0][1]
 
     # 6.2 版本号不得是 0.0.0（这是「检查更新永远说已是最新」的症状）
     not_placeholder = bool(v_status) and str(v_status) != "0.0.0"
@@ -1163,6 +1179,65 @@ def phase6(samples_dir):
            "projects.total == len(projects)",
            f"total={n_total} list={n_plist}", ok8,
            "磁盘目录数可能更多（exports 目录、只剩 exports 的空壳不算项目），属正常")
+
+    # 6.9 项目隔离的根：/api/projects/data-dir 必须恰好等于
+    #     status.data_dir + projects + 当前项目 id。
+    # v0.1.211 新增。为什么这条重要：全项目所有业务数据都落在
+    # data/projects/<id>/ 下，一旦这个解析出的路径和当前项目对不上，
+    # 两个项目就会共用一份索引 —— 表现为「A 项目里看到 B 项目的设备」，
+    # 而界面上每个接口都返回 ok:true，完全看不出来。这里是**唯一**能把
+    # 路径口径钉死的地方，所以再简单也要成对断言，而不是只信一个接口。
+    code_dd, dd, err_dd = call("GET", "/api/projects/data-dir")
+    code_cu, cu, err_cu = call("GET", "/api/projects/current")
+    cur_id = ((cu or {}).get("project") or {}).get("id") if isinstance(cu, dict) else None
+    real_dd = (dd or {}).get("data_dir") if isinstance(dd, dict) else None
+    base_dir = (st or {}).get("data_dir") if isinstance(st, dict) else None
+    expect_dd = (os.path.join(base_dir, "projects", str(cur_id))
+                 if base_dir and cur_id else None)
+    ok9 = bool(real_dd) and bool(expect_dd) and \
+        os.path.abspath(real_dd) == os.path.abspath(expect_dd)
+    record(P, "项目数据目录指向当前项目",
+           "projects/data-dir == status.data_dir + 'projects' + 当前项目 id",
+           f"data-dir={real_dd} 期望={expect_dd}", ok9,
+           "口径不一致时两个项目会共用一份索引，界面上完全看不出来")
+
+    # 6.10 该目录必须真实存在（路径算对了但目录没建，写入会散落到别处）
+    ok10 = bool(real_dd) and os.path.isdir(real_dd)
+    record(P, "当前项目目录真实存在",
+           "os.path.isdir(projects/data-dir)",
+           f"exists={ok10} path={real_dd}", ok10,
+           "目录不存在时后续所有写入的落点都不可信")
+
+    # 6.11 索引与解析缓存自洽：标记 parsed 的文件必须找得到缓存。
+    # v0.1.211 新增。为什么必须成对断言：写入口 scanner 把缓存写进项目级
+    # parsed_cache，而 main.py 有 4 处读取曾写死全局目录 —— 两边都「正常返回」，
+    # 界面看不出错，表现为 AI 助手 sources.project 恒 0、现场记录 OCR 恒空、
+    # 设备车间重建恒 0。实测项目 322fef90 的 parsed_cache 目录压根不存在，
+    # 索引却写着 1 个 status=parsed，于是检索必然命不中。
+    code_f2, fl2, err_f2 = call("GET", "/api/files")
+    flist = (fl2 or {}).get("files") or [] if isinstance(fl2, dict) else []
+    parsed_shas = [f.get("sha256") for f in flist
+                   if isinstance(f, dict) and f.get("status") == "parsed"
+                   and f.get("sha256")]
+    if parsed_shas:
+        missing = []
+        for s in parsed_shas:
+            p1 = os.path.join(real_dd or "", "parsed_cache", f"{s}.json") if real_dd else ""
+            p2 = os.path.join(base_dir or "", "parsed_cache", f"{s}.json") if base_dir else ""
+            if not ((p1 and os.path.isfile(p1)) or (p2 and os.path.isfile(p2))):
+                missing.append(str(s)[:12])
+        ok11 = not missing
+        record(P, "已解析文件都有解析缓存",
+               "每个 status=parsed 的文件在 项目级/全局 parsed_cache 里都有同名 json",
+               f"parsed={len(parsed_shas)} 缺缓存={len(missing)} {missing[:5]}",
+               ok11,
+               "缺缓存时 AI 检索恒 0 命中、现场记录 OCR 恒空、车间归属重建恒 0，"
+               "而每个接口都返回 ok:true")
+    else:
+        record(P, "已解析文件都有解析缓存",
+               "每个 status=parsed 的文件都有解析缓存",
+               "当前项目无 status=parsed 文件", None,
+               "无已解析文件，无法比对；导入了资料的项目应至少 1 个")
 
 
 def _walk_keys(obj, depth=0):
