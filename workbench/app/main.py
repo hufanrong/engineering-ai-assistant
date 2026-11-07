@@ -4924,6 +4924,19 @@ def run():
             print(f"  [清理] 已清除 {_n} 个历史遗留临时文件")
     except Exception as _e:  # noqa: BLE001
         print(f"  [清理] 跳过：{_e}")
+    # v0.1.215：当前项目指针自愈。
+    # 实测事故：用户删掉自己的项目后，下一次打开看到「当前未选择项目，请先新建或
+    # 选择项目」——观感是「我的工程不见了」。根因是 delete_project() 删当前项目时
+    # 顺手把 current_project.json 也删了（v0.1.215 已改成自动切到别的项目）。
+    # 但**已经删过指针的机器**还得救回来，否则升级包装上去照样看不到工程。
+    # 所以启动时补一次：指针缺失 / 指向不存在项目，且还有项目存在 → 自动指回去。
+    try:
+        from . import project_manager as _pm0
+        _heal = _pm0.ensure_current_project()
+        if _heal.get("healed"):
+            print(f"  [修复] {_heal.get('message')}")
+    except Exception as _e:  # noqa: BLE001
+        print(f"  [修复] 当前项目自愈跳过：{_e}")
     # v0.1.188：原来这里连着调了两次 _start_guardian()，起了两个守护线程。
     # 卡死超时后两个线程会在同一分钟内各自判一次「卡死」并同时调
     # retry_failed_files(shas=None)，同一批失败文件被重试两遍、retry_count 加倍

@@ -548,7 +548,22 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
 #     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
 #     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
-APP_VERSION = "0.1.214"
+APP_VERSION = "0.1.215"
+# v0.1.215：修「删掉当前项目后指针悬空」——用户删掉自己的工程，下次打开看到
+#   「当前未选择项目，请先新建或选择项目」，观感是「我的资料丢了」。
+#   根因：project_manager.delete_project() 对当前项目只做 os.remove(
+#   CURRENT_PROJECT_FILE)，指针直接消失，没有任何接任逻辑。现场已反馈过一次
+#   （「打开程序发现自己的工程不见了」），当时只当成测试污染处理，没修产品行为。
+#   改法：① 删当前项目前先挑接任者（优先 file_count/device_count>0 的项目，
+#   其次任意项目，一个都没有才允许置空），资料处理完再切指针；② 新增
+#   ensure_current_project()，启动时对「指针缺失 / 指向已删项目」的机器自愈，
+#   让已经踩过这个坑的安装也能恢复（否则装上新包照样看不到工程）；
+#   ③ 删除结果里加 switched_to 并写进 message，前端 alert 能直接告诉用户
+#   切到了哪个项目，而不是只弹一句「已删除」。
+#   附带修好自测：阶段⑥ 的 _ORIGIN_PID 会因指针为空而成为空串，该断言只能落
+#   `目标=?` FAIL（58/1）；现在指针不会悬空，它也稳定可核验。新增 6.12
+#   「有项目时当前项目指针不悬空」，以及 tools/test_delete_project_pointer.py
+#   32 条断言（含 H 组启动自愈）。
 # v0.1.214：修「测试把车间归属写进用户真实项目」——与 v0.1.213 的队列污染同源。
 #   现象：用户真实项目 322fef90 的 workshop_assign.json 里 22~28 条记录，
 #   其中 21~27 条 file_path 指向 /tmp/fgpath_*（全是单测样本）；

@@ -1307,6 +1307,29 @@ def phase6(samples_dir):
                "当前项目无 status=parsed 文件", None,
                "无已解析文件，无法比对；导入了资料的项目应至少 1 个")
 
+    # 6.12 删当前项目后指针不能悬空（v0.1.215）。
+    # 这条只能读接口，不能真删用户项目，所以只验「当前项目可读 + 状态一致」：
+    # 它抓的是「打开程序发现工程不见了」这个现场问题留下的痕迹 —— 指针为空
+    # 而项目列表里明明有项目。
+    code_p, pl, _ = call("GET", "/api/projects")
+    _plist = (pl or {}).get("projects") or [] if isinstance(pl, dict) else []
+    code_c2, cl, _ = call("GET", "/api/projects/current")
+    _cur_ok = (code_c2 == 200 and (cl or {}).get("ok"))
+    _cur_id = (((cl or {}).get("project") or {}).get("id") or "")
+    _ids_in_list = {p.get("id") for p in _plist if isinstance(p, dict)}
+    if _plist:
+        ok12 = bool(_cur_ok) and (_cur_id in _ids_in_list)
+        record(P, "有项目时当前项目指针不悬空",
+               "项目列表非空时，/api/projects/current 必须给出列表里存在的项目",
+               f"项目={len(_plist)} 当前={_cur_id or '空'} 在列表={_cur_id in _ids_in_list}",
+               ok12,
+               "指针悬空时界面显示「当前未选择项目」，用户以为自己的工程丢了（现场已反馈）")
+    else:
+        record(P, "有项目时当前项目指针不悬空",
+               "项目列表非空时当前项目必须可用",
+               "项目列表为空，无法比对", None,
+               "一个项目都没有时「未选择项目」是真实状态，不算缺陷")
+
 
 def _walk_keys(obj, depth=0):
     """递归收集 dict 的键名，用于检查导出包里有没有不该出现的字段。"""

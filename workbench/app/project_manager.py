@@ -221,6 +221,119 @@ def rename_project(project_id: str, new_name: str) -> Dict:
     }
 
 
+def _project_has_data(p: Dict) -> bool:
+    """项目里是否还有真实资料（文件或设备）。空壳项目返回 False。"""
+    try:
+        if int(p.get("file_count") or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(p.get("device_count") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _pick_successor_project(exclude_id: str) -> Optional[Dict]:
+    """v0.1.215：为「即将被删掉的当前项目」挑一个接任者。
+
+    挑法按用户在乎程度排：
+      ① 还有资料的项目（file_count / device_count > 0）——那是用户真正的工程；
+      ② 其余任何项目（哪怕是空壳）——空壳也比界面显示「未选择项目」强，
+         因为后者给人的观感是「我的工程不见了」；
+      ③ 一个都没有 → None。这时「未选择项目」是**真实**状态，不是丢数据。
+
+    同级内按 updated_at（缺失则 created_at）倒序，取最近动过的那个。
+    这个函数本身只读，不改任何文件。
+    """
+    cands = []
+    try:
+        for p in list_projects():
+            if not p or p.get("id") == exclude_id:
+                continue
+            if not isinstance(p, dict):
+                continue
+            cands.append(p)
+    except Exception:  # noqa: BLE001
+        return None
+    if not cands:
+        return None
+
+    def _recency(p):
+        return str(p.get("updated_at") or p.get("created_at") or "")
+
+    with_data = [p for p in cands if _project_has_data(p)]
+    if with_data:
+        with_data.sort(key=_recency, reverse=True)
+        return with_data[0]
+    cands.sort(key=_recency, reverse=True)
+    return cands[0]
+
+
+def _settle_current_after_delete(successor: Optional[Dict]) -> Dict:
+    """v0.1.215：当前项目被删之后，把「当前项目指针」收尾。
+
+    有接任者 → 切过去；没有 → 才移除指针文件。
+
+    为什么必须这么做：原来 delete_project() 只做 os.remove(CURRENT_PROJECT_FILE)，
+    删掉当前项目后指针直接消失，用户下次打开看到「当前未选择项目，请先新建或
+    选择项目」——等于自己的工程不见了（现场已反馈过一次）。而且这个悬空状态
+    还会让自测阶段⑥ 的「在用户原项目上校验」只能报 `目标=?`，全量自测出现 58/1。
+    """
+    if successor and successor.get("id"):
+        try:
+            r = set_current_project(successor["id"])
+            if r.get("ok"):
+                return {
+                    "switched_to": {"id": successor["id"],
+                                    "name": successor.get("name", "")},
+                    "switch_message": f"已自动切换为项目「{successor.get('name', '')}」",
+                }
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        if os.path.isfile(CURRENT_PROJECT_FILE):
+            os.remove(CURRENT_PROJECT_FILE)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"switched_to": None,
+            "switch_message": "已无其它项目，当前项目置空"}
+
+
+def ensure_current_project() -> Dict:
+    """v0.1.215：启动自愈 —— 指针丢了但项目还在时，自动指回一个。
+
+    这是对「打开程序发现自己的工程不见了」这个现场问题的直接补救。
+
+    触发条件严格限定为「指针文件缺失」或「指针指向一个不存在的项目」：
+      · 后端没有「取消选择项目」的接口（前端置空只改本地变量，不打后端），
+        所以指针消失只有一种成因 —— 删掉当前项目时被连带删掉（v0.1.214 及
+        之前的行为），或者用户手工删了文件/迁移过数据目录；
+      · 一个项目都没有时不动作，那时「未选择项目」是真实状态。
+
+    返回 {"healed": bool, "project": {...}|None, "message": str}，只读判断 +
+    最多一次写指针，幂等。
+    """
+    _probe = get_current_project()
+    if _probe and _probe.get("id"):
+        return {"healed": False, "project": _probe, "message": "当前项目正常"}
+
+    # 指针文件存在但读不出有效项目（指向已删 id / JSON 损坏）也走自愈。
+    succ = _pick_successor_project("")
+    if not succ:
+        return {"healed": False, "project": None,
+                "message": "无可用项目，保持未选择状态"}
+    try:
+        r = set_current_project(succ["id"])
+    except Exception:  # noqa: BLE001
+        return {"healed": False, "project": None, "message": "自愈写入失败"}
+    if not r.get("ok"):
+        return {"healed": False, "project": None,
+                "message": f"自愈失败：{r.get('error') or '未知'}"}
+    return {"healed": True, "project": succ,
+            "message": f"当前项目指针缺失，已自动恢复为「{succ.get('name', '')}」"}
+
+
 def delete_project(project_id: str, force: bool = False, backup: bool = True,
                    delete_data: bool = True) -> Dict:
     """
@@ -240,11 +353,14 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
 
     project_dir = _get_project_dir(project_id)
 
-    # 如果是当前项目，清除当前项目设置
+    # v0.1.215：如果是当前项目，**先挑好接任者**，等资料处理完再切指针。
+    # 原来这里只有 os.remove(CURRENT_PROJECT_FILE)，删完指针就悬空：
+    # 用户下次打开看到「当前未选择项目」，观感是「我的工程不见了」。
+    # 判断顺序也很重要：先挑接任者再删目录，否则 list_projects() 里
+    # 还混着即将被删的那个（虽然按 id 排除了，但先删会少一次元数据读取）。
     current = get_current_project()
-    if current and current["id"] == project_id:
-        if os.path.isfile(CURRENT_PROJECT_FILE):
-            os.remove(CURRENT_PROJECT_FILE)
+    _is_current = bool(current and current.get("id") == project_id)
+    _successor = _pick_successor_project(project_id) if _is_current else None
 
     if not delete_data:
         # v0.1.130：仅删除项目记录，资料移入回收站保留（可找回）
@@ -257,13 +373,19 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
                                 f"{project_id}_{int(datetime.datetime.now().timestamp())}")
         if os.path.exists(project_dir):
             shutil.move(project_dir, dest)
-        return {
+        _settle = _settle_current_after_delete(_successor) if _is_current else {}
+        result = {
             "ok": True,
             "message": f"项目「{project['name']}」已删除（资料已保留）",
             "deleted_id": project_id,
             "recycled_to": dest,
             "data_deleted": False,
         }
+        if _is_current:
+            result["switched_to"] = _settle.get("switched_to")
+            if _settle.get("switch_message"):
+                result["message"] += f"（{_settle['switch_message']}）"
+        return result
 
     # 删除项目（含资料）：删除前自动备份
     backup_result = None
@@ -284,6 +406,13 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
         "deleted_id": project_id,
         "data_deleted": True,
     }
+    # v0.1.215：目录删完再切指针 —— 反过来会在「指针指着还没删的目录」那一瞬间
+    # 被并发的 /api/projects/current 读到，统计刷新会把已删项目的数带出来。
+    if _is_current:
+        _settle = _settle_current_after_delete(_successor)
+        result["switched_to"] = _settle.get("switched_to")
+        if _settle.get("switch_message"):
+            result["message"] += f"（{_settle['switch_message']}）"
     if backup_result and backup_result.get("ok"):
         result["backup"] = backup_result
         result["message"] += f"（删除前已自动备份：{backup_result['output_file']}）"
