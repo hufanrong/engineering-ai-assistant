@@ -548,7 +548,28 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
 #     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
 #     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
-APP_VERSION = "0.1.212"
+APP_VERSION = "0.1.214"
+# v0.1.214：修「测试把车间归属写进用户真实项目」——与 v0.1.213 的队列污染同源。
+#   现象：用户真实项目 322fef90 的 workshop_assign.json 里 22~28 条记录，
+#   其中 21~27 条 file_path 指向 /tmp/fgpath_*（全是单测样本）；
+#   界面「待人工确认」从 0 涨到 10，用户看到一堆自己没上传过的文件。
+#   根因：workshop_assign._assign_file() 只认「当前项目」，不看调用方给的 data_dir；
+#   scanner.reparse_file(path, data_dir=...) 里调 assign_workshop(...) 不带目录，
+#   于是解析缓存/index/队列都落临时目录、**车间归属却落用户真实项目**。
+#   改法与 upload_queue 完全一致：模块级 _ISOLATED_DIR 放在 _assign_file 这一层，
+#   任何内部调用都必须尊重它。顺带补了 C7/C8/C9 三条断言，其中 C8 初版只比
+#   「键集合差异」，样本 sha 恒定导致恒 PASS —— 已改为按内容全等比较。
+# v0.1.213：修「测试往用户真实队列写垃圾包」——同一件事两个落点的又一处。
+#   现象：跑完单测/自测后，用户项目的待上传队列里出现「设备台账.xlsx」「q.xlsx」
+#   这类根本没上传过的条目（实测 322fef90 pending 由 0 变 4）。
+#   根因是 upload_queue._ensure() 只看「当前项目」，不看调用方给的 data_dir；
+#   而 scanner.reparse_file(path, data_dir=...) 会调 upload_queue.enqueue(res)，
+#   于是解析缓存/index 落进临时目录、**队列包却落进用户真实项目**。
+#   第一版修法（进 enqueue 时临时改 QUEUE_DIR、finally 还原）还不够：
+#   _enqueue_locked 中间调 _node_id()，_node_id() 内部又 _ensure() 一次，
+#   不带参数就把 QUEUE_DIR 重置回当前项目 —— 结果索引进了临时目录、包进了真实队列，
+#   同一份入队逻辑两个落点算出两个目录。
+#   改法：模块级 _ISOLATED_DIR 覆盖，放在 _ensure 这一层，任何内部调用都得尊重它。
 # v0.1.212：修「同一件事两个答案」的车间版本 ——
 #   /api/workshops 报 19 个车间，同一时刻 /api/relations.workshops 是空数组 []，
 #   而 228 台台账设备自己身上明明带 19 个车间名。根因在 relations._merge_index_devices()：

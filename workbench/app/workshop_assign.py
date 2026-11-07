@@ -6,16 +6,34 @@ import datetime
 import json
 import os
 import re
+import threading
 
 from . import config
 
 _LEGACY_FILE = None      # 全局旧文件路径（迁移用）
 _MIGRATED = False
+_LOCK = threading.RLock()
 
 
-def _assign_file() -> str:
+# v0.1.214：非 None 时所有落点都用这个目录（单测/离线重解析的隔离钩子）。
+_ISOLATED_DIR = None
+
+
+def _assign_file(data_dir=None) -> str:
     """v0.1.138：车间归属按项目隔离——写入当前项目数据目录，
-    未选择项目时回退全局目录（兼容单项目/迁移期）。"""
+    未选择项目时回退全局目录（兼容单项目/迁移期）。
+
+    v0.1.214 修：原来只认「当前项目」，不认调用方给的目录。于是在临时目录里
+    做重解析（单测 / 离线校验）时，解析缓存和 index 都落进临时目录，
+    **车间归属却写进用户真实项目**。实测事故：真实项目 322fef90 的
+    workshop_assign.json 里 22 条有 21 条指向 /tmp/fgpath_*，全是测试样本，
+    界面上表现为「待人工确认」从 0 涨到 10 —— 用户看到一堆自己没上传过的文件。
+    这和 upload_queue 那次是同一类：同一个动作，两个落点算出两个目录。
+    """
+    ddir = data_dir or _ISOLATED_DIR
+    if ddir:
+        os.makedirs(ddir, exist_ok=True)
+        return os.path.join(ddir, "workshop_assign.json")
     try:
         from . import project_manager as _pm
         cur = _pm.get_current_project()
@@ -78,9 +96,12 @@ def _migrate_legacy():
         pass
 
 
-def _load() -> dict:
-    _migrate_legacy()
-    f = _assign_file()
+def _load(data_dir=None) -> dict:
+    # 隔离目录下不做旧文件迁移：迁移是「全局 → 各项目」的一次性动作，
+    # 在临时目录里跑会把用户真实的全局历史文件改名备份掉。
+    if not (data_dir or _ISOLATED_DIR):
+        _migrate_legacy()
+    f = _assign_file(data_dir)
     if os.path.exists(f):
         try:
             with open(f, encoding="utf-8") as fh:
@@ -90,8 +111,8 @@ def _load() -> dict:
     return {}
 
 
-def _save(m: dict):
-    f = _assign_file()
+def _save(m: dict, data_dir=None):
+    f = _assign_file(data_dir)
     _atomic_io.write_json(f, m, indent=1)
 
 
@@ -392,9 +413,26 @@ def detect_workshop(file_name: str = "", text: str = "", structure: dict = None,
 
 
 def assign_workshop(sha: str, file_name: str = "", text: str = "", structure: dict = None,
-                    force: bool = False, file_path: str = "") -> dict:
+                    force: bool = False, file_path: str = "", data_dir: str = "") -> dict:
     """解析后自动归车间；已有人工登记不覆盖（force=True 才覆盖）。
-    v0.1.143：新增 file_path 目录路径信号（网页上传传 orig_path，扫描传绝对路径）。"""
+    v0.1.143：新增 file_path 目录路径信号（网页上传传 orig_path，扫描传绝对路径）。
+
+    v0.1.214：新增 data_dir —— 临时目录场景（单测 / 离线重解析）必须能指定落点。
+    不传时行为不变（写当前项目）。
+    """
+    if data_dir:
+        global _ISOLATED_DIR
+        with _LOCK:
+            _prev = _ISOLATED_DIR
+            try:
+                _ISOLATED_DIR = data_dir
+                return _assign_workshop_impl(sha, file_name, text, structure, force, file_path)
+            finally:
+                _ISOLATED_DIR = _prev
+    return _assign_workshop_impl(sha, file_name, text, structure, force, file_path)
+
+
+def _assign_workshop_impl(sha, file_name, text, structure, force, file_path):
     m = _load()
     existing = m.get(sha)
     if existing and existing.get("source") == "manual" and not force:

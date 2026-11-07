@@ -31,9 +31,24 @@ def _get_data_dir():
     return config.DATA_DIR
 
 
-def _ensure():
+_ISOLATED_DIR = None   # v0.1.212：非 None 时所有落点都用这个目录（测试/离线隔离）
+
+
+def _ensure(data_dir=None):
     global QUEUE_DIR, LOG_PATH
-    ddir = _get_data_dir()
+    # v0.1.212：允许显式指定数据目录。原来恒走「当前项目」，于是
+    # 任何在临时目录里跑的单测/重解析都会把包写进**用户真实项目**的队列 ——
+    # 实测事故：tools/test_source_path_fields.py 造的样本
+    # 直接进了 322fef90 的待上传队列（pending 变 4），界面上就是 4 个待上传的真文件。
+    #
+    # 为什么用模块级 _ISOLATED_DIR 而不是「临时改全局再还原」：
+    # 第一版就是这么写的（进 enqueue 时把 QUEUE_DIR 指到临时目录、finally 还原），
+    # 结果**索引进了临时目录、包文件却进了真实队列** —— 因为 _enqueue_locked
+    # 中间会调 _node_id()，而 _node_id() 内部又调了一次 _ensure()，
+    # 不带参数就把 QUEUE_DIR 重置回「当前项目」。同一份入队逻辑，
+    # 两个落点算出两个目录，又是「同一件事两个答案」。
+    # 所以覆盖必须放在 _ensure 这一层，任何内部调用都会尊重它。
+    ddir = data_dir or _ISOLATED_DIR or _get_data_dir()
     QUEUE_DIR = os.path.join(ddir, "upload_queue")
     LOG_PATH = os.path.join(ddir, "upload_log.jsonl")
     # 目录可能被外部删除/移动（如整库迁移、导入合并后继续扫描），每次确保存在
@@ -117,10 +132,22 @@ def _rebuild_idx() -> dict:
     return idx
 
 
-def enqueue(parse_result) -> str:
+def enqueue(parse_result, data_dir=None) -> str:
     """把一个解析结果打包进上传队列，返回包文件名（不含扩展）。
     v0.1.138：payload 附带 project_id/project_name，云端按项目合并（同项目合并，不同项目不合并）。
-    v0.1.144：按 sha256 去重——队列中已有相同内容的包时跳过（重复解析不重复入队）。"""
+    v0.1.144：按 sha256 去重——队列中已有相同内容的包时跳过（重复解析不重复入队）。
+    v0.1.212：新增 data_dir，供临时目录场景（单测、离线重解析）隔离队列。"""
+    if data_dir:
+        global _ISOLATED_DIR
+        with _IDX_LOCK:
+            _prev = _ISOLATED_DIR
+            try:
+                _ISOLATED_DIR = data_dir
+                _ensure()
+                return _enqueue_locked(parse_result)
+            finally:
+                _ISOLATED_DIR = _prev
+                _ensure()      # 还原后重建真实目录，别留下指向临时目录的全局
     _ensure()
     # v0.1.198：整个「查去重 → 打包落盘 → 更新索引」必须在一把锁里。
     # 原来这三步裸奔，扫描线程与网页上传线程同时入队时：

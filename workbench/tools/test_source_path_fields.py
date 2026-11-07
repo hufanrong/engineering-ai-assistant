@@ -172,6 +172,94 @@ def main():
                   ("file_path" in rec),
                   f"keys={sorted(rec.keys())[:6]}")
 
+        # ---------- [C5] 测试不得污染用户的真实待上传队列 ----------
+        print("\n[C5] 临时目录里重解析不得写进真实项目队列")
+        from app import upload_queue as UQ
+        old_q, old_l = UQ.QUEUE_DIR, UQ.LOG_PATH
+        try:
+            real_q = os.path.join(os.path.abspath(C.DATA_DIR), "uploads")
+            # 真实队列目录 = 当前项目 upload_queue（不存在也算 0）
+            from app import project_manager as PM
+            _cur = PM.get_current_project() or {}
+            _pid = _cur.get("id") or ""
+            real_pq = (os.path.join(PM.get_project_data_dir(_pid), "upload_queue")
+                       if _pid else "")
+            n_before = (len([f for f in os.listdir(real_pq)
+                             if f.endswith(".json") and not f.startswith("_")])
+                        if real_pq and os.path.isdir(real_pq) else 0)
+            tdir2 = os.path.join(tmp, "proj_q")
+            os.makedirs(tdir2, exist_ok=True)
+            srcq = os.path.join(tmp, "q.xlsx")
+            try:
+                import openpyxl
+                _wb = openpyxl.Workbook()
+                _wb.active.append(["设备位号"]); _wb.active.append(["Q-1"])
+                _wb.save(srcq)
+            except Exception:  # noqa: BLE001
+                srcq = ""
+            if srcq and os.path.exists(srcq):
+                # v0.1.214：真实项目的车间归属必须在**调用之前**快照。
+                # 第一版写在调用之后，before/after 都是「已污染」的同一份，
+                # C8 于是恒 PASS —— 测试自己成了「同一件事两个答案」。
+                real_wa = (os.path.join(PM.get_project_data_dir(_pid), "workshop_assign.json")
+                           if _pid else "")
+                _wa_before = {}
+                if real_wa and os.path.isfile(real_wa):
+                    try:
+                        _wa_before = json.load(open(real_wa, encoding="utf-8"))
+                    except Exception:  # noqa: BLE001
+                        _wa_before = {}
+                S.reparse_file(srcq, data_dir=tdir2)
+                n_proj = (len([f for f in os.listdir(os.path.join(tdir2, "upload_queue"))
+                               if f.endswith(".json") and not f.startswith("_")])
+                          if os.path.isdir(os.path.join(tdir2, "upload_queue")) else 0)
+                check("C5 包落在临时目录队列里", ">=1", n_proj, n_proj >= 1,
+                      "否则说明 enqueue 没跟 data_dir 走")
+                n_after = (len([f for f in os.listdir(real_pq)
+                                if f.endswith(".json") and not f.startswith("_")])
+                           if real_pq and os.path.isdir(real_pq) else 0)
+                check("C6 真实项目队列条目数未变", n_before, n_after,
+                      n_after == n_before,
+                      "测试往用户真实队列写入 = 用户看到莫名的待上传文件")
+
+                # v0.1.214：与 enqueue 同一类的第二处落点 —— 车间归属。
+                # 实测事故：真实项目 322fef90 的 workshop_assign.json 22 条里
+                # 21 条指向 /tmp/fgpath_*，全是单测样本；界面上「待人工确认」
+                # 从 0 涨到 10，用户看到一堆自己没上传过的文件。
+                _wa_tmp = os.path.join(tdir2, "workshop_assign.json")
+                _wa_after = {}
+                if real_wa and os.path.isfile(real_wa):
+                    try:
+                        _wa_after = json.load(open(real_wa, encoding="utf-8"))
+                    except Exception:  # noqa: BLE001
+                        _wa_after = {}
+                _new = sorted(set(_wa_after) - set(_wa_before))
+                check("C7 车间归属落在临时目录", "临时目录有 workshop_assign.json",
+                      os.path.basename(_wa_tmp) if os.path.isfile(_wa_tmp) else "缺失",
+                      os.path.isfile(_wa_tmp),
+                      "分配没跟 data_dir 走时，它会写进当前项目而不是这里")
+                # v0.1.214 反向验证时发现的第一版写法有漏洞：只比「键集合差异」。
+                # 测试样本内容每次都一样 → sha 相同 → 键早就存在于真实项目里，
+                # 于是 set 差为空、C8 照样 PASS，而它其实**覆盖写了**那条记录。
+                # 判据改成按内容全等比较（含 ts 字段变化），才抓得住覆盖写入。
+                _changed = sorted(k for k in _wa_after
+                                  if _wa_before.get(k) != _wa_after.get(k))
+                check("C8 真实项目车间归属未被新增或改写", "内容全等",
+                      f"变更 {len(_changed)} 条 新增 {len(_new)} 条",
+                      (_wa_after == _wa_before),
+                      "测试往用户真实项目写车间归属 = 界面多出没上传过的待确认文件")
+                # C9：真实项目里不该存在指向临时目录的车间归属记录。
+                # 这是「已经发生的污染」的看门狗 —— 只看本次有没有新增，
+                # 查不出上一轮已经写进去的垃圾。
+                _tmpy = sorted(k for k, v in (_wa_after or {}).items()
+                               if isinstance(v, dict)
+                               and str(v.get("file_path") or "").startswith("/tmp/"))
+                check("C9 真实项目无 /tmp 测试残留", "0 条",
+                      f"{len(_tmpy)} 条", len(_tmpy) == 0,
+                      "这些是单测写进用户项目的记录，会导致界面出现没上传过的待确认文件")
+        finally:
+            UQ.QUEUE_DIR, UQ.LOG_PATH = old_q, old_l
+
         # ---------- [D] 源码里不许再调不存在的函数 ----------
         print("\n[D] 源码里不得再调用不存在的 index_result")
         # 必须用 AST 查**真实调用**，不能用正则查文本：

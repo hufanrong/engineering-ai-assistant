@@ -357,13 +357,21 @@ def reparse_file(path: str, data_dir=None) -> dict:
             res.structure = res.structure or {}
             res.structure["vector_error"] = str(_ve)[:200]
         try:
-            upload_queue.enqueue(res)
+            # v0.1.212：必须带上 ddir —— 不传时 enqueue 恒落「当前项目」队列，
+            # 于是在临时目录里做重解析（单测 / 离线校验）会把包写进用户真实项目的
+            # 待上传队列。实测：单测造的 4 个样本让真实项目 pending 变成 4。
+            upload_queue.enqueue(res, data_dir=ddir)
         except Exception:  # noqa: BLE001
             pass
         try:
             from . import workshop_assign
+            # v0.1.214：必须带上 ddir —— 不传时 assign_workshop 恒落「当前项目」，
+            # 于是在临时目录里重解析会把车间归属写进用户真实项目。实测事故：
+            # 真实项目 322fef90 的 workshop_assign.json 22 条里 21 条指向
+            # /tmp/fgpath_*，界面上「待人工确认」从 0 涨到 10。
             workshop_assign.assign_workshop(res.sha256, res.file_name, res.text or "",
-                                            res.structure or {}, file_path=path)
+                                            res.structure or {}, file_path=path,
+                                            data_dir=ddir)
         except Exception:  # noqa: BLE001
             pass
         _save_parsed_cache(res, ddir)
