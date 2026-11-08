@@ -1330,6 +1330,49 @@ def phase6(samples_dir):
                "项目列表为空，无法比对", None,
                "一个项目都没有时「未选择项目」是真实状态，不算缺陷")
 
+    # 6.13 项目变更动作必须都有审计埋点，且审计只有唯一落点（v0.1.216）。
+    # 实测事故：用户问「这些项目怎么没的」，查 operation_log.jsonl 325 条里
+    # 一条「删」都没有，差点据此回答「没人删过」—— 真相是 /api/projects/delete
+    # 根本不写日志。审计空白被误读成否定证据，这比缺一条日志危险得多。
+    # 这条不去真删项目（本阶段必须只读），改为核对源码里的"契约"：
+    #   ① app/op_log.py 存在（唯一落点）；
+    #   ② project_manager 的 4 个变更动作各自都有 _op_log.log_op 调用；
+    #   ③ app/main.py 不再自带直写 operation_log.jsonl 的第二份实现。
+    _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _app = os.path.join(_here, "app")
+    _ol_path = os.path.join(_app, "op_log.py")
+    _pm_path = os.path.join(_app, "project_manager.py")
+    _mn_path = os.path.join(_app, "main.py")
+
+    def _src(fpath):
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+        except Exception:  # noqa: BLE001
+            return ""
+
+    _ol = _src(_ol_path)
+    _pm_src = _src(_pm_path)
+    _mn_src = _src(_mn_path)
+
+    _has_ol = bool(_ol) and "def log_op(" in _ol
+    # 4 个动作各自埋点：用"函数体内出现了 log_op 调用"来判。
+    # 只查字符串有无，不猜语义 —— 但足以抓住"整个动作没埋点"这种情况。
+    _acts = {}
+    _acts["create"] = ('新建项目：' in _pm_src)
+    _acts["switch"] = ('切换项目：' in _pm_src)
+    _acts["rename"] = ('项目改名：' in _pm_src)
+    _acts["delete"] = ('删除项目：' in _pm_src and 'log_op("delete"' in _pm_src)
+    _missing = [k for k, v in _acts.items() if not v]
+    _single_point = ('"operation_log.jsonl"' not in _mn_src.split("def _log_op")[-1][:400]
+                     if "def _log_op" in _mn_src else True)
+    ok13 = _has_ol and not _missing and _single_point
+    record(P, "项目变更动作都有审计且只有唯一落点",
+           "op_log 存在；create/switch/rename/delete 四处埋点齐全；main.py 不再自建第二份写盘",
+           f"op_log={_has_ol} 缺埋点={_missing or '无'} 唯一落点={_single_point}",
+           ok13,
+           "缺审计时「日志里没有删」会被当成「没发生删除」—— 审计空白被误读成否定证据（本轮实测）")
+
 
 def _walk_keys(obj, depth=0):
     """递归收集 dict 的键名，用于检查导出包里有没有不该出现的字段。"""

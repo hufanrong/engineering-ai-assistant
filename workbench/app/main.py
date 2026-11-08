@@ -3590,9 +3590,12 @@ def list_projects():
 
 @app.post("/api/projects/create")
 def create_project(data: dict):
-    """新建项目。"""
+    """新建项目。
+    v0.1.216：审计不再埋在路由里 —— 已下沉到 project_manager（唯一落点）。
+    原来这里先 _log_op 再 create_project，创建失败（重名/磁盘满/权限不足）
+    也留下一条「新建项目：xxx」，审计说建了、列表里没有。
+    """
     from . import project_manager as _pm
-    _log_op("project", f"新建项目：{data.get('name', '')}")
     return _pm.create_project(
         name=data.get("name", ""),
         description=data.get("description", ""),
@@ -3603,7 +3606,7 @@ def create_project(data: dict):
 
 @app.post("/api/projects/switch")
 def switch_project(data: dict):
-    """切换当前项目。"""
+    """切换当前项目。v0.1.216：审计已下沉到 project_manager.set_current_project。"""
     from . import project_manager as _pm
     return _pm.set_current_project(data.get("project_id", ""))
 
@@ -4157,7 +4160,15 @@ def resolve_merge_conflict(data: dict):
 
 @app.post("/api/projects/delete")
 def delete_project(data: dict):
-    """删除项目。backup=false 跳过自动备份；delete_data=false 仅删记录、资料移入回收站保留。"""
+    """删除项目。backup=false 跳过自动备份；delete_data=false 仅删记录、资料移入回收站保留。
+
+    v0.1.216：删除项目原来**一条审计都不写**。
+    实测后果：用户问「项目怎么没了」，查 operation_log.jsonl 325 条里
+    没有一条「删」，据此判断「没人删过」—— 这个判断是错的，因为根本没留痕。
+    审计空白被当成「没发生」，比留痕本身更危险。
+    现在：成功即写一条 delete 日志，带项目 id / 名称 / 资料是否删除 / 备份文件名，
+    事后能从日志里还原「哪个项目、什么时候、被删了什么」。
+    """
     from . import project_manager as _pm
     return _pm.delete_project(
         data.get("project_id", ""),
@@ -4168,7 +4179,9 @@ def delete_project(data: dict):
 
 @app.post("/api/projects/rename")
 def rename_project(data: dict):
-    """v0.1.130：修改已有项目名称。"""
+    """v0.1.130：修改已有项目名称。
+    v0.1.216：改名同样不留审计 —— 项目列表里名字变了，却查不出是谁改的。
+    """
     from . import project_manager as _pm
     return _pm.rename_project(data.get("project_id", ""), data.get("new_name", ""))
 
@@ -4956,20 +4969,14 @@ def run():
 
 
 def _log_op(op_type: str, content: str, operator: str = ""):
-    """写入操作日志（智能窗口-操作日志审计）。"""
-    import json as _json
-    try:
-        log_path = os.path.join(config.DATA_DIR, "operation_log.jsonl")
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(_json.dumps({
-                "time": datetime_now(),
-                "type": op_type,
-                "content": content,
-                "operator": operator or "系统",
-            }, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    """写入操作日志（智能窗口-操作日志审计）。
+
+    v0.1.216：实现下沉到 app/op_log.py。原来这里自带一份写盘逻辑，
+    而 project_manager 的动作（删除/改名/切换）压根不经过它 —— 于是
+    「日志里没有删」被误当成「没发生删除」。现在全仓只有一个落点。
+    """
+    from . import op_log as _ol
+    return _ol.log_op(op_type, content, operator)
 
 def _frontend_index():
     """获取当前项目索引（显式指定项目数据目录，避免全局INDEX_FILE竞态）。"""

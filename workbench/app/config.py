@@ -548,7 +548,7 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
 #     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
 #     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
-APP_VERSION = "0.1.215"
+APP_VERSION = "0.1.216"
 # v0.1.215：修「删掉当前项目后指针悬空」——用户删掉自己的工程，下次打开看到
 #   「当前未选择项目，请先新建或选择项目」，观感是「我的资料丢了」。
 #   根因：project_manager.delete_project() 对当前项目只做 os.remove(

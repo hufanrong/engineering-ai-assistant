@@ -26,6 +26,7 @@ from typing import Optional, List, Dict
 #      看到的是空的「_j_节自测_xxxx」，同时 E 段（project_id=None 走当前
 #      项目）跟着漂移，断言数从 189 变 188。
 from . import config as _config
+from . import op_log as _op_log   # v0.1.216：审计流水唯一落点
 
 # 项目根目录
 PROJECTS_ROOT = os.path.join(_config.DATA_DIR, "projects")
@@ -100,13 +101,20 @@ def create_project(name: str, description: str = "", client: str = "",
     _atomic_io.write_json(os.path.join(project_dir, "index.json"), {"files": [], "devices": {}, "workshops": {}}, indent=2)
     _atomic_io.write_json(os.path.join(project_dir, "relations.json"), {"devices": {}, "workshops": {}, "relations": []}, indent=2)
     
-    # 自动设为当前项目
-    set_current_project(project_id)
-    
+    # 自动设为当前项目（v0.1.216：内部切换不单独记审计，避免新建动作留两条：
+    # 「新建项目：X」+「切换项目：→ X」，同一件事两个答案）
+    set_current_project(project_id, log=False)
+
+    # v0.1.216：审计留痕。原来埋在 app/main.py 的 HTTP 路由里，
+    # 直接调用本函数（自测/脚本/内部流程）就完全不留痕。
+    # 且日志必须在**成功之后**写：先记后做，创建失败也会留下「已新建」。
+    _op_log.log_op("project", f"新建项目：{name}（id={project_id}）")
+
     return {
         "ok": True,
         "project": meta,
         "message": f"项目「{name}」创建成功，已自动切换为当前项目",
+        "log_written": True,
     }
 
 
@@ -144,20 +152,24 @@ def get_project(project_id: str) -> Optional[Dict]:
         return None
 
 
-def set_current_project(project_id: str) -> Dict:
+def set_current_project(project_id: str, log: bool = True) -> Dict:
     """
     切换当前项目。
-    
+
     Args:
         project_id: 项目ID
-    
+        log: 是否写审计流水（v0.1.216）。create_project 内部自动切项目时传 False，
+             否则「新建」会连带留下一条「切换」，同一件事两个答案。
+
     Returns:
         切换结果
     """
     project = get_project(project_id)
     if not project:
         return {"ok": False, "error": f"项目不存在：{project_id}"}
-    
+
+    _prev = get_current_project() or {}
+
     os.makedirs(os.path.dirname(CURRENT_PROJECT_FILE), exist_ok=True)
     with open(CURRENT_PROJECT_FILE, "w", encoding="utf-8") as f:
         json.dump({
@@ -166,10 +178,21 @@ def set_current_project(project_id: str) -> Dict:
             "switched_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }, f, ensure_ascii=False, indent=2)
     
+    # v0.1.216：切项目原来完全不记审计 —— 事后答不出「谁在什么时候换过项目」。
+    # 但**切到自己**不算动作：实测一次全量自测就刷出 9 条「A → A」，
+    # 把真实审计流水从 325 行涨到 346 行，其中一半是无意义噪音。
+    # 审计的价值在于「事后能答出来」，噪音多了反而没人看。
+    _logged = False
+    if log and _prev.get("id") != project_id:
+        _logged = _op_log.log_op(
+            "project",
+            f"切换项目：{_prev.get('name') or '（未选择）'} → {project['name']}")
+
     return {
         "ok": True,
         "project": project,
         "message": f"已切换到项目「{project['name']}」",
+        "log_written": _logged,
     }
 
 
@@ -214,10 +237,15 @@ def rename_project(project_id: str, new_name: str) -> Dict:
     project["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     _atomic_io.write_json(meta_path, project, indent=2)
 
+    _logged = _op_log.log_op("project", f"项目改名：{old_name} → {new_name}")
+
     return {
         "ok": True,
         "project": project,
         "message": f"项目「{old_name}」已重命名为「{new_name}」",
+        "old_name": old_name,
+        "new_name": new_name,
+        "log_written": _logged,
     }
 
 
@@ -385,6 +413,12 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
             result["switched_to"] = _settle.get("switched_to")
             if _settle.get("switch_message"):
                 result["message"] += f"（{_settle['switch_message']}）"
+        # v0.1.216：审计留痕必须带项目 id + 名称 + 资料处置方式。
+        # 实测教训：删除项目原先一条日志都没有，事后只能靠猜。
+        result["log_written"] = _op_log.log_op(
+            "delete",
+            f"删除项目：{project['name']}（id={project_id}，"
+            f"仅删记录，资料已移入回收站：{os.path.basename(dest)}）")
         return result
 
     # 删除项目（含资料）：删除前自动备份
@@ -413,9 +447,19 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
         result["switched_to"] = _settle.get("switched_to")
         if _settle.get("switch_message"):
             result["message"] += f"（{_settle['switch_message']}）"
+    _bak_name = ""
     if backup_result and backup_result.get("ok"):
         result["backup"] = backup_result
+        _bak_name = os.path.basename(str(backup_result.get("output_file") or ""))
         result["message"] += f"（删除前已自动备份：{backup_result['output_file']}）"
+
+    # v0.1.216：审计留痕。带 id/名称/资料处置/备份文件名 ——
+    # 否则事后只能回答「日志里没有删」这种假否定。
+    _del_content = f"删除项目：{project['name']}（id={project_id}，含项目资料"
+    if _bak_name:
+        _del_content += f"，删除前备份={_bak_name}"
+    _del_content += "）"
+    result["log_written"] = _op_log.log_op("delete", _del_content)
     return result
 
 
