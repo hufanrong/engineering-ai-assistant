@@ -189,6 +189,37 @@ def main():
         check("G2 四条必填字段齐全",
               all(all(k in x for k in need) for x in rows),
               f"缺失行={[i for i, x in enumerate(rows) if not all(k in x for k in need)]}")
+        # v0.1.217：时间格式必须与历史流水一致（%Y%m%d_%H%M）。
+        # 反例就是本轮实测的回归：抽公共实现时把格式"优化"成
+        # "%Y-%m-%d %H:%M:%S"，历史 325 条老格式 + 新写入新格式 → 同一份
+        # 流水混排，前端「时间」列原样透传，既不能排序也不能按日期筛选。
+        import re as _re
+        _compact = _re.compile(r"^\d{8}_\d{4}$")
+        _bad_time = [x.get("time") for x in rows if not _compact.match(str(x.get("time", "")))]
+        check("G3 时间格式与历史流水一致（YYYYMMDD_HHMM）",
+              not _bad_time, f"不合格式={_bad_time[:3]}")
+
+        # ---------- [I] 上传审计只在真的存下之后才写（v0.1.217） ----------
+        # 反例：/api/upload-files 原来在函数第一行就 _log_op("upload", ...)。
+        # 于是「3 个文件全部超限 → 一个都没落盘」也会留下「上传 3 个文件」。
+        # 这里只构造一个**必然失败**的上传（超过大小上限的假文件），
+        # 断言不产生任何 upload 审计 —— 账本必须跟着事实走。
+        print("\n[I] 上传全部失败时不得写「上传成功」的审计")
+        before = len(_read_log(log_path))
+        _over = config.MAX_FILE_MB * 1024 * 1024 + 1024
+        try:
+            _r = M.app  # 仅为确认 TestClient 覆盖的是同一个 app
+            from fastapi.testclient import TestClient as _TC
+            _c = _TC(_r, raise_server_exceptions=False)
+            _resp = _c.post("/api/upload-files",
+                            files={"files": ("too_big.bin", b"x" * _over, "application/octet-stream")})
+            _code = _resp.status_code
+        except Exception as _e:  # noqa: BLE001
+            _code = f"异常 {type(_e).__name__}: {_e}"
+        rows = _read_log(log_path)
+        _newup = [x for x in rows[before:] if x.get("type") == "upload"]
+        check("I1 超限文件未落盘 → 不写 upload 审计",
+              len(_newup) == 0, f"http={_code} 新增 upload 条数={len(_newup)}")
 
     finally:
         config.DATA_DIR = origin_data

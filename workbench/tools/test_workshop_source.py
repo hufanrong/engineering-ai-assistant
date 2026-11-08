@@ -29,11 +29,50 @@
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app.main as M
-from app import project_manager as pm
+import app.config as config  # noqa: E402
+
+# v0.1.217：本测试会真的建项目、真的切当前项目、真的写审计流水。
+# 原来它直接在用户真实 data/projects 里建 ws_src_test 并切过去 ——
+# 实测后果（本轮抓到的）：① 用户真实 operation_log.jsonl 被写进 8 行
+# 「切换项目：… → 车间来源测试项目」；② 一旦中途异常，_cleanup 与还原
+# 都可能执行不到，指针就停在刚被删的项目上（界面显示「当前未选择项目」）。
+# 手法与 test_project_audit_log 一致：先切 config.DATA_DIR 到临时目录，
+# **再** import app.main —— PROJECTS_ROOT / CURRENT_PROJECT_FILE 都是
+# 模块级常量，import 时机决定了它们指向哪里。
+_REAL_AUDIT_SNAPSHOT = {"lines": 0, "tail": ""}
+
+
+def _snap_real_audit(path=None):
+    """审计流水快照（只读）：行数 + 末行。
+
+    path 必须显式传入**真实**路径 —— 本模块很早就把 config.DATA_DIR 切到
+    临时目录了，收尾时再读 config.DATA_DIR 读到的是临时目录里的流水，
+    断言会变成「前=333 后=3」这种自欺欺人的数字（实测踩过）。
+    """
+    p = path or os.path.join(config.DATA_DIR, "operation_log.jsonl")
+    snap = {"lines": 0, "tail": ""}
+    if not os.path.isfile(p):
+        return snap
+    with open(p, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if line.strip():
+                snap["lines"] += 1
+                snap["tail"] = line.strip()
+    return snap
+
+
+_REAL_DATA_DIR = config.DATA_DIR
+_REAL_AUDIT_PATH = os.path.join(_REAL_DATA_DIR, "operation_log.jsonl")
+_REAL_AUDIT_SNAPSHOT = _snap_real_audit(_REAL_AUDIT_PATH)
+_TMP_DATA = tempfile.mkdtemp(prefix="fg_ws_src_")
+config.DATA_DIR = _TMP_DATA            # 必须在 import app.main 之前
+
+import app.main as M  # noqa: E402
+from app import project_manager as pm  # noqa: E402
 
 RESULTS = []
 
@@ -187,6 +226,25 @@ def run():
               bool(_now) and _now.get("id") == old_cur,
               f"原项目={old_cur}，测试后=({(_now or {}).get('id')}, "
               f"{(_now or {}).get('name')})")
+
+    # v0.1.217：本测试已改为在临时 DATA_DIR 里跑，收尾必须证明
+    # 「用户真实审计流水一行没多、末行没变」—— 这是它以前污染过的证据。
+    try:
+        _now_a = _snap_real_audit(_REAL_AUDIT_PATH)
+        _audit_ok = (_now_a["lines"] == _REAL_AUDIT_SNAPSHOT["lines"]
+                     and _now_a["tail"] == _REAL_AUDIT_SNAPSHOT["tail"])
+        check("T8 本测试未写用户真实审计流水",
+              _audit_ok,
+              f"前={_REAL_AUDIT_SNAPSHOT['lines']} 后={_now_a['lines']}")
+    except Exception as _e:  # noqa: BLE001
+        check("T8 本测试未写用户真实审计流水", False, f"{type(_e).__name__}: {_e}")
+
+    # 临时数据目录用完即删，不留残骸
+    try:
+        import shutil as _sh
+        _sh.rmtree(_TMP_DATA, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        pass
 
     ok = sum(1 for r in RESULTS if r["passed"])
     bad = len(RESULTS) - ok

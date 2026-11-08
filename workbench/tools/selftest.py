@@ -50,6 +50,18 @@ TEST_PROJECT_ID = ""
 CREATED_PIDS = []
 _ORIGIN_PID = ""      # run() 记下的用户原项目 id；phase6 用它切回来校验真实项目
 
+# v0.1.217：自测是"真的在建项目/切项目/删项目"，因此会真的写审计流水。
+# 上一轮实测：一次全量自测把用户真实 data/operation_log.jsonl 从 325 行涨到
+# 346 行（含 9 条「A → A」自切换），用户事后查「项目怎么没了」时，
+# 审计里混进一堆测试记录 —— 流水本身还在，但可信度没了。
+# 这里记两样：
+#   AUDIT_SNAPSHOT —— 开跑前真实流水的「行数 + 末行」快照（只读）
+#   SELFTEST_TOKENS —— 本次自测建的项目名/项目 id（全局唯一），用于精确识别
+#                      "哪几行是本进程写的"，清理时只删这些行
+AUDIT_SNAPSHOT = {}
+SELFTEST_TOKENS = []
+_AUDIT_AFTER = {}     # 清理之后的新快照；finally 里写，用于「流水未污染」断言
+
 
 # ---------------- 后端选择：进程内 TestClient / 真实 HTTP ----------------
 _INPROC = None
@@ -209,6 +221,116 @@ def zip_summary(raw):
             pass
     return {"size": len(raw), "files": len(names), "uncompressed": total,
             "bad_member": bad, "names": names[:8]}
+
+
+# ---------------- 审计流水隔离（v0.1.217） ----------------
+def _audit_log_path():
+    """真实审计流水路径。优先问服务要 data_dir（HTTP 模式下本进程不知道它）。"""
+    d = ""
+    try:
+        _, st, _ = call("GET", "/api/status")
+        d = (st or {}).get("data_dir") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    if not d and _INPROC is not None:
+        try:
+            from app import config as _cfg
+            d = _cfg.DATA_DIR
+        except Exception:  # noqa: BLE001
+            pass
+    if not d:
+        d = os.path.join(_INPROC_DIR or ".", "data")
+    return os.path.join(d, "operation_log.jsonl")
+
+
+def audit_snapshot():
+    """读真实审计流水的行数 + 字节长度 + 末行（只读，不改写）。
+
+    size 是本轮的「历史边界」：清理时只动 size 之后追加的字节，
+    size 之前的历史行一个字节都不碰 —— 这样「清理自测痕迹」不可能
+    误删用户的历史审计。
+    """
+    snap = {"path": "", "exists": False, "lines": 0, "tail": "", "size": -1}
+    try:
+        p = _audit_log_path()
+    except Exception:  # noqa: BLE001
+        return snap
+    snap["path"] = p
+    if not os.path.isfile(p):
+        return snap
+    snap["exists"] = True
+    try:
+        snap["size"] = os.path.getsize(p)
+    except Exception:  # noqa: BLE001
+        snap["size"] = -1
+    try:
+        with open(p, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.strip():
+                    snap["lines"] += 1
+                    snap["tail"] = line.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return snap
+
+
+def audit_purge_selftest_rows():
+    """把本次自测追加进真实审计流水的行删掉，历史行一字不动。
+
+    做法：以开跑前的字节长度 AUDIT_SNAPSHOT["size"] 为分界线，
+    - 分界线之前 = 用户历史流水，原样保留（连字节都不重写）；
+    - 分界线之后 = 本次运行追加的，只删**含本次自测独有标识**的行
+      （项目名 `自测_<秒>`/`自测隔离_<时分秒>`、项目 id）。
+    不含标识的追加行不删 —— 宁可留一条，也不误删可能是真实操作的行；
+    它们会让「行数一致」断言失败，并作为残留暴露出来。
+
+    返回 dict：removed / total / skipped / error。
+    skipped=True 表示本次运行**根本没建过项目**（如单跑 --phase 6），
+    这时「清理 0 行」是真实且正确的，不能被读成「清理功能没生效」。
+    """
+    out = {"removed": 0, "total": 0, "skipped": False, "error": ""}
+    p = _audit_log_path()
+    if not os.path.isfile(p):
+        out["skipped"] = True
+        return out
+    tokens = [t for t in SELFTEST_TOKENS if t]
+    if not tokens:
+        out["skipped"] = True
+        return out
+    start = AUDIT_SNAPSHOT.get("size", -1)
+    if not isinstance(start, int) or start < 0:
+        out["error"] = "无开跑前字节边界，跳过清理（历史行未动）"
+        return out
+    try:
+        with open(p, "rb") as f:
+            raw = f.read()
+        if start > len(raw):
+            out["error"] = "流水比开跑前还短（%d < %d），疑似被外部重置" % (len(raw), start)
+            return out
+        prefix, suffix = raw[:start], raw[start:]
+        text = suffix.decode("utf-8", "ignore")
+        kept, removed = [], 0
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            if any(t in line for t in tokens):
+                removed += 1
+                continue
+            kept.append(line)
+        total_lines = sum(1 for ln in raw.decode("utf-8", "ignore").splitlines() if ln.strip())
+        if removed:
+            new_raw = prefix + ("".join(ln + "\n" for ln in kept)).encode("utf-8")
+            tmp_p = p + ".selftest_tmp"
+            with open(tmp_p, "wb") as f:
+                f.write(new_raw)
+            os.replace(tmp_p, p)
+            total_lines -= removed
+        out["removed"] = removed
+        out["total"] = total_lines
+        return out
+    except Exception as e:  # noqa: BLE001
+        out["error"] = "%s: %s" % (type(e).__name__, e)
+        return out
 
 
 def record(phase, step, expected, actual, passed, evidence=""):
@@ -415,6 +537,10 @@ def phase1(samples_dir):
     code, cur, _ = call("GET", "/api/projects/current")
     origin = (cur or {}).get("project") or (cur or {}).get("current") or cur
     proj_name = f"自测_{time.strftime('%Y%m%d_%H%M%S')}"
+    # v0.1.217：登记「这个名字是本自测建的」——退出时据此把本次自测写进
+    # 真实审计流水的行删掉。名字精确到秒，用户真实项目里不会撞名。
+    if proj_name not in SELFTEST_TOKENS:
+        SELFTEST_TOKENS.append(proj_name)
     code, body, err = call("POST", "/api/projects/create", {"name": proj_name})
     record(P, "项目创建", "200 且 ok=true", f"{code} {str(body)[:80]}",
            code == 200 and (body or {}).get("ok", True), err)
@@ -425,6 +551,10 @@ def phase1(samples_dir):
         TEST_PROJECT_ID = _pj["id"]
         if _pj["id"] not in CREATED_PIDS:
             CREATED_PIDS.append(_pj["id"])
+        # v0.1.217：id 也登记成审计识别标记 —— 日志行里带 id（新建/删除都带），
+        # 名字可能因为改名而变化，id 不会。
+        if _pj["id"] not in SELFTEST_TOKENS:
+            SELFTEST_TOKENS.append(_pj["id"])
 
     # 扫描
     t0 = time.time()
@@ -813,12 +943,18 @@ def phase3(samples_dir):
         _, _cur_now, _ = call("GET", "/api/projects/current")
         _home_id = (((_cur_now or {}).get("project") or {}).get("id")
                     or TEST_PROJECT_ID or "")
+        # v0.1.217：名字先算出来再复用 —— 两次 strftime 跨秒时会产生两个不同
+        # 名字，登记进审计识别的那个就和真建出来的对不上，清理会漏行。
+        _new_name = f"自测隔离_{time.strftime('%H%M%S')}"
         code_new, nb, err_new = call("POST", "/api/projects/create",
-                                     {"name": f"自测隔离_{time.strftime('%H%M%S')}"})
+                                     {"name": _new_name})
         _new_id = ((nb or {}).get("project") or {}).get("id") or ""
         if _new_id:
             if _new_id not in CREATED_PIDS:
                 CREATED_PIDS.append(_new_id)
+            for _tk in (_new_id, _new_name):
+                if _tk and _tk not in SELFTEST_TOKENS:
+                    SELFTEST_TOKENS.append(_tk)
             call("POST", "/api/projects/switch", {"project_id": _new_id})
             # 新项目里还没生成过任何竣工资料，设备数必须为 0
             _, st_b, _ = call("GET", "/api/completion-archive/stats")
@@ -1457,6 +1593,16 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     sdir = os.path.join(here, "_samples")
 
+    # v0.1.217：开跑前先给用户真实审计流水拍快照（只读）。
+    # 自测会真建/真切/真删项目，因此会真写 operation_log.jsonl。上一轮实测
+    # 一次全量自测把流水从 325 行涨到 346 行 —— 用户事后查「项目怎么没了」，
+    # 审计里混着 21 行测试记录，流水还在但不可信了。
+    # 处理方式：跑完按 SELFTEST_TOKENS 精确删掉本次自测写的行，然后断言
+    # 「行数与末行都和开跑前一致」。断言放 phase6，证据写在这里的快照。
+    global AUDIT_SNAPSHOT
+    AUDIT_SNAPSHOT = audit_snapshot()
+    print(f"[审计] 开跑前流水：{AUDIT_SNAPSHOT['lines']} 行（{AUDIT_SNAPSHOT['path']}）")
+
     # v0.1.195：自测必须把「当前项目」还原回去。
     # 实测事故：phase1 建了自测项目并切过去，phase2 切回了原项目，但 phase3
     # 又切到自测项目去做整卷校验，**结束时没人还原**。于是每次跑完自测，
@@ -1526,6 +1672,43 @@ def main():
                 print(f"[清理] 删除本次测试项目 {_tp} → {'OK' if _ok_d else 'FAILED'}")
             except Exception as _e:  # noqa: BLE001
                 print(f"[WARN] 测试项目 {_tp} 清理失败：{_e}")
+
+        # v0.1.217：把本次自测写进**真实审计流水**的行删掉，再用断言复核
+        # 「行数/末行回到开跑前」。注意顺序：必须放在删除测试项目之后 ——
+        # 删除本身也会写一条 delete 审计，早清就漏掉那一行。
+        global _AUDIT_AFTER
+        _pg = {"removed": 0, "total": 0, "skipped": False, "error": ""}
+        try:
+            _pg = audit_purge_selftest_rows()
+            if _pg.get("error"):
+                print(f"[WARN] 审计流水清理失败：{_pg['error']}")
+            elif _pg.get("skipped"):
+                print("[审计] 本次运行未建测试项目，无可清理行")
+            else:
+                print(f"[审计] 清理本次自测写入 {_pg['removed']} 行，剩余 {_pg['total']} 行")
+        except Exception as _e:  # noqa: BLE001
+            _pg["error"] = f"{type(_e).__name__}: {_e}"
+            print(f"[WARN] 审计流水清理异常：{_pg['error']}")
+        _AUDIT_AFTER = audit_snapshot()
+
+        # v0.1.217：审计隔离的收尾断言（只在跑了阶段6 时记，避免单独跑
+        # `--phase 1` 也往阶段6 的汇总里塞一条）。
+        # 它必须放在 finally 里、且在清理之后 —— 阶段跑到一半抛异常时同样要能
+        # 报出来，否则「全量自测全绿、但用户审计流水被污染」会再次悄悄发生。
+        if 6 in want:
+            _before_n = AUDIT_SNAPSHOT.get("lines", 0)
+            _after_n = _AUDIT_AFTER.get("lines", 0)
+            _same_tail = AUDIT_SNAPSHOT.get("tail", "") == _AUDIT_AFTER.get("tail", "")
+            _ok_aud = (_after_n == _before_n) and _same_tail and not _pg.get("error")
+            record(6, "跑完自测用户审计流水未被污染",
+                   "真实 operation_log.jsonl 行数与末行和开跑前一致"
+                   "（本次自测写的行已按项目名/id 精确清除）",
+                   f"前={_before_n} 后={_after_n} 清除={_pg['removed']} "
+                   f"建过测试项目={not _pg.get('skipped')} 末行一致={_same_tail}"
+                   + (f" 错误={_pg['error']}" if _pg.get("error") else ""),
+                   _ok_aud,
+                   "上一轮实测：一次全量自测把用户真实审计流水 325 行涨到 346 行，"
+                   "用户事后查「项目怎么没了」时审计里混着测试记录 —— 流水还在但不可信")
 
     fails = write_report(os.path.join(here, "selftest_report.json"),
                          os.path.join(here, "selftest_report.md"), sdir)

@@ -621,7 +621,12 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 rel_paths = []
         except Exception:  # noqa: BLE001
             rel_paths = []
-    _log_op("upload", f"上传 {len(files)} 个文件", uploader or "")
+    # v0.1.217：审计必须在**真的存下并解析成功之后**才写。
+    # 原来这里在函数开头就 _log_op("upload", f"上传 {n} 个文件")——
+    #   ① 文件全部超限/为空/临时锁文件 → 一个都没落盘，审计却说「上传了」；
+    #   ② 中途抛异常 → 同样留下一条「上传了」。
+    # 这与 create_project 的「先记账后执行」是同一类错误：日志说做了、
+    # 事实没做，两条路径给出两个答案。改为统计真正落盘的数量再记。
     save_dir = os.path.join(config.DATA_DIR, "uploads")
     os.makedirs(save_dir, exist_ok=True)
     results = []
@@ -667,6 +672,14 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     if idx_dirty:
         scanner._save_index(idx)
     _refresh_project_stats()
+
+    # v0.1.217：按**真实落盘结果**记审计（不是按请求里传了几个文件）。
+    # 口径：status 为 parsed / partial / duplicate 都算"进了库"（duplicate 是
+    # 断点续传时已存在的文件，对用户是"这次上传确实处理了"）；failed/skipped 不算。
+    _stored = sum(1 for _r in results
+                  if (_r or {}).get("status") in ("parsed", "partial", "duplicate"))
+    if _stored:
+        _log_op("upload", f"上传 {_stored} 个文件", uploader or "")
     # v0.1.172：上传后同步设备台账到 index.json["devices"]
     # （原来这个字段没人写，监理确认表按车间出设备行永远为空）
     try:
