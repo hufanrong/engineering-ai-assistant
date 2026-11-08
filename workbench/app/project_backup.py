@@ -2,7 +2,33 @@
 v0.1.110：项目数据备份与恢复
 
 支持将项目的所有数据打包为 .fgbak 备份文件，以及从备份文件恢复项目。
-备份内容：index.json、relations.json、parsed_cache/、vector_db/、uploads/、exports/、project_meta.json
+
+v0.1.218：备份范围从「9 项白名单」改为「跟随目录实际内容」
+------------------------------------------------------------
+原实现维护一份 `BACKUP_ITEMS` 白名单，只含
+index.json / relations.json / confirmed_relations.json / rejected_candidates.json /
+project_meta.json / parsed_cache / vector_db / uploads / exports。
+而一个真实项目的数据目录里有 19 类业务数据（本轮实测，11 个项目）：
+
+  generated_docs     10 个项目共 178 份 docx   ← 最严重，等于"成果不进备份"
+  doc_relations.json  10 个项目
+  construction_logs.json 9 个项目
+  workshop_assign.json / equipment_merge.json / supervision_registry.json /
+  file_level.json / upload_log.jsonl / .node_id / volumes/ / upload_queue/ …
+
+后果不是"少打包一个文件"，而是**删除或恢复项目会静默丢数据**：
+  · delete_project(backup=True) → backup_before_delete() → export_project()，
+    同一条白名单，所以"删除前已自动备份"这句提示给的安全感是假的；
+  · import_project() 按 zip 内实际条目解压，备份里没有的永远恢复不出来。
+实测（临时 DATA_DIR 造项目 → 导出 → 导入）：
+  包内 generated_docs 条目 = 0，导入后 generated_docs 文件数 = 0，
+  而 uploads / exports 完好 —— 两条路径都返回 ok:true。
+
+改法：**以目录实际内容为准，不靠白名单**。
+  · 打包：遍历项目目录下的每一个条目（文件或目录），全部进包；
+  · 只跳过明确的运行期垃圾（__pycache__、*.pyc、*.tmp），
+    这样以后新增一类数据目录不需要再回来改清单。
+  · BACKUP_ITEMS 仅保留为"兼容旧调用方/旧备份"的参考常量，不再参与打包判定。
 """
 
 import os
@@ -20,6 +46,8 @@ BACKUP_DIR = os.path.join(
 )
 
 # 需要备份的文件和目录
+# v0.1.218：**不再作为打包白名单使用**，仅为兼容历史调用方保留。
+# 真正打进包里的内容由 iter_project_items() 按目录实际内容决定。
 BACKUP_ITEMS = [
     "index.json",
     "relations.json",
@@ -31,6 +59,38 @@ BACKUP_ITEMS = [
     "uploads",
     "exports",
 ]
+
+# 打包时唯一跳过的东西：运行期垃圾。**不跳过任何业务数据。**
+SKIP_DIRS = {"__pycache__", ".pytest_cache"}
+SKIP_SUFFIX = (".pyc", ".pyo", ".tmp", ".swp", ".lock")
+
+
+def iter_project_items(project_dir: str):
+    """遍历项目目录下需要备份的所有条目，yield (绝对路径或None, zip 内相对路径)。
+
+    v0.1.218：改为"跟随目录实际内容"。只要在项目目录里，就是项目的数据 ——
+    generated_docs（生成成果）、doc_relations / construction_logs /
+    workshop_assign / equipment_merge / supervision_registry / file_level /
+    upload_log / volumes 这些原来全被白名单挡在包外。
+
+    空目录也会以 (None, "dir/") 的形式产出：vector_db 在还没有建索引时就是空的，
+    若只打包文件，恢复后这个目录会消失，等于改变了项目结构。
+    """
+    for root, dirs, files in os.walk(project_dir):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        rel_root = os.path.relpath(root, project_dir)
+        if rel_root != "." and not files and not dirs:
+            # 叶子空目录，用 "dir/" 形式记入 zip
+            yield None, rel_root.replace(os.sep, "/") + "/"
+            continue
+        for f in files:
+            if f.endswith(SKIP_SUFFIX):
+                continue
+            fp = os.path.join(root, f)
+            if not os.path.isfile(fp):
+                continue
+            arcname = os.path.relpath(fp, project_dir)
+            yield fp, arcname
 
 
 def _ensure_backup_dir():
@@ -87,20 +147,21 @@ def export_project(project_id: str, output_path: str = None) -> Dict:
             zf.writestr("backup_meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
             
             # 写入项目数据
-            for item in BACKUP_ITEMS:
-                item_path = os.path.join(project_dir, item)
-                if os.path.isfile(item_path):
-                    zf.write(item_path, item)
-                    file_count += 1
-                    total_size += os.path.getsize(item_path)
-                elif os.path.isdir(item_path):
-                    for root, dirs, files in os.walk(item_path):
-                        for f in files:
-                            fp = os.path.join(root, f)
-                            arcname = os.path.relpath(fp, project_dir)
-                            zf.write(fp, arcname)
-                            file_count += 1
-                            total_size += os.path.getsize(fp)
+            # v0.1.218：原来是 `for item in BACKUP_ITEMS`（9 项白名单），
+            # 于是 generated_docs（生成成果）、doc_relations / construction_logs /
+            # workshop_assign / equipment_merge / supervision_registry / file_level /
+            # upload_log / volumes 等 10 类业务数据全被挡在包外 ——
+            # "删除前已自动备份"实际上保不住成果，恢复后 generated_docs 为 0。
+            # 改为按目录实际内容遍历：项目目录里有什么就备份什么，
+            # 以后新增一类数据目录也不必再回来改清单。
+            for fp, arcname in iter_project_items(project_dir):
+                if fp is None:
+                    # 空目录：只记目录名，不计数（没有文件）
+                    zf.writestr(arcname, b"")
+                    continue
+                zf.write(fp, arcname)
+                file_count += 1
+                total_size += os.path.getsize(fp)
     except Exception as e:
         if os.path.exists(output_path):
             os.remove(output_path)
@@ -157,12 +218,32 @@ def import_project(backup_path: str, new_project_name: str = None,
         project_id = overwrite_project_id
         project_dir = _pm.get_project_data_dir(project_id)
         # 清空现有数据
-        for item in BACKUP_ITEMS:
+        # v0.1.218：原来是 `for item in BACKUP_ITEMS`（同一份 9 项白名单）。
+        # 两个问题：
+        #   ① 白名单清不掉 generated_docs 等 10 类数据 —— 旧的 docx 会残留，
+        #      与"覆盖"语义不符（备份里没有的版本还挂在目录里）；
+        #   ② 一旦哪天把 generated_docs 加进白名单，旧备份（不含该目录）做覆盖导入
+        #      就会先删掉再解不出来 —— 借"恢复"之名删数据。
+        # 改为**只清空备份包里确实带了的顶层条目**：包里有就整体替换，
+        # 包里没有就原样留着。这样新备份是干净替换，旧备份也不会误删。
+        try:
+            with zipfile.ZipFile(backup_path, "r") as _zf:
+                _names = [n for n in _zf.namelist() if n != "backup_meta.json"]
+        except Exception as e:
+            return {"ok": False, "error": f"读取备份文件失败：{str(e)}"}
+        _tops = {n.split("/")[0] for n in _names if n.strip()}
+        for item in _tops:
             item_path = os.path.join(project_dir, item)
             if os.path.isfile(item_path):
-                os.remove(item_path)
+                try:
+                    os.remove(item_path)
+                except Exception:
+                    pass
             elif os.path.isdir(item_path):
-                shutil.rmtree(item_path)
+                try:
+                    shutil.rmtree(item_path)
+                except Exception:
+                    pass
     else:
         # 创建新项目
         result = _pm.create_project(
@@ -187,6 +268,10 @@ def import_project(backup_path: str, new_project_name: str = None,
                 if name.startswith("..") or name.startswith("/"):
                     continue
                 target_path = os.path.join(project_dir, name)
+                if name.endswith("/"):
+                    # v0.1.218：空目录条目，只建目录、不写文件
+                    os.makedirs(target_path, exist_ok=True)
+                    continue
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 with zf.open(name) as src, open(target_path, "wb") as dst:
                     dst.write(src.read())

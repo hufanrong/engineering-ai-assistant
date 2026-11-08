@@ -649,6 +649,15 @@ def phase2(samples_dir):
     P = 2
     print("\n=== 阶段 2：工程资料生成管理 ===")
 
+    # v0.1.218：phase1 结束时切回了用户原项目，本阶段却直接调 /api/docgen/generate、
+    # /api/supervision-templates/generate-batch —— 生成接口写的是**当前项目**，
+    # 于是自测生成的 docx 落进了用户的真实项目。实测：一次全量自测后
+    # 322fef90 的 generated_docs 从 36 份涨到 38 份，两份都是
+    # 「繁工AI_施工方案_2026...docx」这种自测产物，而 63 项断言全绿。
+    # 修法：与 phase3 一样，显式切到自测项目；退出时（run() 的 finally）再切回。
+    if TEST_PROJECT_ID:
+        call("POST", "/api/projects/switch", {"project_id": TEST_PROJECT_ID})
+
     code, types, err = call("GET", "/api/docgen/types")
     tl = types if isinstance(types, list) else ((types or {}).get("types") or [])
     record(P, "资料类型清单", "200 且类型数>0", f"{code} types={len(tl) if isinstance(tl,list) else 'n/a'}",
@@ -1509,6 +1518,51 @@ def phase6(samples_dir):
            ok13,
            "缺审计时「日志里没有删」会被当成「没发生删除」—— 审计空白被误读成否定证据（本轮实测）")
 
+    # 6.14 备份范围必须是「跟随目录」而不是「白名单」（v0.1.218）。
+    # 为什么必须钉在源码契约上：这个缺陷只在**真的导出一次**时才暴露，
+    # 而本阶段必须只读，不能在用户项目上跑导出。改为核对两条不可退让的契约：
+    #   ① export_project 里出现 iter_project_items(project_dir) 调用；
+    #   ② export_project 的函数体里不再有 `for item in BACKUP_ITEMS`。
+    # 缺陷实测：白名单 9 项 vs 项目目录 19 类数据，generated_docs 178 份 docx
+    # 不进包；delete_project(backup=True) 走同一函数，所以"删除前已自动备份"
+    # 保不住成果，恢复后 generated_docs 为 0，而两条路径都返回 ok:true。
+    _pb_path = os.path.join(_app, "project_backup.py")
+    _pb_src = _src(_pb_path)
+    _exp_body = _pb_src.split("def export_project(", 1)[-1] if "def export_project(" in _pb_src else ""
+    _exp_body = _exp_body.split("def import_project(", 1)[0]
+    # 只看**代码行**，注释里会出现 "for item in BACKUP_ITEMS" 这样的历史说明，
+    # 拿它当判据会把「已经改好」误判成「还在用白名单」。
+    _code_lines = [ln.split("#", 1)[0] for ln in _exp_body.splitlines()]
+    _code = "\n".join(_code_lines)
+    _walk_used = "iter_project_items(project_dir)" in _code
+    _no_whitelist = "for item in BACKUP_ITEMS" not in _code
+    _iter_exists = "def iter_project_items(" in _pb_src
+    ok14 = bool(_pb_src) and _walk_used and _no_whitelist and _iter_exists
+    record(P, "备份按目录实际内容打包，不走白名单",
+           "export_project 调用 iter_project_items；函数体内无 for item in BACKUP_ITEMS",
+           f"遍历函数存在={_iter_exists} 使用遍历={_walk_used} 已去白名单={_no_whitelist}",
+           ok14,
+           "白名单只有 9 项而项目目录有 19 类数据，generated_docs 178 份 docx 不进备份 —— "
+           "删除/恢复项目静默丢成果，而导出与导入两条路径都返回 ok:true（v0.1.218 实测）")
+
+    # 6.15 自测不得往用户真实项目写产物（v0.1.218）。
+    # 为什么钉在源码而不是比对目录：本阶段只读，不能在用户项目上建/删文件，
+    # 但可以核对「每个会生成文件的阶段，进入前都把当前项目切到自测项目」。
+    # 实测事故：phase1 结束切回用户原项目，phase2 直接调 /api/docgen/generate，
+    # 生成接口写的是**当前项目** —— 一次全量自测让 322fef90 的 generated_docs
+    # 从 36 份涨到 38 份，而 63 项断言全绿。反向验证：去掉 phase2 的切换，
+    # --phase 1,2 仍 24/0 全过，docx 照样 178 → 179。
+    _st_path = os.path.join(_here, "tools", "selftest.py")
+    _st_src = _src(_st_path)
+    _p2 = _st_src.split("def phase2(", 1)[-1].split("def phase3(", 1)[0] if "def phase2(" in _st_src else ""
+    _p2_switch = "projects/switch" in _p2 and "TEST_PROJECT_ID" in _p2
+    ok15 = bool(_st_src) and _p2_switch
+    record(P, "生成类阶段先切到自测项目再生成",
+           "phase2 进入时显式切到 TEST_PROJECT_ID，产物不落用户项目",
+           f"phase2 内切换调用={_p2_switch}",
+           ok15,
+           "不切就会把自测 docx 写进用户真实项目（实测 36→38 份而全绿）")
+
 
 def _walk_keys(obj, depth=0):
     """递归收集 dict 的键名，用于检查导出包里有没有不该出现的字段。"""
@@ -1627,6 +1681,7 @@ def main():
     # 否则全量自测时它验的是临时自测项目（详见 phase6 里的说明）。
     global _ORIGIN_PID
     _ORIGIN_PID = _origin_pid
+
 
     print(f"造样本 -> {sdir}")
     build_samples(sdir, include_dwg=True)

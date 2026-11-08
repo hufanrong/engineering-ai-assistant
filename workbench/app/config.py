@@ -548,7 +548,40 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
 #     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
 #     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
-APP_VERSION = "0.1.217"
+APP_VERSION = "0.1.218"
+# v0.1.218 —— 备份范围：项目「有什么」和「备了什么」是两套口径
+#     现象：备份/恢复与删除前自动备份，都按 project_backup.BACKUP_ITEMS 这份
+#     **9 项白名单**打包。而一个真实项目的数据目录里有 19 类业务数据。
+#     实测（本轮，data/projects 11 个真实项目）白名单漏掉的：
+#       generated_docs        10 个项目共 178 份 docx（6.45 MB）← 最严重
+#       doc_relations.json    10 个项目      construction_logs.json 9 个
+#       volumes/              1 个项目 11 个文件
+#       workshop_assign / equipment_merge / supervision_registry /
+#       file_level / upload_log.jsonl / .node_id / upload_queue/ 各 1~11 个
+#     后果不是「少打包一个文件」，而是**删除或恢复项目会静默丢数据**：
+#       · delete_project(backup=True) → backup_before_delete() → export_project()，
+#         走的是同一份白名单，所以「删除前已自动备份」这句提示给的安全感是假的；
+#       · import_project() 按 zip 内实际条目解压，包里没有的永远恢复不出来。
+#     实测证据（临时 DATA_DIR）：
+#       · 造种子项目 → 导出 → 包内 generated_docs 条目 = 0，
+#         而 exports/uploads 完好 —— 两条路径都返回 ok:true；
+#       · 拿真实项目 322fef90（102 个文件 / 36 份 docx / 11 份归档卷）复制到
+#         临时 DATA_DIR 做导出→导入：改前 generated_docs 恢复 0 份，
+#         改后 102 个文件全部逐字节一致、36 份 docx 一份不少；
+#       · 直接走 delete_project(backup=True, delete_data=True)：改前最新备份里
+#         generated_docs 条目 0 个，改后 14/14（种子项目 0b15f685 的 14 份）。
+#     改法：**以目录实际内容为准，不靠白名单**。
+#       ① 打包遍历项目目录下每一个条目（文件 + 空目录，如 vector_db 尚未建索引时）；
+#          只跳过运行期垃圾（__pycache__ / *.pyc / *.tmp / *.swp / *.lock），
+#          以后新增一类数据目录不必再回来改清单。
+#       ② 覆盖导入原来按同一份白名单「清空」，改为**只清空备份包里确实带了的
+#          顶层条目**：包里有就整体替换，包里没有就原样留着 —— 新备份是干净替换，
+#          旧备份（不含 generated_docs）也不会借「恢复」之名删数据。
+#       ③ BACKUP_ITEMS 降级为兼容常量，不再参与打包/清空判定。
+#     回归：tools/test_project_backup_complete.py 18 条断言（B1 逐类覆盖、
+#     B2 成果进包、B3b/c/d/e 恢复后逐字节一致、B4b 覆盖导入不误删、B5 未知新目录）；
+#     改前 5 PASS / 13 FAIL，改后 18 PASS / 0 FAIL；把导出改回白名单写法
+#     立回 5/13（rc=1），确认测试真能抓住。
 # v0.1.217 —— 审计流水自身的两处「同一件事两个答案」
 #     ① 时间格式分裂（本轮实测发现，是 v0.1.216 自己引入的回归）：
 #        v0.1.216 把写盘逻辑从 app/main.py 抽到 app/op_log.py 时，顺手把
