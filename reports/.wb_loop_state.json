@@ -1,38 +1,6 @@
 {
-  "last_tested_commit": "912dee0d345901aa652a5a1c84ded369c78c3701",
+  "last_tested_commit": "51a3c60d6b5f682367e1df5876ed2003ff68bd59",
   "runs": [
-    {
-      "run_id": "20261101_013708",
-      "status": "failed",
-      "commit": "19ec871f8b48a993522c6d9241367ce585f66753",
-      "summary": {
-        "passed": 46,
-        "failed": 1,
-        "skipped": 0,
-        "by_phase": {
-          "1": {
-            "passed": 15,
-            "failed": 0,
-            "skipped": 0
-          },
-          "2": {
-            "passed": 9,
-            "failed": 0,
-            "skipped": 0
-          },
-          "3": {
-            "passed": 13,
-            "failed": 1,
-            "skipped": 0
-          },
-          "5": {
-            "passed": 9,
-            "failed": 0,
-            "skipped": 0
-          }
-        }
-      }
-    },
     {
       "run_id": "20261101_073651",
       "status": "failed",
@@ -1063,6 +1031,43 @@
       "run_id": "20261109_185105",
       "status": "failed",
       "commit": "912dee0d345901aa652a5a1c84ded369c78c3701",
+      "summary": {
+        "passed": 57,
+        "failed": 2,
+        "skipped": 2,
+        "by_phase": {
+          "1": {
+            "passed": 15,
+            "failed": 0,
+            "skipped": 0
+          },
+          "2": {
+            "passed": 3,
+            "failed": 1,
+            "skipped": 0
+          },
+          "3": {
+            "passed": 14,
+            "failed": 0,
+            "skipped": 0
+          },
+          "5": {
+            "passed": 9,
+            "failed": 0,
+            "skipped": 0
+          },
+          "6": {
+            "passed": 16,
+            "failed": 1,
+            "skipped": 2
+          }
+        }
+      }
+    },
+    {
+      "run_id": "20261109_185648",
+      "status": "failed",
+      "commit": "51a3c60d6b5f682367e1df5876ed2003ff68bd59",
       "summary": {
         "passed": 57,
         "failed": 2,
