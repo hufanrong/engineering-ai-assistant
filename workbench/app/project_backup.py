@@ -228,7 +228,14 @@ def import_project(backup_path: str, new_project_name: str = None,
         # 包里没有就原样留着。这样新备份是干净替换，旧备份也不会误删。
         try:
             with zipfile.ZipFile(backup_path, "r") as _zf:
-                _names = [n for n in _zf.namelist() if n != "backup_meta.json"]
+                # v0.1.219：project_meta.json 既不能清掉、也不能写回 ——
+                # 它是**目标项目自己**的身份文件（id/name/created_at），
+                # 包里的那份属于源项目。若留在这里，覆盖导入会先把它删掉、
+                # 然后又因下面"跳过 project_meta.json"而不解出来，
+                # 目标项目直接失去 meta → 列表里消失、后续导出报"项目不存在"
+                # （本轮实测：B5 用例导出直接 failed，KeyError output_path）。
+                _names = [n for n in _zf.namelist()
+                          if n != "backup_meta.json" and n != "project_meta.json"]
         except Exception as e:
             return {"ok": False, "error": f"读取备份文件失败：{str(e)}"}
         _tops = {n.split("/")[0] for n in _names if n.strip()}
@@ -263,6 +270,16 @@ def import_project(backup_path: str, new_project_name: str = None,
         with zipfile.ZipFile(backup_path, "r") as zf:
             for name in zf.namelist():
                 if name == "backup_meta.json":
+                    continue
+                # v0.1.219：project_meta.json 不能照搬。
+                # 包里的那份记的是**源项目**的 id/name/created_at：
+                #   · 新建模式：目标目录名是新 id，meta 里却是源 id →
+                #     /api/projects 列出两条同 id 的项目（实测 11 项里 322fef90 出现两次），
+                #     前端下拉两个 option 同 value，用户根本选不中新项目；
+                #   · 覆盖模式：会把目标项目自己的 id/name/created_at 一起改掉。
+                # 项目身份以目标项目为准，包里的这份只用于取描述类字段（已在
+                # backup_meta.json 里带出、创建时已用上），不写盘。
+                if name == "project_meta.json":
                     continue
                 # 安全检查：防止路径穿越
                 if name.startswith("..") or name.startswith("/"):

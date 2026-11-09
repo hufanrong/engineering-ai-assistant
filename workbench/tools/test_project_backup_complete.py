@@ -216,6 +216,21 @@ def main():
     gen_after = os.path.join(ddir, "generated_docs")
     n_after = sum(len(f) for _, _, f in os.walk(gen_after))
     check("B4b 覆盖导入后生成文档仍在", n_after >= 2, f"覆盖后 generated_docs 文件数={n_after}")
+    # v0.1.219：覆盖导入不能把目标项目自己的身份文件弄丢。
+    # 事故现场：解压时跳过包内 project_meta.json（那是源项目的 id），
+    # 但清空逻辑按「包内顶层条目」删除 —— project_meta.json 在包内，
+    # 于是先被删、再不写回，目标项目直接失去 meta：
+    # 列表里消失、紧接着导出报「项目不存在 / KeyError output_path」。
+    mp = os.path.join(ddir, "project_meta.json")
+    meta_ok = os.path.isfile(mp)
+    meta_id = ""
+    if meta_ok:
+        try:
+            meta_id = json.load(open(mp, encoding="utf-8")).get("id", "")
+        except Exception:
+            meta_id = ""
+    check("B4c 覆盖导入后项目身份文件还在且 id 未变", meta_ok and meta_id == pid,
+          f"存在={meta_ok} id={meta_id}（应为 {pid}）")
 
     # ---------- B5：未知的新目录也要进包（防止下次再漏一类） ----------
     print("\n[B5] 未知新目录")

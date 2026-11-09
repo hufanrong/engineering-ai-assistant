@@ -3273,8 +3273,66 @@ function showProjectBackup() {
             '共 <b>' + (d.total != null ? d.total : bs.length) + '</b> 个备份文件。</div>';
         html += quickTable(['文件名', '创建时间', '大小'], rows);
         html += '<div style="margin-top:14px"><button class="btn btn-primary btn-sm" onclick="exportProjectNow()">💾 立即备份当前项目</button></div>';
+        // v0.1.219：这里原来只有「立即备份」，没有任何恢复入口 —— 用户能备份、
+        // 却没有任何办法从备份恢复（整个页面 grep "fgbak" = 0 处）。
+        // 后端 POST /api/projects/import 一直存在（v0.1.110），但自写下起
+        // 就因缺少 `request: Request` 标注而恒返回 422，前端也从未接上，
+        // 两头加起来构成「备份功能半交付」。此处把恢复接到界面上。
+        html += '<div style="margin-top:10px;border-top:1px dashed #e0e0e0;padding-top:10px">' +
+            '<div style="font-size:13px;color:#555;margin-bottom:8px">从备份文件恢复（.fgbak）</div>' +
+            '<div style="font-size:12px;color:#8B8B8B;margin-bottom:8px">' +
+            '恢复为<b>新建项目</b>，不覆盖当前项目；恢复完自动刷新项目列表。</div>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+            '<input type="file" id="fgbakInput" accept=".fgbak,.zip" ' +
+            'style="font-size:12px;max-width:240px">' +
+            '<input type="text" id="fgbakName" placeholder="新项目名称（可留空，默认用备份内名称）" ' +
+            'style="font-size:12px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;flex:1;min-width:180px">' +
+            '<button class="btn btn-sm" onclick="importProjectFromBackup()">↩ 恢复为项目</button>' +
+            '</div>' +
+            '<div id="fgbakMsg" style="font-size:12px;margin-top:8px"></div>' +
+            '</div>';
         openQuickResult('项目备份', html, '备份文件位于 data/backups/');
     }).catch(function (e) { quickResultError('项目备份', '加载失败：' + e.message); });
+}
+
+// v0.1.219：从 .fgbak 恢复项目。必须走真实结果反馈，不许假装成功：
+// 只有后端 ok:true 才算恢复成功，并把新项目名/文件数原样报出来。
+function importProjectFromBackup() {
+    var input = document.getElementById('fgbakInput');
+    var nameEl = document.getElementById('fgbakName');
+    var msg = document.getElementById('fgbakMsg');
+    var f = input && input.files && input.files[0];
+    if (!f) {
+        if (msg) { msg.innerHTML = '<span style="color:#c0392b">请先选择一个 .fgbak 备份文件</span>'; }
+        return;
+    }
+    if (msg) { msg.innerHTML = '<span style="color:#8B8B8B">正在恢复（文件较大的备份需要几十秒）…</span>'; }
+    var fd = new FormData();
+    fd.append('file', f);
+    var nm = (nameEl && nameEl.value || '').trim();
+    if (nm) { fd.append('new_project_name', nm); }
+    fetch('/api/projects/import', { method: 'POST', body: fd })
+        .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function (d) {
+            if (!d || d.ok === false) {
+                if (msg) { msg.innerHTML = '<span style="color:#c0392b">恢复失败：' +
+                    (d && (d.error || d.message) || '未知错误') + '</span>'; }
+                return;
+            }
+            if (msg) {
+                msg.innerHTML = '<span style="color:#27ae60">已恢复：' + (d.project_name || '') +
+                    '（' + (d.file_count != null ? d.file_count : '?') + ' 个文件，模式：' +
+                    (d.mode || '') + '）</span>';
+            }
+            // 项目列表必须真的刷新，否则用户看不到新项目、以为恢复没成功
+            if (typeof loadProjects === 'function') { loadProjects(); }
+        })
+        .catch(function (e) {
+            if (msg) { msg.innerHTML = '<span style="color:#c0392b">恢复失败：' + e.message + '</span>'; }
+        });
 }
 
 function exportProjectNow() {

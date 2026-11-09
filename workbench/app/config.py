@@ -548,7 +548,41 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     反向验证：把 indexed_files 改回 len(_load_index()) → status=6 而列表=1，
 #     阶段⑥报 FAIL、exit=1；把 _queue_files 改回 endswith(".json") →
 #     status=2 api=2 items=1，同样 FAIL、exit=1。两处回退都被抓住。
-APP_VERSION = "0.1.218"
+# v0.1.219 —— 「只能备份，不能恢复」：一个 422 加一个不存在的按钮
+#     从用户入口走，而不是只在模块层验，才暴露出来。两处缺陷叠加：
+#     ① 后端签名错：`@app.post("/api/projects/import")` 下写的是
+#          async def import_project(request):
+#        缺少 `: Request` 类型标注。FastAPI 因此把 request 当成**必填 query 参数**，
+#        请求根本没进函数体就被拒。实测（2026-11-09，真实 HTTP）：
+#          POST /api/projects/import  →  422
+#          {"detail":[{"type":"missing","loc":["query","request"],
+#                      "msg":"Field required","input":null}]}
+#        同一文件里另外 4 个函数都写的是 `request: Request`，只有这一处漏了。
+#        也就是说「从备份恢复项目」这个接口自 v0.1.110 写下起，
+#        **一次都没有成功执行过**，而 /openapi.json 里它一直都在。
+#     ② 前端没有入口：web/index.html 里 grep "fgbak" = 0 处，
+#        grep "importProject|restoreProject|projects/import|恢复项目|导入项目" 无结果；
+#        备份面板只有「💾 立即备份当前项目」一个按钮。
+#        用户能备份、却没有任何办法从备份恢复。
+#     修法（三处）：
+#       1) main.py 补 `: Request` 标注；
+#       2) index.html 备份面板新增 .fgbak 文件选择 + 新项目名 + 「↩ 恢复为项目」，
+#          只有后端 ok:true 才显示成功并报出真实文件数，失败原样回显后端错误，
+#          成功后调 loadProjects() 真刷新列表（不假装成功）；
+#       3) project_backup 解压时跳过包内 project_meta.json —— 那份记的是**源项目**
+#          id/name/created_at。实测恢复成新项目后，目录名是新 id、meta 里仍是旧 id
+#          → /api/projects 出现两条同 id 项目（11 项里 322fef90 两次），
+#          前端下拉两个 option 同 value，用户选不中新项目；覆盖模式还会把目标
+#          项目的 id/name/created_at 一起改掉。项目身份以目标项目为准。
+#     验证（真实 HTTP，不是只跑模块层）：
+#       修前 E1-E3 通过、导入 422 失败；补签名后 I1-I3/I5 通过、I4 报「恢复的项目
+#       不在列表」；再补 meta 跳过后 8 项全 PASS（导出 86 文件 / 包内 22 份成果
+#       与磁盘 22 份一致 / 恢复后逐字节一致 / 历史 22 条可读）。
+#       测试用完即删（删新项目目录 + 备份文件），并把审计流水按字节边界回滚，
+#       用户真实项目回到基线：339 行 / md5 7f7c3bd1 / 10 个项目 / 指针 322fef90。
+#     阶段⑥新增 6.16 源码契约：路由签名 + 前端入口同时成立，否则报红。
+APP_VERSION = "0.1.219"
+
 # v0.1.218 —— 备份范围：项目「有什么」和「备了什么」是两套口径
 #     现象：备份/恢复与删除前自动备份，都按 project_backup.BACKUP_ITEMS 这份
 #     **9 项白名单**打包。而一个真实项目的数据目录里有 19 类业务数据。

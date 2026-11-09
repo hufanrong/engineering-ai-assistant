@@ -1563,6 +1563,29 @@ def phase6(samples_dir):
            ok15,
            "不切就会把自测 docx 写进用户真实项目（实测 36→38 份而全绿）")
 
+    # 6.16 备份/恢复必须「两头都通」：后端路由能收请求，前端有真实入口（v0.1.219）。
+    # 实测两类缺陷同时存在：
+    #  ① `async def import_project(request)` 缺 `: Request` 标注 → FastAPI 当成必填
+    #     query 参数 → 任何真实调用都 422，函数体从未执行过一次；
+    #  ② 页面里 grep "fgbak" = 0 处、grep "projects/import" 无结果 → 用户只能备份、
+    #     无法恢复。
+    # 两条都钉成源码契约，任一被改回去即报红。
+    _mn_path = os.path.join(_app, "main.py")
+    _mn_src = _src(_mn_path)
+    _imp_sig = "async def import_project(request: Request)" in _mn_src
+    _web_path = os.path.join(_here, "web", "index.html")
+    _web_src = _src(_web_path)
+    _ui_post = "/api/projects/import" in _web_src
+    _ui_pick = "fgbakInput" in _web_src
+    _ui_fn = "function importProjectFromBackup(" in _web_src
+    ok16 = bool(_mn_src) and bool(_web_src) and _imp_sig and _ui_post and _ui_pick and _ui_fn
+    record(P, "备份恢复前后端贯通（路由签名 + 前端入口）",
+           "main.py 的 import_project 带 Request 标注；index.html 有 .fgbak 选择与 importProjectFromBackup",
+           f"签名正确={_imp_sig} 前端调用路由={_ui_post} 文件选择={_ui_pick} 恢复函数={_ui_fn}",
+           ok16,
+           "缺 Request 标注时 POST /api/projects/import 恒返回 422（函数体一次都没跑过），"
+           "叠加前端无恢复入口 = 只能备份不能恢复")
+
 
 def _walk_keys(obj, depth=0):
     """递归收集 dict 的键名，用于检查导出包里有没有不该出现的字段。"""

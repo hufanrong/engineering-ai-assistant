@@ -3661,8 +3661,17 @@ def list_backups():
 
 
 @app.post("/api/projects/import")
-async def import_project(request):
-    """从备份文件导入项目。支持上传 .fgbak 文件或指定路径。"""
+async def import_project(request: Request):
+    """从备份文件导入项目。支持上传 .fgbak 文件或指定路径。
+
+    v0.1.219：这里原来写的是 `async def import_project(request)`，缺少 `: Request`
+    类型标注。FastAPI 因此把 request 当成**必填 query 参数**，任何真实调用（无论
+    JSON 还是上传文件）都在进函数体之前被拒：
+        POST /api/projects/import -> 422
+        {"detail":[{"type":"missing","loc":["query","request"],"msg":"Field required"}]}
+    也就是说「从备份恢复项目」这个接口自写下起就从未成功执行过一次，
+    与前端没有恢复入口叠加，形成一个完整的「只能备份、不能恢复」。
+    """
     from . import project_backup as _pb
     form = await request.form()
     backup_path = form.get("backup_path", "")
