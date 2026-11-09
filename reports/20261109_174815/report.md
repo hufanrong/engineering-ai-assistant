@@ -1,8 +1,8 @@
 # WORKbuddy 自测报告 20261109_174815
 
 - 状态：**failed**
-- 代码版本：`f114e5f9284b`
-- 开始：2026-11-09 17:48:15　结束：2026-11-09 17:48:52
+- 代码版本：`bd52bf72f3b6`
+- 开始：2026-11-09 17:48:15　结束：2026-11-09 17:48:57
 - 结果：通过 57 / 失败 2 / 跳过 2
 
 ## 步骤
@@ -21,3 +21,8 @@
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 - [OK] 导出使用遥测　rc=0
 - [OK] 判定　rc=0
+- [OK] git add reports　rc=0
+- [OK] git commit　rc=0
+- [OK] git push　rc=0
+  - To https://github.com/hufanrong/engineering-ai-assistant
+   f114e5f..bd52bf7  HEAD -> main
