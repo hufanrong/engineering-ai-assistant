@@ -3,7 +3,7 @@
 - 性质：**缺陷清单**，不是一次自测轮次（不触发 selftest）
 - 代码版本：`783cd87b72e0`
 - 生成时间：2026-11-09 19:23:32
-- 汇总：已修 16 项 / 待上游决策 5 项 / 合计 21 项
+- 汇总：已修 17 项 / 待上游决策 5 项 / 合计 22 项
 
 ## 一、这次全部失败的项
 
@@ -28,6 +28,7 @@
 | CH-06 | 通道 | finish() 推送后二次写盘不再提交，远端 report.json 永远缺 pushed、commit_after 自指 | major | 已修 |
 | CH-07 | 通道 | selftest_report.json/md 已被 .gitignore 声明忽略却仍被跟踪，每轮必脏 | minor | 已修 |
 | CH-08 | 通道 | workbench/updates/ 未忽略，每轮进 stash | minor | 已修 |
+| CH-09 | 通道 | git stash 的 rc=0 被误判成「已暂存」，随后 stash pop 可能弹出别人的旧 stash | major | 已修 |
 | ST-01 | 自测 | 阶段② 打印 docx 二进制内容触发 UnicodeEncodeError，阶段从 9 项截断到 4 项 | blocker | 已修 |
 | ST-02 | 自测 | 阶段⑥「设备数自身一致」必挂：真实项目 relations.json 无 stats 键，接口返回 stats=None | major | 已修 |
 | ST-03 | 自测 | worktree 下 .git 是 55 字节指针文件，isdir 判断导致「不是 git 仓库」 | major | 已修 |
@@ -49,7 +50,10 @@
 3. **阶段⑥ stats 恒为 dict**：`load_relations()` 读时按真实条数重算 `devices/workshops`，让这个不变量由结构保证。
 4. **远端终于有 pushed**：新增 `commit_followup()`，推送后二次写盘的内容会补提交补推送（此前 26 轮远端报告无一含 pushed）。
 5. **报告目录不再被 stash 吃掉**：stash 加 `:(exclude)reports`，并在 PULL 后补建一次目录。
-6. **临时产物不再污染工作区**：`selftest_report.json/md` 移出版本索引，`workbench/updates/` 加入 .gitignore。
+6. **stash 不再误判**：`git stash` 在「没有可存内容」时也返回 rc=0，
+              原来据此认为存过了，后面 `stash pop` 可能把用户上一次遗留的旧 stash
+              弹出来。现在改为比对 `refs/stash` 是否真的变化。
+7. **临时产物不再污染工作区**：`selftest_report.json/md` 移出版本索引，`workbench/updates/` 加入 .gitignore。
 
 ## 四、待上游决策
 

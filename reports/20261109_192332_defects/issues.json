@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-11-09 19:23:32",
   "commit": "5010f2b7fb38079415d4b07c510bcb986d24325a",
-  "count": 21,
+  "count": 22,
   "items": [
     {
       "id": "CH-01",
@@ -170,6 +170,14 @@
       "severity": "minor",
       "status": "fixed",
       "fix": "所有 .bat 统一按 CRLF 写并校验 bareLF=0"
+    },
+    {
+      "id": "CH-09",
+      "category": "通道",
+      "title": "git stash 的 rc=0 被误判成「已暂存」，随后 stash pop 可能弹出别人的旧 stash",
+      "severity": "major",
+      "status": "fixed",
+      "fix": "改为比对 refs/stash 是否变化来判定真的建了 stash；并实测确认 ':(exclude)reports' pathspec 被 git 接受（输出 No local changes to save）"
     }
   ]
 }

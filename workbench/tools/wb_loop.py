@@ -284,13 +284,21 @@ def pull_latest():
         # `git stash push -u` 会把它当成「未跟踪内容」一并收走删除，pop 也回不来。
         # 随后写 reports/<run_id>/console.log 直接 FileNotFoundError，整轮作废。
         # 触发条件几乎每轮都成立（上一轮结束会留下 3 个已修改的报告文件）。
+        rc0, o0, _ = git("rev-parse", "-q", "--verify", "refs/stash")
+        stash_before = o0.strip() if rc0 == 0 else ""
         rc2, o2, e2 = git("stash", "push", "-u", "-m",
                           f"wb_loop auto-stash {time.strftime('%Y%m%d_%H%M%S')}",
                           "--", ".", ":(exclude)reports")
-        stashed = rc2 == 0
+        # v0.1.221：rc=0 不等于「真的存了」。工作区只有 reports/ 脏时，
+        # 上面这条会输出 "No local changes to save" 并返回 0，
+        # 若据此把 stashed 置 True，后面 `git stash pop` 可能把**上一次遗留的
+        # 别人的 stash** 弹出来，把用户现场搅乱。改成比对 refs/stash 是否变化。
+        rc1, o1, _ = git("rev-parse", "-q", "--verify", "refs/stash")
+        after = o1.strip() if rc1 == 0 else ""
+        stashed = bool(after) and after != stash_before
         steps.append({"step": "git stash（保住本地改动，排除 reports/）", "rc": rc2,
                       "out": o2.strip()[:300], "err": e2.strip()[:300],
-                      "dirty_count": len(dirty)})
+                      "dirty_count": len(dirty), "stashed": stashed})
 
     # 2) 取远端（若调用方已 fetch，则本步直接快进）
     rc, out, err = git("fetch", "origin", BRANCH, "--prune", timeout=180)
