@@ -1,0 +1,84 @@
+{
+  "run_id": "20261109_164936",
+  "started": "2026-11-09 16:49:36",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "4a07eea96e3bede7feb7a4c0d9808ef1d023279f",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 63, \"failed\": 1, \"skipped\": 2, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"passed\": 16, \"failed\": 1, \"skipped\": 2}}}",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=142 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1"
+    }
+  ],
+  "summary": {
+    "passed": 63,
+    "failed": 1,
+    "skipped": 2,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 16,
+        "failed": 1,
+        "skipped": 2
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "4a07eea96e3bede7feb7a4c0d9808ef1d023279f",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-09 16:52:48",
+  "commit_before": "4a07eea96e3bede7feb7a4c0d9808ef1d023279f",
+  "commit_after": "4a07eea96e3bede7feb7a4c0d9808ef1d023279f"
+}
