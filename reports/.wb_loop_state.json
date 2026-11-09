@@ -1,48 +1,6 @@
 {
-  "last_tested_commit": "c0b1d6d8ffc168f83f7b29eb92ec0e8e61d861a1",
+  "last_tested_commit": "924a5d39fc53d8e7090d81675d7e27c10c469308",
   "runs": [
-    {
-      "run_id": "20261109_072420",
-      "status": "failed",
-      "commit": "e91156e0b52666d2c42febdf9eff20024f2303a8",
-      "summary": {
-        "passed": 67,
-        "failed": 1,
-        "skipped": 2,
-        "by_phase": {
-          "1": {
-            "passed": 15,
-            "failed": 0,
-            "skipped": 0
-          },
-          "2": {
-            "passed": 9,
-            "failed": 0,
-            "skipped": 0
-          },
-          "3": {
-            "passed": 14,
-            "failed": 0,
-            "skipped": 0
-          },
-          "4": {
-            "passed": 6,
-            "failed": 0,
-            "skipped": 0
-          },
-          "5": {
-            "passed": 9,
-            "failed": 0,
-            "skipped": 0
-          },
-          "6": {
-            "passed": 14,
-            "failed": 1,
-            "skipped": 2
-          }
-        }
-      }
-    },
     {
       "run_id": "20261109_164936",
       "status": "failed",
@@ -1083,6 +1041,43 @@
       "run_id": "20261109_192848",
       "status": "passed",
       "commit": "c0b1d6d8ffc168f83f7b29eb92ec0e8e61d861a1",
+      "summary": {
+        "passed": 64,
+        "failed": 0,
+        "skipped": 2,
+        "by_phase": {
+          "1": {
+            "passed": 15,
+            "failed": 0,
+            "skipped": 0
+          },
+          "2": {
+            "passed": 9,
+            "failed": 0,
+            "skipped": 0
+          },
+          "3": {
+            "passed": 14,
+            "failed": 0,
+            "skipped": 0
+          },
+          "5": {
+            "passed": 9,
+            "failed": 0,
+            "skipped": 0
+          },
+          "6": {
+            "passed": 17,
+            "failed": 0,
+            "skipped": 2
+          }
+        }
+      }
+    },
+    {
+      "run_id": "20261109_193545",
+      "status": "passed",
+      "commit": "924a5d39fc53d8e7090d81675d7e27c10c469308",
       "summary": {
         "passed": 64,
         "failed": 0,
