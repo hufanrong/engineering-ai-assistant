@@ -1,0 +1,81 @@
+{
+  "run_id": "20261109_072030",
+  "started": "2026-11-09 07:20:30",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "3199d520694a627a5b64db606941d921b1b1c671",
+      "err": ""
+    },
+    {
+      "step": "跳过拉取",
+      "rc": 0,
+      "out": "--no-pull"
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 67, \"failed\": 1, \"skipped\": 2, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"4\": {\"passed\": 6, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"p",
+      "err": "[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {\"count\":51,\"threshold\":50,\"scope\":\"turn\",\"targets\":[\"D:\\\\fangong-workbench\\\\workbench\\\\tools\\\\_samples\"],\"targetCount\":1}\n"
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=294 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1"
+    }
+  ],
+  "summary": {
+    "passed": 67,
+    "failed": 1,
+    "skipped": 2,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "4": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 14,
+        "failed": 1,
+        "skipped": 2
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "3199d520694a627a5b64db606941d921b1b1c671",
+  "finished": "2026-11-09 07:24:07",
+  "commit_before": "3199d520694a627a5b64db606941d921b1b1c671",
+  "commit_after": "3199d520694a627a5b64db606941d921b1b1c671"
+}
