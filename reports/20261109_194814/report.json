@@ -1,0 +1,90 @@
+{
+  "run_id": "20261109_194814",
+  "started": "2026-11-09 19:48:14",
+  "status": "passed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "81d330b033c8b462d501bd01748f39d61f5a441a",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "taskkill 19196",
+      "rc": 0,
+      "out": "SUCCESS: The process with PID 19196 has been terminated.",
+      "err": ""
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 0,
+      "out": "{\"passed\": 64, \"failed\": 0, \"skipped\": 2, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"passed\": 17, \"failed\": 0, \"skipped\": 2}}}",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=89 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=passed rc=0"
+    }
+  ],
+  "summary": {
+    "passed": 64,
+    "failed": 0,
+    "skipped": 2,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 2
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "81d330b033c8b462d501bd01748f39d61f5a441a",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-09 19:48:54",
+  "commit_before": "81d330b033c8b462d501bd01748f39d61f5a441a",
+  "commit_after": "81d330b033c8b462d501bd01748f39d61f5a441a"
+}
