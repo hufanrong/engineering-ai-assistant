@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 rem ============================================================
-rem  v0.1.213 - double-click friendly launcher.
+rem  v0.1.221 - double-click friendly launcher.
 rem
 rem  Why this file is pure ASCII: cmd reads a .bat byte-by-byte, and
 rem  after `chcp 65001` it loses sync on multi-byte (Chinese) lines --

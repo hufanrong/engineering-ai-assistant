@@ -277,7 +277,7 @@ def pull_latest():
     dirty = [l for l in out.splitlines() if l.strip()]
     stashed = False
     if dirty:
-        # v0.1.213：必须把 reports/ 排除在 stash 之外。
+        # v0.1.221：必须把 reports/ 排除在 stash 之外。
         #
         # 缺陷（实测 2026-11-09 07:14 那轮整轮崩）：one_round() 在调 pull_latest()
         # **之前**就 os.makedirs(out_dir) 建好了本轮报告目录。git 不能记录空目录，
@@ -543,7 +543,7 @@ def collect_env():
 def commit_followup(run_id):
     """把「推送后二次写盘」的内容补提交并推上去。
 
-    v0.1.213：finish() 为了在 report.json 里带上 pushed / commit_after，
+    v0.1.221：finish() 为了在 report.json 里带上 pushed / commit_after，
     会在 commit_and_push() **之后**再 write_report_files() 一次。
     但那次写盘从来没有再提交过 —— 后果是远端 26 轮报告里，
     report.json 无一含 pushed 字段，commit_after 也指向提交前的自己
@@ -719,7 +719,7 @@ def one_round(args):
             # 提交后再写一次，保证 report.json 里也含回传结果
             write_report_files(status, summary, error)
             if pushed:
-                # v0.1.213：上面这次写盘必须再提交一次，否则远端留下的
+                # v0.1.221：上面这次写盘必须再提交一次，否则远端留下的
                 # 永远是「推送前」的快照（缺 pushed、commit_after 指向自己）。
                 _, s2 = commit_followup(run_id)
                 rec["steps"].extend(s2)
@@ -771,7 +771,7 @@ def one_round(args):
                 return "error"
             rec["steps"].append({"step": "拉取后 HEAD", "rc": 0, "out": local_head()[:12]})
 
-    # v0.1.213 防御：git 不跟踪空目录，任何 stash / rebase / clean 都可能把
+    # v0.1.221 防御：git 不跟踪空目录，任何 stash / rebase / clean 都可能把
     # 本轮刚建好的空报告目录顺手删掉。这里无条件补建一次，
     # 保证后面写 console.log / env.json 时目录一定在。
     os.makedirs(out_dir, exist_ok=True)

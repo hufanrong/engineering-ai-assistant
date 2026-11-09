@@ -1033,7 +1033,7 @@ def load_relations() -> dict:
         ledger = {}
     graph = _merge_index_devices(graph, ledger)
 
-    # v0.1.213：stats 恒为 dict，且计数与真实条数对齐。
+    # v0.1.221：stats 恒为 dict，且计数与真实条数对齐。
     #
     # 缺陷（实测 2026-11-09，三台真实项目全部复现）：磁盘上的 relations.json
     # 只有 devices / workshops / relations 三个键，**根本没有 stats**；

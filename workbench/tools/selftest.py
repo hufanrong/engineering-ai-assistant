@@ -357,7 +357,7 @@ def record(phase, step, expected, actual, passed, evidence=""):
     else:
         s["failed"] += 1
     tag = "SKIP" if passed is None else ("PASS" if passed else "FAIL")
-    # v0.1.213：actual 可能是二进制内容（阶段②「单据生成」返回的就是 docx 字节串
+    # v0.1.221：actual 可能是二进制内容（阶段②「单据生成」返回的就是 docx 字节串
     # "PK\x03\x04..."），直接 print 到 GBK 控制台会抛 UnicodeEncodeError，
     # 把整个阶段掐断 —— 实测阶段② 从 9 项截断到只剩 4 项，AI 侧看到的是
     # 「2 项通过 1 项失败」，完全看不到后面 5 项。
