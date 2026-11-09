@@ -34,6 +34,24 @@
       "step": "判定",
       "rc": 0,
       "out": "status=failed rc=1"
+    },
+    {
+      "step": "git add reports",
+      "rc": 0,
+      "out": "",
+      "err": ""
+    },
+    {
+      "step": "git commit",
+      "rc": 0,
+      "out": "[main 6f0b936] test(workbuddy): 20261109_072030 status=failed P67/F1/S2\n 10 files changed, 1470 insertions(+), 5 deletions(-)\n create mode 100644 reports/20261109_072030/console.log\n create mode 100644 reports/20261109_072030/env.json\n create mode 100644 reports/20261109_072030/report.json\n create m",
+      "err": ""
+    },
+    {
+      "step": "git push",
+      "rc": 128,
+      "out": "",
+      "err": ""
     }
   ],
   "summary": {
@@ -75,7 +93,8 @@
   },
   "error": "",
   "remote_head": "3199d520694a627a5b64db606941d921b1b1c671",
-  "finished": "2026-11-09 07:24:07",
+  "finished": "2026-11-09 07:24:10",
   "commit_before": "3199d520694a627a5b64db606941d921b1b1c671",
-  "commit_after": "3199d520694a627a5b64db606941d921b1b1c671"
+  "commit_after": "6f0b93637cf5418191d0813771d84c4b65f6b73d",
+  "pushed": false
 }
