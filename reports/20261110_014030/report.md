@@ -1,8 +1,8 @@
 # WORKbuddy 自测报告 20261110_014030
 
 - 状态：**passed**
-- 代码版本：`f496fac1dd0c`
-- 开始：2026-11-10 01:40:30　结束：2026-11-10 01:41:20
+- 代码版本：`5cc1023ffe30`
+- 开始：2026-11-10 01:40:30　结束：2026-11-10 01:41:23
 - 结果：通过 68 / 失败 0 / 跳过 2
 
 ## 步骤
@@ -17,3 +17,8 @@
 - [OK] selftest　rc=0
 - [OK] 导出使用遥测　rc=0
 - [OK] 判定　rc=0
+- [OK] git add reports　rc=0
+- [OK] git commit　rc=0
+- [OK] git push　rc=0
+  - To https://github.com/hufanrong/engineering-ai-assistant
+   f496fac..5cc1023  HEAD -> main
