@@ -1586,6 +1586,35 @@ def phase6(samples_dir):
            "缺 Request 标注时 POST /api/projects/import 恒返回 422（函数体一次都没跑过），"
            "叠加前端无恢复入口 = 只能备份不能恢复")
 
+    # 6.17 全部路由函数的参数必须带类型标注（v0.1.219 新增的通用门禁）。
+    # 6.16 只钉住 import_project 这一个签名；而这类缺陷是成批出现的：
+    # 少写 `: Request` → FastAPI 当成必填 query → 该接口恒 422、函数体一次都没跑过，
+    # 而 /openapi.json 里它照样列着，页面上也看不出异常。
+    # 所以这里调 tools/check_route_signatures.py 做全量 AST 扫描，不再单点防守。
+    # 该脚本自身带一条防假通过：扫到 0 个路由即报红（目录解析错了不能算通过）——
+    # 第一版就踩过，脚本放在 tools/ 下却按 __file__ 同级找 app/，扫到 0 个还 rc=0。
+    import subprocess as _sp
+    _sig_script = os.path.join(_here, "tools", "check_route_signatures.py")
+    _sig_rc = None
+    _sig_tail = ""
+    if os.path.isfile(_sig_script):
+        try:
+            _cp = _sp.run([sys.executable, _sig_script], cwd=_here,
+                          capture_output=True, text=True, timeout=120)
+            _sig_rc = _cp.returncode
+            _sig_lines = [l for l in (_cp.stdout or "").strip().splitlines() if l.strip()]
+            _sig_tail = _sig_lines[-1] if _sig_lines else ""
+        except Exception as _e:
+            _sig_rc = -1
+            _sig_tail = f"执行异常：{_e}"
+    ok17 = (_sig_rc == 0) and ("缺标注参数 0 个" in _sig_tail)
+    record(P, "全部路由函数参数带类型标注（防 422 死接口）",
+           "tools/check_route_signatures.py 退出码 0，且汇总为「缺标注参数 0 个」",
+           f"退出码={_sig_rc} 汇总={_sig_tail}",
+           ok17,
+           "缺 `: Request` 时 FastAPI 把 request 当必填 query，接口恒 422 且函数体从未执行 —— "
+           "而 /openapi.json 里照旧列着该路由，属于「接口存在 ≠ 接口能用」")
+
 
 def _walk_keys(obj, depth=0):
     """递归收集 dict 的键名，用于检查导出包里有没有不该出现的字段。"""
