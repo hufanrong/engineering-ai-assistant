@@ -1,0 +1,90 @@
+{
+  "run_id": "20261109_171403",
+  "started": "2026-11-09 17:14:03",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "e932beff14a2f04cb851b9748528d73c6e536acb",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "taskkill 15564",
+      "rc": 0,
+      "out": "�ɹ�: ����ֹ PID Ϊ 15564 �Ľ��̡�",
+      "err": ""
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 57, \"failed\": 2, \"skipped\": 2, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 3, \"failed\": 1, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"passed\": 16, \"failed\": 1, \"skipped\": 2}}}",
+      "err": "Traceback (most recent call last):\n  File \"D:\\fangong-workbench\\workbench\\tools\\selftest.py\", line 1752, in main\n    {1: phase1, 2: phase2, 3: phase3, 4: phase4,\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n     5: phase5, 6: phase6}[ph](sdir)\n     ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File \"D:\\fang"
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=82 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1"
+    }
+  ],
+  "summary": {
+    "passed": 57,
+    "failed": 2,
+    "skipped": 2,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 3,
+        "failed": 1,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 16,
+        "failed": 1,
+        "skipped": 2
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "e932beff14a2f04cb851b9748528d73c6e536acb",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-09 17:14:39",
+  "commit_before": "e932beff14a2f04cb851b9748528d73c6e536acb",
+  "commit_after": "e932beff14a2f04cb851b9748528d73c6e536acb"
+}
