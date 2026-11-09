@@ -1,0 +1,22 @@
+== 真实终端输出：run_loop.bat 含中文且 chcp 65001（修复前）==
+D:\>chcp 65001  1>nul
+D:\>rem  1) 这里只认 PATH 上的 python。真实用户机器（本机就是）
+D:\>没有 git，双击直接死在第一步，
+'没有' is not recognized as an internal or external command,
+operable program or batch file.
+D:\>rem     用户看到的是「找不到 Python，先运行 install.bat」。
+D:\>rem  2) 即使补上 git，push 仍会 rc=128 且 stderr 全空：
+D:\> stderr 全空：
+'?' is not recognized as an internal or external command,
+operable program or batch file.
+D:\>ithub.com 的凭据助手是 "!"-前缀外部命令
+
+== 结论 ==
+cmd 在 chcp 65001 之后仍按字节读取 .bat，遇到多字节（中文）行会丢失同步，
+把一行 rem 从中间劈开，后半截当命令执行。这不是编码写错了，是 cmd 的固有行为。
+修复：.bat 正文全部改 ASCII，中文只出现在 Python 的输出里。
+
+== 另一个已复现的问题：UTF-8 BOM ==
+文件带 BOM 时首行变成 '<BOM>@echo off'，被当成命令名：
+'?@echo' is not recognized as an internal or external command
+连锁后果：echo off 没生效，整个脚本逐行回显，中文行被解析得更碎。

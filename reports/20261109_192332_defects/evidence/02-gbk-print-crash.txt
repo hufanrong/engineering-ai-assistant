@@ -1,0 +1,14 @@
+== A. 修复后在 GBK 输出环境下调用 record()（PYTHONIOENCODING=gbk）==
+rc=0
+--- stdout ---
+  [PASS] doc-gen: b'PK\x03\x04\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d\x8e\x8f\x90\x91\x92\x93\x94\x95\x96\x97\x98\x99\x9a
+RESULT phase2= {'passed': 1, 'failed': 0, 'skipped': 0}
+
+--- stderr ---
+
+
+== B. 修复前同一场景 ==
+rc=1
+UnicodeEncodeError: 'gbk' codec can't encode character '\ufffd'
+  File "workbench\tools\selftest.py", line 360, in record
+    print(f"  [{tag}] {step}: {str(actual)[:120]}")

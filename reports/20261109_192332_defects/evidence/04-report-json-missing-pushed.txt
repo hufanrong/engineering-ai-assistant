@@ -1,0 +1,18 @@
+== origin/main:reports/20261109_191128/report.json 尾部（真实抓取）==
+  "remote_head": "72390d510bdcdf1851946d79f52318eb86244b6a",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-09 19:12:12",
+  "commit_before": "72390d510bdcdf1851946d79f52318eb86244b6a",
+  "commit_after": "6e48b088ef5cf43a093dfec705d1f1910132d231",
+  "pushed": true
+}
+
+结论：远端无 pushed 字段；commit_after 等于 commit_before（自己指自己）。
+
+== 同轮本地（推送后二次写盘）版本尾部 ==
+  "finished": "2026-11-09 19:12:12",
+  "commit_before": "72390d510bdcdf1851946d79f52318eb86244b6a",
+  "commit_after": "6e48b088ef5cf43a093dfec705d1f1910132d231",
+  "pushed": true
+}

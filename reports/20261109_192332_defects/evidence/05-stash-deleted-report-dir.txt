@@ -1,0 +1,13 @@
+== 真实报错（2026-11-09 07:14 那一轮整轮崩）==
+FileNotFoundError: [Errno 2] No such file or directory:
+    'D:\\fangong-workbench\\reports\\20261109_071408\\console.log'
+
+== 因果链 ==
+1. one_round() 在调 pull_latest() 之前就 os.makedirs(out_dir)，此时目录是空的；
+2. pull_latest() 发现工作区脏（上一轮留下 3 个改过的报告文件），执行
+   git stash push -u —— git 不跟踪空目录，这个空报告目录被当成未跟踪内容收走删除；
+3. 紧接着写 console.log -> FileNotFoundError，整轮作废。
+
+== 修复 ==
+- stash 加 pathspec ':(exclude)reports'
+- one_round 在 PULL 之后再 os.makedirs(out_dir, exist_ok=True) 兜一次

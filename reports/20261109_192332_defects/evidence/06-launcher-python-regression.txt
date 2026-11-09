@@ -1,0 +1,14 @@
+== 我在仓库外写的临时启动器引入的回归（已修）==
+[ERROR] no python with fastapi found under:
+        D:/WorkBuddy/work/data/binaries/python/versions/
+
+== 根因（实测写法对照）==
+for /d %%D in ("D:/WorkBuddy/work/data/binaries/python/versions/*") do (
+  echo RAW=[%%D]     -> RAW=[D:3.13.12]      <- 盘符后的反斜杠被吃掉
+)
+带引号的 set + 正斜杠会让 for /d 把 D:\x 解析成 D:x。
+正确写法：无引号 + 反斜杠，或者直接用 for /f + dir /b /ad。
+（仓库版 run_loop.bat 已采用 for /f + dir 的稳妥写法。）
+
+== 附：用 LF 写 .bat 的另一个坑 ==
+'ouble-click' is not recognized ...   <- 每行首字符被吃掉（cmd 需要 CRLF）

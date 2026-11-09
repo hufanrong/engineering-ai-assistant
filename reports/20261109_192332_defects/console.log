@@ -1,0 +1,27 @@
+== 本文件不是 wb_loop 自动捕获的日志，是本次核查的终端输出汇总 ==
+run_id: 20261109_192332_defects
+commit: 5010f2b7fb38079415d4b07c510bcb986d24325a
+
+-- 1) 真实用户 PATH 下的探测（PATH 只留 C:\Windows\System32）--
+where python -> 信息: 用提供的模式无法找到文件。
+where git    -> 信息: 用提供的模式无法找到文件。
+即：真实用户 PATH 中既无 python 也无 git，双击启动必然失败。
+
+-- 2) 修复后的 run_loop.bat 在同一受限 PATH 下 --
+[INFO] git    : D:/WorkBuddy/.../PortableGit/versions/1.2.0.old.11896/mingw64/bin/git.exe
+[INFO] python : D:\fangong-workbench\workbench\venv\Scripts\python.exe
+usage: wb_loop.py [-h] [--once] [--interval INTERVAL] [--phases PHASES]
+  -> 自解析成功，--help 正常输出中文。
+
+-- 3) 阶段② 修复前后对照 --
+修复前：UnicodeEncodeError: 'gbk' codec can't encode character '\ufffd'
+        phase2 被截断为 4 项（3 通过 1 失败），后面 5 项直接没跑。
+修复后：rc=0，phase2 汇总 = {'passed': 1, 'failed': 0, 'skipped': 0}，不再中断。
+
+-- 4) 阶段⑥ stats 兜底 --
+修复前：stats=None，断言 len(devices)==stats.devices 必挂。
+修复后：stats type = dict，{'devices': 0, 'workshops': 0}，断言成立。
+
+-- 5) 远端 report.json 缺 pushed --
+origin/main:reports/20261109_191128/report.json 尾部无 pushed 字段，
+commit_after == commit_before。见 evidence/04-*.txt。

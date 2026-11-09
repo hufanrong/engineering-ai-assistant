@@ -1,0 +1,43 @@
+{
+  "run": "20261109_191024",
+  "phase2_count": 4,
+  "expected_count": 9,
+  "rows": [
+    {
+      "phase": 2,
+      "step": "资料类型清单",
+      "expected": "200 且类型数>0",
+      "actual": "200 types=10",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "模板预填",
+      "expected": "200",
+      "actual": "200 {'data': {'项目名称': '紫金矿业工程项目', '车间': '1号车间', '_devices': [{'tag': 'P-101', 'name'",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "单据生成",
+      "expected": "200 且生成成功",
+      "actual": "200 PK\u0003\u0004\u0014\u0000\u0000\u0000\b\u0000\\�i]�R���\u0001\u0000\u0000�\u0006\u0000\u0000\u0013\u0000\u0000\u0000[Content_Types].xml��MO�@\u0010���\u0015�/> {C\u000f\u0015��p(p,�\u001aD���8Y�/�L\u0002���:�U�P�\u0006.����}\u001e۲=�|�&[CD�]]�W�\"",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 2,
+      "step": "阶段执行异常",
+      "expected": "无异常",
+      "actual": "^^^^^^^^^\n  File \"D:\\fangong-workbench\\workbench\\tools\\selftest.py\", line 360, in record\n    print(f\"  [{tag}] {step}: {str(actual)[:120]}\")\n    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nUnicodeEncodeError: 'gbk' codec can't encode character '\\ufffd' in position 30: illegal multibyte sequence\n",
+      "passed": false,
+      "skipped": false,
+      "evidence": ""
+    }
+  ]
+}
