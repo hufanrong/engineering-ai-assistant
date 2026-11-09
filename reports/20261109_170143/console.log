@@ -1,0 +1,107 @@
+$ D:\WorkBuddy\work\data\binaries\python\versions\3.13.12.old.11896\python.exe D:\fangong-workbench\workbench\tools\selftest.py --phase 1,2,3,5,6 --base http://127.0.0.1:8756
+
+[stdout]
+[���] ����ǰ��ˮ��11 �У�D:\fangong-workbench\workbench\data\operation_log.jsonl��
+������ -> D:\fangong-workbench\workbench\tools\_samples
+warning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.
+
+=== �׶� 1���ļ��ϴ����������ࡢ���Ͽ� ===
+  [PASS] ���񽡿����: 200 
+  [PASS] �汾�ſɶ�: 0.1.220
+  [PASS] ��Ŀ����: 200 {'ok': True, 'project': {'id': 'd106621a', 'name': '�Բ�_20261109_170203', 'descri
+  [PASS] �ݹ�ɨ������: 200 {'ok': True, 'folders': ['D:\\fangong-workbench\\workbench\\tools\\_samples']}
+  [PASS] ɨ�����: {"found": 6, "parsed": 6, "vectorized": 0, "skipped": 0, "failed": 0, "duplicate": 0}
+  [PASS] �����ɹ���: parsed=6 failed=0
+  [PASS] ���Ͽ���Ŀ��: ��Ŀ 6
+  [PASS] ����ض�����: 6/6 ��ȡ��ʧ�ܣ�[]
+  [PASS] ���ķǿ�: 6/6 ������
+  [PASS] ʵ��(λ��)��ȡ: 6/6 ����ʵ�壻���� ["{'type': 'equipment', 'tag': 'EQ-101'}", "{'type': 'equipment', 'tag': 'P-101'}", "{'type': 'equipment', '
+  [PASS] �ṹ������: 6/6 ���� structure
+  [PASS] �����Զ�����: ʶ�𳵼� ['1�ų���', '2�ų���', '�����']���ѹ����ļ� 2
+  [PASS] ���Ͽ����: 200 hits=5 mode=keyword
+  [PASS] ����ģʽ����: keyword
+      ���У�ͼֽ˵��.pdf ƥ�� 5/5 ���� 0.0
+      ���У�ʩ��˵��.txt ƥ�� 5/5 ���� 0.0
+      ���У�ʩ��ͼ_EQ-101.dxf ƥ�� 5/5 ���� 0.0
+  [PASS] ���������: vector_count=0
+
+=== �׶� 2�������������ɹ��� ===
+  [PASS] ���������嵥: 200 types=10
+      ����������[{'key': 'ʩ������', 'label': 'ʩ������', 'required': ['��Ŀ����', '����', '���Ƶ�λ', '������', 'ʩ������', 'ʩ������'], 'optional': ['ʩ����λ', '�����', '��׼��', 'ʩ������', '������ʩ', '��ȫ��ʩ', '���Ȱ���', '�漰�豸']}, {'key': '��װ����', 'label': '��װ����', 'required': ['��Ŀ����', '����', '���Ƶ�λ', '������', '��װ����', '��װ�豸����', '�豸����'], 'optional': ['ʩ����λ', '�����', '��׼��', '��װ��е', '��װ�뾶', '��װ�߶�', '����վλ', '������', '��װ��ȫ��ʩ']}, {'key': '��������', 'label': '��������', 'required': ['��Ŀ����', '����', '������', '��������', '��������'], 'optional': ['�����׵�λ', '��������', '��������', 'ע������']}, {'key': '�������ռ�¼', 'label': '�������ռ�¼', 'required': ['��Ŀ����', '����', '�䵥��', '������', '��������', '���ս��'], 'optional': ['λ��', '�豸����', '����', '��ۼ�����', '�������', '��ע']}, {'key': '���ι������ռ�¼', 'label': '���ι������ռ�¼', 'required': ['��Ŀ����', '����', '���β�λ', '������', '��������', '���ս��'], 'optional': ['ʩ����λ', '������λ', '��������', '������', 'Ӱ�����ϱ��']}, {'key': 'ʩ���ƻ�', 'label': 'ʩ���ƻ�', 'required': ['��Ŀ����', '����', '���Ƶ�λ', '������', '�ƻ�����'], 'optional': ['ʩ����λ', '�����', '��������', '��������', '���Ȱ���', '��Դ����', '�ؼ��ڵ�']}, {'key': 'ʩ����־', 'label': 'ʩ����־', 'required': ['��Ŀ����', '����', '��¼��', '��¼����', '���չ�������'], 'optional': ['����', '�¶�', '������Ա', '��������', '��еʹ��', '��ȫ�������', '���⼰����']}, {'key': '��Ʊ��', 'label': '��Ʊ��', 'required': ['��Ŀ����', '����', '������', '�������', '�����'], 'optional': ['ԭ���ͼ��', '���ͼ��', '���ԭ��', '�漰�豸', '�������仯', '������', '����']}]
+  [PASS] ģ��Ԥ��: 200 {'data': {'��Ŀ����': '�Ͻ��ҵ������Ŀ', '����': '1�ų���', '_devices': [{'tag': 'P-101', 'name'
+  [FAIL] �׶�ִ���쳣: ^^^^^^^^^
+  File "D:\fangong-workbench\workbench\tools\selftest.py", line 360, in record
+    print(f"  [{tag}] {step}: {
+
+=== �׶� 3�����������Զ����� ===
+  [PASS] �����Լ��: 200 phases=6 �豸��=0 ����=��
+  [PASS] ��������Ҫ��: 200 requirements=6
+  [PASS] ��������ͳ��: 200 total_devices=3 �� һ������ total_devices=3
+  [PASS] ����嵥: 200 ����=3 error=None
+  [PASS] ����Ŀ¼: 200 rows=11
+  [PASS] ���������: 200 error=None
+  [PASS] ��������Ҫ��ǼǱ�: 200 ready=True total=3 err=
+  [PASS] ��������: 200 generated=2 todo=0 collect=1 errors=0 ��Ĭ����=[] error=
+  [PASS] �����ļ�����: generated=2 �Ҳ���=0 �䵽��Ŀ��=0 ��Ŀ=d106621a
+  [PASS] һ����������: 200 total_devices=3
+  [PASS] ȱ���嵥: 200 missing=22
+  [PASS] ��������: 200 size=42125 files=4 uncompressed=45781 bad=None err=
+  [PASS] �����鵵����Ŀ����: ����Ŀ total_devices=0 missing=0������ A=3 ̨��
+  [PASS] �л�ԭ��Ŀ�Զ��������嵥: �лغ� total_devices=3��ӦΪ 3��home=d106621a
+
+=== �׶� 5��ʹ��ң��������������Լ� ===
+  [PASS] ң��״̬�ӿ�: 200 lines=792 err=
+  [PASS] �����¼����: lines=792
+  [PASS] ��·�ɾۺ�: routes=45 total=793 �ֲ�=True
+  [PASS] 4xx ����ͻ��˴���: status_4xx=7
+  [PASS] ������ϰ�: 200 keys=['bundle_version', 'generated_at', 'window', 'requests', 'errors', 'parse_failures', 'environment', 'privacy']
+  [PASS] �������: sanitized=True
+  [PASS] ���ڲ�������·��: �̷�����=0 �û�Ŀ¼=False
+  [PASS] ���ڲ���ҵ�������ֶ�: ����=��
+  [PASS] ����ʧ�ܾۺ�: total_failed=0 by_ext={}
+
+=== �׶� 6��ͬһ��ʵ����ȶ� ===
+  [PASS] ���û�ԭ��Ŀ��У��: �л�ǰ=d106621a Ŀ��=0c9a4b2d �л�=True
+  [PASS] �汾��ȫ����Դһ��: /api/status.version=0.1.220; /api/update/check.current_version=0.1.220; /api/mobile/config.version=0.1.220
+  [PASS] �汾�Ų���ռλֵ: status.version=0.1.220
+  [PASS] ���ϴ�������һ��: status=3 api=3 items=3
+  [PASS] ������ļ�������һ��: status=3 total=3 list=3
+  [FAIL] �豸������һ��: list=0 stats=None
+  [SKIP] �豸����ӿ�һ��: 200 ok=False msg=�ռ�ģ��δ�����������ؽ�ͼ��
+  [SKIP] �豸��������ɽ���: �豸�б�Ϊ��
+  [PASS] ��Ŀ������һ��: total=5 list=5
+  [PASS] ��Ŀ����Ŀ¼ָ��ǰ��Ŀ: data-dir=D:\fangong-workbench\workbench\data\projects\0c9a4b2d ����=D:\fangong-workbench\workbench\data\projects\0c9a4b2d
+  [PASS] ��ǰ��ĿĿ¼��ʵ����: exists=True path=D:\fangong-workbench\workbench\data\projects\0c9a4b2d
+  [PASS] �ѽ����ļ����н�������: parsed=3 ȱ����=0 []
+  [PASS] ����Ŀʱ��ǰ��Ŀָ�벻����: ��Ŀ=5 ��ǰ=0c9a4b2d ���б�=True
+  [PASS] ��Ŀ����������������ֻ��Ψһ���: op_log=True ȱ���=�� Ψһ���=True
+  [PASS] ���ݰ�Ŀ¼ʵ�����ݴ�������߰�����: ������������=True ʹ�ñ���=True ��ȥ������=True
+  [PASS] ������׶����е��Բ���Ŀ������: phase2 ���л�����=True
+  [PASS] ���ݻָ�ǰ��˹�ͨ��·��ǩ�� + ǰ����ڣ�: ǩ����ȷ=True ǰ�˵���·��=True �ļ�ѡ��=True �ָ�����=True
+  [PASS] ȫ��·�ɺ������������ͱ�ע���� 422 ���ӿڣ�: �˳���=0 ����=ɨ�� 92 �� py �ļ���ʶ��·�ɺ��� 441 ����ȱ��ע���� 0 ��������ʧ�� 0 ��
+[��ԭ] ��ǰ��Ŀ�л� 0c9a4b2d �� OK
+[����] ɾ�����β�����Ŀ d106621a �� OK
+[����] ɾ�����β�����Ŀ 19268d34 �� OK
+[���] ���������Բ�д�� 8 �У�ʣ�� 11 ��
+  [PASS] �����Բ��û������ˮδ����Ⱦ: ǰ=11 ��=11 ���=8 ����������Ŀ=True ĩ��һ��=True
+
+===== ���ܣ�ͨ�� 57 / ʧ�� 2 =====
+���棺D:\fangong-workbench\workbench\tools\selftest_report.json
+     D:\fangong-workbench\workbench\tools\selftest_report.md
+
+
+[stderr]
+Traceback (most recent call last):
+  File "D:\fangong-workbench\workbench\tools\selftest.py", line 1752, in main
+    {1: phase1, 2: phase2, 3: phase3, 4: phase4,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     5: phase5, 6: phase6}[ph](sdir)
+     ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "D:\fangong-workbench\workbench\tools\selftest.py", line 676, in phase2
+    record(P, "��������", "200 �����ɳɹ�", f"{code} {str(gen)[:120]}", ok, err)
+    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\fangong-workbench\workbench\tools\selftest.py", line 360, in record
+    print(f"  [{tag}] {step}: {str(actual)[:120]}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'gbk' codec can't encode character '\ufffd' in position 30: illegal multibyte sequence
+
