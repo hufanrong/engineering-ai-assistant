@@ -1130,6 +1130,10 @@ class VolumeReq(BaseModel):
     project_id: str = ""
     book: str = ""
     workshop: str = ""
+    # v0.1.222：默认 False = **不覆盖卷内已存在的同名文件**。
+    # 登记表里的 B 类表是留给现场填实测数据的，重跑整卷时必须保留；
+    # 只有用户明确勾选「覆盖已有文件」才重建。
+    overwrite: bool = False
 
 
 @app.get("/api/supervision/status")
@@ -1145,7 +1149,8 @@ def supervision_status(project_id: str = "", book: str = "", workshop: str = "")
 def supervision_volume(req: VolumeReq):
     """一键整卷：A 全自动 + B 预填待补 + C 建归集目录。"""
     try:
-        r = si.generate_volume(req.project_id, req.book, req.workshop)
+        r = si.generate_volume(req.project_id, req.book, req.workshop,
+                               overwrite=bool(req.overwrite))
         return {"ok": r["ok"], "result": r}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"整卷失败：{e}")

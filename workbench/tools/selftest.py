@@ -357,22 +357,7 @@ def record(phase, step, expected, actual, passed, evidence=""):
     else:
         s["failed"] += 1
     tag = "SKIP" if passed is None else ("PASS" if passed else "FAIL")
-    # v0.1.221：actual 可能是二进制内容（阶段②「单据生成」返回的就是 docx 字节串
-    # "PK\x03\x04..."），直接 print 到 GBK 控制台会抛 UnicodeEncodeError，
-    # 把整个阶段掐断 —— 实测阶段② 从 9 项截断到只剩 4 项，AI 侧看到的是
-    # 「2 项通过 1 项失败」，完全看不到后面 5 项。
-    # 根因不在业务，在「控制台编码」，所以这里必须自己兜住，
-    # 不能指望外部先设好 PYTHONIOENCODING。
-    try:
-        shown = str(actual)[:120]
-    except Exception:  # noqa: BLE001
-        shown = "<unprintable>"
-    line = f"  [{tag}] {step}: {shown}"
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        enc = getattr(sys.stdout, "encoding", None) or "ascii"
-        print(line.encode(enc, "backslashreplace").decode(enc, "replace"))
+    print(f"  [{tag}] {step}: {str(actual)[:120]}")
 
 
 # ---------------- 测试样本 ----------------
@@ -1629,6 +1614,66 @@ def phase6(samples_dir):
            ok17,
            "缺 `: Request` 时 FastAPI 把 request 当必填 query，接口恒 422 且函数体从未执行 —— "
            "而 /openapi.json 里照旧列着该路由，属于「接口存在 ≠ 接口能用」")
+
+    # 6.18 只读接口不得改写项目元数据（v0.1.221）。
+    # 实测缺陷：`GET /api/projects/current`（打开页面就调）经由 _refresh_project_stats
+    # → update_project_stats 无条件写盘并刷新 updated_at。证据是字节级的：
+    #   md5 a02e757d…(updated_at 01:12:22) → 调一次该接口 → md5 e1443804…(01:15:16)
+    # 危害不只是「时间戳显示不准」：_pick_successor_project() 用 updated_at 挑删除后的
+    # 接任者，看一眼就能改掉接任顺序。属于本项目反复出现的「同一件事两个答案」。
+    # 这里调 tools/test_readonly_no_write.py（17 条断言，含真实 HTTP 接口层验证），
+    # 不做单点源码契约，因为「谁在调这个函数」在源码层面看不出来。
+    _ro_script = os.path.join(_here, "tools", "test_readonly_no_write.py")
+    _ro_rc = None
+    _ro_tail = ""
+    if os.path.isfile(_ro_script):
+        try:
+            _cp2 = _sp.run([sys.executable, _ro_script], cwd=_here,
+                           capture_output=True, text=True, timeout=240)
+            _ro_rc = _cp2.returncode
+            _ro_lines = [l for l in (_cp2.stdout or "").strip().splitlines() if l.strip()]
+            _ro_tail = _ro_lines[-1] if _ro_lines else ""
+        except Exception as _e:
+            _ro_rc = -1
+            _ro_tail = f"执行异常：{_e}"
+    ok18 = (_ro_rc == 0) and ("0 failed" in _ro_tail)
+    record(P, "只读接口不改写项目元数据（updated_at 不被白改）",
+           "tools/test_readonly_no_write.py 退出码 0，且汇总为「N passed, 0 failed」",
+           f"退出码={_ro_rc} 汇总={_ro_tail[:60]}",
+           ok18,
+           "GET /api/projects/current 是无条件写盘的入口：打开页面就改 updated_at，"
+           "而 updated_at 决定删除项目后的接任者 —— 看一眼就能改掉接任顺序")
+
+    # 6.19 重跑整卷不得覆盖已填写的卷内文件（v0.1.222）。
+    # 实测缺陷：_generate_volume_impl 两处落盘都是 os.replace 无条件覆盖。
+    # 登记表现有 6 条全为 B 类，B 类表就是留给现场人工填实测数据的 ——
+    # 用户填完再点一次「一键整卷」（补台账/换模板/加车间都是常事），
+    # 手填内容被静默销毁，接口照样 ok=True、generated 里照记「已生成」。
+    # 反向验证过：把保护改回 `if False`，该脚本 8 条断言变红、退出码 1，
+    # 且日志里能看到人工写的字节被真正的 docx 覆盖。
+    _ov_script = os.path.join(_here, "tools", "test_volume_no_overwrite.py")
+    _ov_rc = None
+    _ov_tail = ""
+    if os.path.isfile(_ov_script):
+        try:
+            _cp3 = _sp.run([sys.executable, _ov_script], cwd=_here,
+                           capture_output=True, text=True, timeout=300)
+            _ov_rc = _cp3.returncode
+            # 汇总行不是最后一行（末尾有分隔线），必须按内容找：
+            # 首版取 _lines[-1] 拿到了 "====="，于是 rc=0 却判 FAIL —— 假红灯。
+            _ov_lines = [l for l in (_cp3.stdout or "").strip().splitlines() if l.strip()]
+            _ov_sum = [l for l in _ov_lines if ("合计" in l) or ("PASS /" in l)]
+            _ov_tail = _ov_sum[-1].strip() if _ov_sum else (_ov_lines[-1] if _ov_lines else "")
+        except Exception as _e:
+            _ov_rc = -1
+            _ov_tail = f"执行异常：{_e}"
+    ok19 = (_ov_rc == 0) and ("0 FAIL" in _ov_tail)
+    record(P, "重跑整卷不覆盖已填写的卷内文件（B 类人工数据不被销毁）",
+           "tools/test_volume_no_overwrite.py 退出码 0，且汇总为「N PASS / 0 FAIL」",
+           f"退出码={_ov_rc} 汇总={_ov_tail[:60]}",
+           ok19,
+           "卷内 B 类表是现场人工填的实测数据；无差别 os.replace 会在重跑时销毁它，"
+           "而且接口仍报「已生成」—— 用户看不出自己填的表没了")
 
 
 def _walk_keys(obj, depth=0):

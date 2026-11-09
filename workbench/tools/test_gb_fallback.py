@@ -238,19 +238,52 @@ def main():
 
     # ---------- D. 接入链路 ----------
     print("\n[D] 接进 render_supervision_doc：模板缺失不再直接报错")
-    r_none = st.render_supervision_doc(category="完全不存在的表XYZ",
-                                       workshop="", project_id=None)
-    check("无模板类别 → ok=True（不再是「未找到表类型」硬失败）",
-          r_none.get("ok") is True, str(r_none.get("error"))[:80])
-    check("带 gb_fallback 标记（人工可辨是兜底表）",
-          r_none.get("gb_fallback") is True)
-    check("带 warning 说明为什么用兜底",
-          "国标通用格式" in (r_none.get("warning") or ""))
-    check("产出文件真实落盘", os.path.isfile(r_none.get("output_path") or ""))
-    check("空白兜底表有 gb_blank 标记",
-          r_none.get("gb_blank") is True)
+    # v0.1.221：这里原来传 project_id=None，而 render_gb_fallback 的
+    # `_pm.get_project_data_dir(None)` 会回落到**当前项目**——也就是用户的真实项目。
+    # 后果实测：每跑一次本脚本，真实项目 322fef90/exports/ 里就多出一份
+    # 「完全不存在的表XYZ_全厂_<时间戳>.docx」。真实项目里已经攒了 19 份这种垃圾，
+    # 时间戳与自测轮次一一对应（11-06 07:05、11-06 19:07、11-07 01:07……），
+    # 而脚本自己 rc=0、192 条断言全绿 —— 断言只查「文件落盘了没」，
+    # 从没查「落在谁家的目录里」。
+    #
+    # 修法与 [E] 段一致：临时项目根 + 显式 project_id，测试产物只进临时目录。
+    _dtmp = tempfile.mkdtemp(prefix="gb_d_")
+    _d_root = _pm.PROJECTS_ROOT
+    _d_cur = _pm.CURRENT_PROJECT_FILE
+    try:
+        _pm.PROJECTS_ROOT = os.path.join(_dtmp, "projects")
+        _pm.CURRENT_PROJECT_FILE = os.path.join(_dtmp, "current_project.json")
+        _dpid = "gb_probe"
+        _dpd = os.path.join(_pm.PROJECTS_ROOT, _dpid)
+        os.makedirs(_dpd, exist_ok=True)
+        with open(os.path.join(_dpd, "project_meta.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"id": _dpid, "name": "兜底测试"}, f, ensure_ascii=False)
+        with open(os.path.join(_dpd, "index.json"), "w", encoding="utf-8") as f:
+            _mjson.dump({"devices": {}, "files": {}, "workshops": {}}, f, ensure_ascii=False)
 
-        # --- D2：版面门禁。表是要打印出来交给监理的，列宽错了就是废表 ---
+        r_none = st.render_supervision_doc(category="完全不存在的表XYZ",
+                                           workshop="", project_id=_dpid)
+        check("无模板类别 → ok=True（不再是「未找到表类型」硬失败）",
+              r_none.get("ok") is True, str(r_none.get("error"))[:80])
+        check("带 gb_fallback 标记（人工可辨是兜底表）",
+              r_none.get("gb_fallback") is True)
+        check("带 warning 说明为什么用兜底",
+              "国标通用格式" in (r_none.get("warning") or ""))
+        check("产出文件真实落盘", os.path.isfile(r_none.get("output_path") or ""))
+        check("空白兜底表有 gb_blank 标记",
+              r_none.get("gb_blank") is True)
+        # 断言产出落在**临时项目**里 —— 这一条就是上面那个缺陷的守卫：
+        # 只要哪天有人把 project_id 改回 None，文件就会落进真实项目，此处立刻变红。
+        _out = r_none.get("output_path") or ""
+        check("产出落在临时项目目录内（不写用户真实项目）",
+              os.path.abspath(_out).startswith(os.path.abspath(_pm.PROJECTS_ROOT)),
+              f"out={_out}")
+    finally:
+        _pm.PROJECTS_ROOT = _d_root
+        _pm.CURRENT_PROJECT_FILE = _d_cur
+        shutil.rmtree(_dtmp, ignore_errors=True)
+
+    # --- D2：版面门禁。表是要打印出来交给监理的，列宽错了就是废表 ---
     # v0.1.185：原来四列一律 4.25cm 等宽，条款被挤成两三行、手写列反而空着很宽；
     # 改成按表种分配后又把第 0 列压到 1.5cm，标签「分部分项工程名称」折成三行。
     # 这两次都是靠渲染出来看才发现的，所以把版面约束写成断言钉住。

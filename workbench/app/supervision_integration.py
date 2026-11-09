@@ -281,8 +281,55 @@ def _check_generated(project_id, book, workshop, it, cat):
     return False
 
 
+def _place_volume_file(dst, src, overwrite=False):
+    """把刚生成的文件落到卷目录 —— **默认不覆盖已有文件**（v0.1.222）。
+
+    实测事故：登记表里 6 条全是 B 类，而 B 类表就是留给现场人工填实测数据的。
+    用户填完之后再点一次「一键整卷」（重跑是很常用的操作：补了设备台账、
+    换了模板、再加一个车间），原来这里是 `os.replace(src, dst)` ——
+    **无条件覆盖**，手填内容被静默销毁，接口还返回 ok=True、generated 里
+    照样记着「已生成」，用户完全看不出自己填了两小时的表没了。
+
+    更讽刺的是 `_check_generated()` 早就写好了，但它只在 volume_status
+    里用来显示「这一项已生成」，真正出卷的路径一次都没调过它 ——
+    「知道怎么判断」和「判断了」是两件事。
+
+    返回 (动作, 落盘路径)，动作取值：
+      created  —— 原来没有同名文件，已落盘
+      replaced —— 调用方显式要求覆盖（overwrite=True），已替换旧文件
+      kept     —— 已有同名文件，按默认策略保留旧文件，本次新渲染的副本已清理
+      no_source—— 生成过程没产出文件（上层照旧记账，不落盘）
+    """
+    exists = os.path.exists(dst)
+    if exists and not overwrite:
+        # 本次新渲染的那份是临时副本，不落卷就清掉，别让 exports 里越堆越多
+        try:
+            if src and os.path.exists(src) and \
+                    os.path.abspath(src) != os.path.abspath(dst):
+                os.remove(src)
+        except OSError:
+            pass
+        return 'kept', dst
+    if not src or not os.path.exists(src):
+        return 'no_source', dst
+    os.replace(src, dst)
+    return ('replaced' if exists else 'created'), dst
+
+
+def _record_kept(results, action, seq, name, dst, cls=''):
+    """把「已存在、本次未覆盖」的条目单独记一本账，供待办清单与界面提示。"""
+    if action != 'kept':
+        return
+    results.setdefault('kept', []).append({
+        '序号': seq, '名称': name,
+        '文件': os.path.basename(dst),
+        '分类': cls,
+        '原因': '卷内已有同名文件，已保留（未覆盖），如需重建请勾选「覆盖已有文件」',
+    })
+
+
 def _proj_root(project_id):
-    """项目数据根：由模板目录推导（workspace/fangong-workbench/templates_builtin → ../data/projects）
+    """项目数据根：**必须以 project_manager.PROJECTS_ROOT 为准**（v0.1.222）
 
     v0.1.173：原来直接 `os.path.join(wb_root, 'projects', project_id)`，
     project_id 为空（前端没选项目、或调用方没传）时拼出来的路径是
@@ -292,6 +339,18 @@ def _proj_root(project_id):
 
     这里改成：project_id 为空时先取「当前项目」；仍取不到就抛 ValueError，
     由上层返回明确错误，而不是静默写到一个谁都不认识的地方。
+
+    v0.1.222：**这是全项目最隐蔽的一条「同一件事两个答案」。**
+    原来这里用 `wb_root_projects()`，从 `st._te.TEMPLATES_DIR` 反推
+    `../data/projects` —— 完全绕开了 `pm.PROJECTS_ROOT`。
+    后果：
+      ① `PROJECTS_ROOT` 跟随 `config.DATA_DIR`（v0.1.195 明确要求的数据目录
+         可配置），而这条推导出来的路径**永远指向安装目录** —— 用户把数据
+         目录设到 D:\\ 之后，项目索引在 D:\\、卷却仍写进 C:\\ 安装目录，
+         同一册资料存在两个地方，界面按项目统计永远看不到这些卷；
+      ② 所有「把 PROJECTS_ROOT 指到临时目录」的测试对卷路径**静默失效**，
+         跑一遍门禁就在用户真实项目里留下测试卷 —— 本轮实测踩到：
+         临时项目 `noov_proj` 的卷落进了真实 `data/projects/`。
     """
     pid = (project_id or '').strip()
     if not pid:
@@ -304,11 +363,18 @@ def _proj_root(project_id):
             pid = ''
     if not pid:
         raise ValueError('未指定项目：整卷必须归属到某个项目，请先选择或创建项目')
-    return os.path.join(wb_root_projects(), pid)
+    from . import project_manager as _pm
+    return os.path.join(_pm.PROJECTS_ROOT, pid)
 
 
 def wb_root_projects():
-    """所有项目目录的父目录（.../data/projects）。"""
+    """所有项目目录的父目录 —— **已弃用，勿再用于定位项目数据**（v0.1.222）。
+
+    这条路径是从模板目录反推出来的安装目录，**不跟随 config.DATA_DIR**。
+    v0.1.222 起 `_proj_root()` 改用 `pm.PROJECTS_ROOT`（唯一真相源），
+    这个函数只为排查历史路径保留，任何新代码都不要调它 ——
+    调一次就等于绕开「数据目录可配置」，并让所有测试隔离静默失效。
+    """
     return os.path.join(os.path.dirname(st._te.TEMPLATES_DIR), 'projects')
 
 
@@ -636,7 +702,10 @@ MERGE_LIST_KEYS = ('generated', 'todo', 'errors', 'collect_dir',
                    'gb_fallback', 'name_alias',
                    # v0.1.187：无名设备不出表，但必须跨车间合并记账 —— 否则整卷视图
                    # 上看不到这些设备，现场就以为台账里的设备全归档了。
-                   'nameless_devices')
+                   'nameless_devices',
+                   # v0.1.222：保留未覆盖的条目同样要跨车间合并，否则整卷视图里
+                   # 只看到首个车间的保留数，其余车间的「已保留」一条都看不见。
+                   'kept')
 
 # 「原因」之外的判别字段：不同列表的行形状不同，同车间同序号同名时
 # 只能靠这些字段区分到底是不是同一条。
@@ -799,7 +868,8 @@ def _merge_workshop_results(ws_results, wss):
     return merged
 
 
-def generate_volume(project_id, book, workshop='', _skip_boxing=False):
+def generate_volume(project_id, book, workshop='', _skip_boxing=False,
+                    overwrite=False):
     """一键整卷的**唯一对外入口**（v0.1.190 起负责互斥与进度）。
 
     v0.1.190 实测事故：整卷 130 秒，界面只有一句静态「整卷生成中」、按钮不禁用。
@@ -827,14 +897,14 @@ def generate_volume(project_id, book, workshop='', _skip_boxing=False):
     try:
         set_volume_progress(key, stage='准备中', total=0, done=0, current='')
         return _generate_volume_impl(project_id, book, workshop, _skip_boxing,
-                                     _progress_key=key)
+                                     _progress_key=key, overwrite=overwrite)
     finally:
         # 必须 finally：一次异常就把整卷永久封死是最坏的结果。
         release_volume_slot(key)
 
 
 def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
-                          _progress_key=None):
+                          _progress_key=None, overwrite=False):
     """一键整卷：A 类全自动生成、B 类生成（待补列清单）、C 类建归集目录
 
     v0.1.178：**未指定车间时按项目实际车间逐个生成**。
@@ -885,7 +955,8 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
                                     current=_name, stage='并发出卷中')
 
             _ws_results = _run_parallel_with_progress(
-                [(_w, (lambda _w=_w: _generate_volume_impl(project_id, book, _w, True, None)))
+                [(_w, (lambda _w=_w: _generate_volume_impl(project_id, book, _w, True, None,
+                                                          overwrite=overwrite)))
                  for _w in _wss],
                 max_workers=_VOLUME_WORKERS,
                 on_done=_on_ws_done,
@@ -899,7 +970,8 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
             if _merged is None:
                 # v0.1.190：同一条出卷链路里不再回抢槽位（当前槽位就是这次的）。
                 _merged = _generate_volume_impl(project_id, book, '全厂',
-                                                _progress_key=_progress_key)
+                                                _progress_key=_progress_key,
+                                                overwrite=overwrite)
             _merged['workshops'] = _wss
             _merged['multi_workshop'] = True
             if _wsr.get('note'):
@@ -962,7 +1034,11 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
     os.makedirs(vol, exist_ok=True)
     results = {'ok': True, 'generated': [], 'todo': [], 'collect_dir': [], 'errors': [],
                # v0.1.183：别名复用 / 国标兜底两本账（写进待办清单供人工复核）
-               'gb_fallback': [], 'name_alias': [], 'gb_blank': []}
+               'gb_fallback': [], 'name_alias': [], 'gb_blank': [],
+               # v0.1.222：卷内已有同名文件而本次**未覆盖**的条目。
+               # 必须单独记账：它们既不是「新生成」，也不是「出错」，
+               # 原来只有一个 os.replace 无差别覆盖，用户手填的 B 类表被销毁且无提示。
+               'kept': []}
     # v0.1.180：**材料车间跳过设备类表单**（用户决策）。
     # 实测依据：尾矿库 4 行全是复合土工膜 / HDPE管 / 长丝无纺土工布（单位 m2、米），
     # 它们不是设备，按设备逐台出「设备安装检查记录」监理不会收。
@@ -1030,8 +1106,9 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
             src_path = _r.get('output_path') or ''
             _safe_name = re.sub(r'[\\/:*?"<>|]', '', name)[:50]
             dst = os.path.join(vol, f'{seq}_{_safe_name}.docx')
-            if src_path and os.path.exists(src_path):
-                os.replace(src_path, dst)
+            # v0.1.222：默认不覆盖已有卷内文件（B 类表是人工填写成果）
+            _action, _ = _place_volume_file(dst, src_path, overwrite=overwrite)
+            _record_kept(results, _action, seq, name, dst)
             results['gb_fallback'].append({
                 '序号': seq, '名称': name, '表号': _no,
                 '文件': os.path.basename(dst),
@@ -1103,8 +1180,9 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
         src = os.path.join(_proj_root(project_id), 'exports', r['output_file'])
         _safe_name = re.sub(r'[\\/:*?"<>|]', '', name)[:50]
         dst = os.path.join(vol, f'{seq}_{_safe_name}.docx')
-        if os.path.exists(src):
-            os.replace(src, dst)
+        # v0.1.222：默认不覆盖已有卷内文件；覆盖要显式勾选
+        _action, _ = _place_volume_file(dst, src, overwrite=overwrite)
+        _record_kept(results, _action, seq, name, dst)
         results['generated'].append({'序号': seq, '名称': name, '文件': os.path.basename(dst)})
         for _g in (results.get('gb_fallback') or []):
             if _g.get('_待回填') and _g.get('序号') == seq:
@@ -1122,7 +1200,8 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
                            material_workshop=results.get('material_workshop', False),
                            gb_fallback=results.get('gb_fallback'),
                            name_alias=results.get('name_alias'),
-                           nameless_devices=results.get('nameless_devices'))
+                           nameless_devices=results.get('nameless_devices'),
+                           kept=results.get('kept'))
     todo_path = os.path.join(vol, '_待办清单.md')
     with open(todo_path, 'w', encoding='utf-8') as f:
         f.write(todo_md)
@@ -1202,9 +1281,26 @@ def is_material_workshop(devices) -> bool:
 
 def _render_todo(todo_fields, todos, errors, empty_shells=None, type_fallback=None, workshop='',
                  skipped_device_forms=None, material_workshop=False,
-                 gb_fallback=None, name_alias=None, nameless_devices=None):
+                 gb_fallback=None, name_alias=None, nameless_devices=None,
+                 kept=None):
     lines = ['# 整编待办清单', '', f'生成时间：{__import__("datetime").datetime.now():%Y-%m-%d %H:%M}',
              f'车间：{workshop or "全厂"}', '']
+    if kept:
+        # v0.1.222：**重跑整卷时保留了哪些已有文件，必须写在这里**。
+        # 这些项不是"失败"，是"上次已经出过、这次没动"。
+        # 如果待办清单里一个字都不提，用户重跑后会发现「生成文件 0 个」却不知道
+        # 卷里其实文件都在 —— 或者反过来，以为自己刚填的表被重新生成洗掉了。
+        lines.append('## 〇之三、卷内已有文件已保留（本次未覆盖）')
+        lines.append('')
+        lines.append(f'共 {len(kept)} 项。这些文件此前已在卷目录中，本次重跑**没有覆盖**它，'
+                     '人工填写的实测数据保持原样。')
+        lines.append('如需按当前台账重新生成，请勾选「覆盖已有文件」后再点一键整卷。')
+        lines.append('')
+        for t in kept[:60]:
+            lines.append(f"- {t.get('序号', '')} {t.get('名称', '')}（{t.get('文件', '')}）")
+        if len(kept) > 60:
+            lines.append(f"- ……另 {len(kept) - 60} 项，见界面「已保留」计数")
+        lines.append('')
     if empty_shells:
         # 注意用词：这些项的文件是**已经生成**的，只是车间里还有设备没被模板覆盖。
         # 原来标题写「未计入已生成」，但 generate_volume 里它们确实进了 generated，

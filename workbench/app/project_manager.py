@@ -465,23 +465,48 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
 
 def update_project_stats(project_id: str, file_count: int = None,
                          device_count: int = None, workshop_count: int = None) -> Dict:
-    """更新项目统计信息。"""
+    """更新项目统计信息。
+
+    v0.1.221：只在统计值**真的变了**才落盘，也只在真变了才刷新 updated_at。
+
+    原实现无条件写盘并刷新 updated_at，而它挂在 `GET /api/projects/current`
+    这个**只读接口**上（打开页面、前端刷新当前项目都会调）。后果实测：
+
+        md5(a02e757d6ad9761221084a9107b324cd)  updated_at=2026-11-10 01:12:22
+        → 只调一次 GET /api/projects/current
+        md5(e14438041e2e5edd6488c3b96d7ce38a)  updated_at=2026-11-10 01:15:16
+
+    也就是说「什么都没做，只是打开看了一下」就改掉了工程的最后修改时间。
+    而 updated_at 不是纯展示字段 —— _pick_successor_project() 用它挑
+    「最近动过的项目」当删除后的接任者（见本文件 v0.1.215 那段）：
+    看一眼就能把接任顺序改掉。这属于本项目反复出现的「同一件事两个答案」：
+    界面说这个项目刚更新过，磁盘上却没有任何实际变化。
+
+    现在：统计值没变就直接返回，不写一个字节；返回值带 changed 供调用方判据。
+    """
     project = get_project(project_id)
     if not project:
         return {"ok": False, "error": f"项目不存在：{project_id}"}
-    
-    if file_count is not None:
-        project["file_count"] = file_count
-    if device_count is not None:
-        project["device_count"] = device_count
-    if workshop_count is not None:
-        project["workshop_count"] = workshop_count
-    
+
+    changed = False
+    for _key, _val in (("file_count", file_count),
+                       ("device_count", device_count),
+                       ("workshop_count", workshop_count)):
+        if _val is None:
+            continue
+        if project.get(_key) != _val:
+            project[_key] = _val
+            changed = True
+
+    if not changed:
+        # 统计口径没变：这次调用是一次「刷新」，不是一次「修改」。
+        return {"ok": True, "project": project, "changed": False}
+
     project["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
     _atomic_io.write_json(_get_project_meta_path(project_id), project, indent=2)
-    
-    return {"ok": True, "project": project}
+
+    return {"ok": True, "project": project, "changed": True}
 
 
 def get_project_data_dir(project_id: str = None) -> str:
