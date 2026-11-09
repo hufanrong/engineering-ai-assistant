@@ -160,10 +160,38 @@
     "by_phase": {}
   },
   "error": "",
-  "remote_head": "5010f2b7fb38079415d4b07c510bcb986d24325a",
+  "remote_head": "2d4dd68e49741e5eab17623d78eeff52f67d19bc",
   "behind": 0,
   "ahead": 0,
-  "commit_before": "5010f2b7fb38079415d4b07c510bcb986d24325a",
-  "commit_after": "5010f2b7fb38079415d4b07c510bcb986d24325a",
-  "pushed": true
+  "commit_before": "783cd87b72e010e76f64dacbab2a996befe17f75",
+  "commit_after": "783cd87b72e010e76f64dacbab2a996befe17f75",
+  "pushed": true,
+  "post_fix_evidence": {
+    "note": "修复代码在 0f2030f；发出本报告前，常驻循环已用修复后的代码跑过两轮",
+    "runs": [
+      {
+        "run_id": "20261109_191712",
+        "status": "passed",
+        "passed": 64,
+        "failed": 0,
+        "skipped": 2
+      },
+      {
+        "run_id": "20261109_192300",
+        "status": "passed",
+        "passed": 64,
+        "failed": 0,
+        "skipped": 2
+      }
+    ],
+    "before": {
+      "run_id": "20261109_191024",
+      "status": "failed",
+      "passed": 57,
+      "failed": 2,
+      "skipped": 2,
+      "note": "阶段② 只有 4 项、阶段⑥ stats=None"
+    },
+    "pending": "wb_loop.py 的两处修复（commit_followup / stash 排除 reports）要等循环进程重启才生效——本轮 commit 出来的 report.json 仍无 pushed 字段。"
+  }
 }
