@@ -1,43 +1,6 @@
 {
-  "last_tested_commit": "1b692005176fc5653603c092b2f45cf87ca02804",
+  "last_tested_commit": "8b01fb453620f4a2d89bb49daddea3b6d3439eef",
   "runs": [
-    {
-      "run_id": "20261109_190303",
-      "status": "failed",
-      "commit": "fdb5677dcf2465f42608fd7396ca3cce59275be3",
-      "summary": {
-        "passed": 57,
-        "failed": 2,
-        "skipped": 2,
-        "by_phase": {
-          "1": {
-            "passed": 15,
-            "failed": 0,
-            "skipped": 0
-          },
-          "2": {
-            "passed": 3,
-            "failed": 1,
-            "skipped": 0
-          },
-          "3": {
-            "passed": 14,
-            "failed": 0,
-            "skipped": 0
-          },
-          "5": {
-            "passed": 9,
-            "failed": 0,
-            "skipped": 0
-          },
-          "6": {
-            "passed": 16,
-            "failed": 1,
-            "skipped": 2
-          }
-        }
-      }
-    },
     {
       "run_id": "20261109_191024",
       "status": "failed",
@@ -1078,6 +1041,43 @@
       "run_id": "20261109_214843",
       "status": "passed",
       "commit": "1b692005176fc5653603c092b2f45cf87ca02804",
+      "summary": {
+        "passed": 64,
+        "failed": 0,
+        "skipped": 2,
+        "by_phase": {
+          "1": {
+            "passed": 15,
+            "failed": 0,
+            "skipped": 0
+          },
+          "2": {
+            "passed": 9,
+            "failed": 0,
+            "skipped": 0
+          },
+          "3": {
+            "passed": 14,
+            "failed": 0,
+            "skipped": 0
+          },
+          "5": {
+            "passed": 9,
+            "failed": 0,
+            "skipped": 0
+          },
+          "6": {
+            "passed": 17,
+            "failed": 0,
+            "skipped": 2
+          }
+        }
+      }
+    },
+    {
+      "run_id": "20261109_215427",
+      "status": "passed",
+      "commit": "8b01fb453620f4a2d89bb49daddea3b6d3439eef",
       "summary": {
         "passed": 64,
         "failed": 0,
