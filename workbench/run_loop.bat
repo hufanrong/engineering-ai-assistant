@@ -1,38 +1,145 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
-setlocal
+setlocal enabledelayedexpansion
+
+rem ============================================================
+rem  v0.1.213 - double-click friendly launcher.
+rem
+rem  Why this file is pure ASCII: cmd reads a .bat byte-by-byte, and
+rem  after `chcp 65001` it loses sync on multi-byte (Chinese) lines --
+rem  a `rem` line gets split and the tail is executed as a command
+rem  ("'<garbage>' is not recognized..."). Verified 2026-11-09.
+rem  Python output is still Chinese and renders fine under 65001.
+rem
+rem  Bugs fixed here (all observed on a real user machine):
+rem  1) Only relied on python/git being on PATH. On this machine the
+rem     real user PATH has neither, so double-click died immediately.
+rem     Now both are located by absolute-path probing.
+rem  2) git push failed with rc=128 and empty stderr: ~/.gitconfig
+rem     points github.com at a "!"-prefixed credential helper
+rem     (gh auth git-credential). "!" requires a shell -> needs
+rem     sh.exe, which lives in PortableGit\usr\bin. Not on PATH =
+rem     silent failure. Now we prepend it.
+rem  3) Console was GBK. Selftest phase 2 prints docx bytes and died
+rem     with UnicodeEncodeError, truncating the phase from 9 checks
+rem     to 4. Now console and Python are both UTF-8.
+rem ============================================================
+
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
+
 cd /d "%~dp0"
 
 echo ============================================================
-echo   繁工AI - WORKbuddy 自动循环通道
-echo   每 5 分钟检查 GitHub，有新代码就拉取、重启、自测、回传报告
+echo   Fangong AI - WORKbuddy auto loop
+echo   Checks GitHub every 5 minutes, pulls, self-tests, reports back
 echo ============================================================
 echo.
 
-rem 找 Python：优先项目内虚拟环境，其次系统 python
-set "PY=python"
-if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
-if exist "%~dp0venv\Scripts\python.exe"  set "PY=%~dp0venv\Scripts\python.exe"
-
-"%PY%" --version >nul 2>&1
-if errorlevel 1 (
-  echo [错误] 找不到 Python。请先运行 install.bat 安装依赖，或确认 python 已加入 PATH。
+rem ---------- 1. locate git, expose sh.exe to PATH ----------
+set "GITBIN="
+for %%G in (git.exe) do set "GITBIN=%%~$PATH:G"
+if not defined GITBIN (
+  for %%P in (
+    "%~dp0..\vendor\PortableGit\mingw64\bin\git.exe"
+    "%ProgramFiles%\Git\mingw64\bin\git.exe"
+    "%ProgramFiles(x86)%\Git\mingw64\bin\git.exe"
+    "%LOCALAPPDATA%\Programs\Git\mingw64\bin\git.exe"
+    "%LOCALAPPDATA%\Programs\WorkBuddy\resources\vendor\PortableGit\mingw64\bin\git.exe"
+    "%ProgramFiles%\WorkBuddy\resources\vendor\PortableGit\mingw64\bin\git.exe"
+  ) do if not defined GITBIN if exist %%P set "GITBIN=%%~fP"
+)
+if not defined GITBIN (
+  for /f "delims=" %%D in ('dir /b /ad "%LOCALAPPDATA%\Programs\WorkBuddy\resources\vendor\PortableGit\versions" 2^>nul') do (
+    if not defined GITBIN if exist "%LOCALAPPDATA%\Programs\WorkBuddy\resources\vendor\PortableGit\versions\%%D\mingw64\bin\git.exe" (
+      set "GITBIN=%LOCALAPPDATA%\Programs\WorkBuddy\resources\vendor\PortableGit\versions\%%D\mingw64\bin\git.exe"
+    )
+  )
+)
+if not defined GITBIN if exist "D:/WorkBuddy/work/data/binaries/PortableGit/versions" (
+  for /f "delims=" %%D in ('dir /b /ad "D:/WorkBuddy/work/data/binaries/PortableGit/versions" 2^>nul') do (
+    if not defined GITBIN if exist "D:/WorkBuddy/work/data/binaries/PortableGit/versions/%%D/mingw64/bin/git.exe" (
+      set "GITBIN=D:/WorkBuddy/work/data/binaries/PortableGit/versions/%%D/mingw64/bin/git.exe"
+    )
+  )
+)
+if not defined GITBIN (
+  echo [ERROR] git.exe not found - cannot pull code or push reports.
+  echo         Install Git for Windows and try again.
   pause
   exit /b 1
 )
 
-echo [信息] 使用 Python: %PY%
-echo [信息] 仓库目录: %~dp0..
+set "GITDIR=%~dp0"
+for %%D in ("%GITBIN%") do set "GITDIR=%%~dpD"
+if exist "%GITDIR%..\..\usr\bin\sh.exe" (
+  set "PATH=%GITDIR%;%GITDIR%..\..\bin;%GITDIR%..\..\usr\bin;%PATH%"
+)
+echo [INFO] git    : %GITBIN%
+
+rem ---------- 2. locate a Python that can import fastapi ----------
+set "PY="
+call :trypy "%~dp0.venv\Scripts\python.exe"
+if defined PY goto :pydone
+call :trypy "%~dp0venv\Scripts\python.exe"
+if defined PY goto :pydone
+for %%G in (python.exe) do call :trypy "%%~$PATH:G"
+if defined PY goto :pydone
+for /f "delims=" %%D in ('dir /b /ad "%LOCALAPPDATA%\Programs\Python\Python3*" 2^>nul') do (
+  if not defined PY call :trypy "%LOCALAPPDATA%\Programs\Python\%%D\python.exe"
+)
+if defined PY goto :pydone
+for /f "delims=" %%D in ('dir /b /ad "%ProgramFiles%\Python3*" 2^>nul') do (
+  if not defined PY call :trypy "%ProgramFiles%\%%D\python.exe"
+)
+if defined PY goto :pydone
+for /f "delims=" %%D in ('dir /b /ad "%ProgramFiles(x86)%\Python3*" 2^>nul') do (
+  if not defined PY call :trypy "%ProgramFiles(x86)%\%%D\python.exe"
+)
+if defined PY goto :pydone
+rem Python runtime shipped next to WorkBuddy (on many machines this is the only one)
+for /f "delims=" %%D in ('dir /b /ad "%LOCALAPPDATA%\Programs\WorkBuddy\resources" 2^>nul') do (
+  if not defined PY call :trypy "%LOCALAPPDATA%\Programs\WorkBuddy\work\data\binaries\python\versions\current\python.exe"
+)
+if defined PY goto :pydone
+for /f "delims=" %%D in ('dir /b /ad "D:/WorkBuddy/work/data/binaries/python/versions" 2^>nul') do (
+  if not defined PY call :trypy "D:/WorkBuddy/work/data/binaries/python/versions/%%D/python.exe"
+)
+:pydone
+
+if not defined PY (
+  echo [ERROR] No usable Python found ^(fastapi must be importable^).
+  echo         Tried: project .venv, PATH, user Python, Program Files,
+  echo         bundled runtime.
+  echo         Run install.bat first, then double-click this file again.
+  pause
+  exit /b 1
+)
+echo [INFO] python : %PY%
+echo [INFO] repo   : %~dp0..
 echo.
-echo 提示：第一次运行建议先跑 --once 确认一条完整链路：
-echo     "%PY%" "%~dp0tools\wb_loop.py" --once
-echo.
-echo 现在启动常驻循环。关闭此窗口即停止。
+
+rem ---------- 3. start the loop ----------
+set "ARGS=%*"
+if "%ARGS%"=="" set "ARGS=--interval 300"
+
+echo First run builds the index and may take a few minutes.
+echo Close this window to stop the loop.
 echo ============================================================
 echo.
 
-"%PY%" "%~dp0tools\wb_loop.py" --interval 300
+"%PY%" "%~dp0tools\wb_loop.py" %ARGS%
 
 echo.
-echo [信息] 循环已退出。
+echo [INFO] loop exited, code=%errorlevel%
 pause
+exit /b 0
+
+rem ---------- helper: accept %1 as PY if it exists and imports fastapi ----------
+:trypy
+if defined PY goto :eof
+if not exist %1 goto :eof
+%1 -c "import fastapi" >nul 2>&1
+if errorlevel 1 goto :eof
+set "PY=%~1"
+goto :eof

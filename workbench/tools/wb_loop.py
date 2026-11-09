@@ -277,10 +277,18 @@ def pull_latest():
     dirty = [l for l in out.splitlines() if l.strip()]
     stashed = False
     if dirty:
+        # v0.1.213：必须把 reports/ 排除在 stash 之外。
+        #
+        # 缺陷（实测 2026-11-09 07:14 那轮整轮崩）：one_round() 在调 pull_latest()
+        # **之前**就 os.makedirs(out_dir) 建好了本轮报告目录。git 不能记录空目录，
+        # `git stash push -u` 会把它当成「未跟踪内容」一并收走删除，pop 也回不来。
+        # 随后写 reports/<run_id>/console.log 直接 FileNotFoundError，整轮作废。
+        # 触发条件几乎每轮都成立（上一轮结束会留下 3 个已修改的报告文件）。
         rc2, o2, e2 = git("stash", "push", "-u", "-m",
-                          f"wb_loop auto-stash {time.strftime('%Y%m%d_%H%M%S')}")
+                          f"wb_loop auto-stash {time.strftime('%Y%m%d_%H%M%S')}",
+                          "--", ".", ":(exclude)reports")
         stashed = rc2 == 0
-        steps.append({"step": "git stash（保住本地改动）", "rc": rc2,
+        steps.append({"step": "git stash（保住本地改动，排除 reports/）", "rc": rc2,
                       "out": o2.strip()[:300], "err": e2.strip()[:300],
                       "dirty_count": len(dirty)})
 
@@ -532,6 +540,42 @@ def collect_env():
     return env
 
 
+def commit_followup(run_id):
+    """把「推送后二次写盘」的内容补提交并推上去。
+
+    v0.1.213：finish() 为了在 report.json 里带上 pushed / commit_after，
+    会在 commit_and_push() **之后**再 write_report_files() 一次。
+    但那次写盘从来没有再提交过 —— 后果是远端 26 轮报告里，
+    report.json 无一含 pushed 字段，commit_after 也指向提交前的自己
+    （等于自己指自己），而且每轮都在工作区留 3 个脏文件，
+    下一轮 pull 又要把它们 stash 一遍，风险越滚越大。
+
+    这里做一次轻量的补提交 + 补推送。失败不影响本轮结论（报告主体已在远端）。
+    """
+    steps = []
+    rc, out, err = git("add", "-A", "reports")
+    if rc != 0:
+        steps.append({"step": "二次 add", "rc": rc,
+                      "out": out.strip()[:200], "err": err.strip()[:200]})
+        return False, steps
+    rc, out, _ = git("diff", "--cached", "--name-only")
+    if not [l for l in out.splitlines() if l.strip()]:
+        steps.append({"step": "二次提交", "rc": 0, "out": "无变更，跳过"})
+        return True, steps
+
+    msg = f"chore(workbuddy): {run_id} post-push snapshot"
+    rc, out, err = git("commit", "-m", msg, "--no-verify")
+    steps.append({"step": "二次提交（post-push 快照）", "rc": rc,
+                  "out": out.strip()[:200], "err": err.strip()[:200]})
+    if rc != 0:
+        return False, steps
+
+    rc, out, err = git("push", "origin", f"HEAD:{BRANCH}", timeout=300)
+    steps.append({"step": "二次 push", "rc": rc,
+                  "out": out.strip()[:200], "err": err.strip()[:300]})
+    return rc == 0, steps
+
+
 def commit_and_push(run_id, out_dir, status, summary, err_msg=""):
     """把 reports/<run_id>/ 提交并推到远端，供 AI 侧读取。
 
@@ -674,6 +718,13 @@ def one_round(args):
             rec["pushed"] = pushed
             # 提交后再写一次，保证 report.json 里也含回传结果
             write_report_files(status, summary, error)
+            if pushed:
+                # v0.1.213：上面这次写盘必须再提交一次，否则远端留下的
+                # 永远是「推送前」的快照（缺 pushed、commit_after 指向自己）。
+                _, s2 = commit_followup(run_id)
+                rec["steps"].extend(s2)
+                # pushed 表示「主报告已回传」；二次推送成败看 steps，不覆盖它，
+                # 否则内存里的 rec 与已落盘的 report.json 会不一致。
         record_state(status, summary)
         log(f"本轮结束 status={status} 报告在 reports/{run_id}/")
         return status
@@ -719,6 +770,11 @@ def one_round(args):
                 finish("error", error="git 拉取失败（见步骤），未动本地代码")
                 return "error"
             rec["steps"].append({"step": "拉取后 HEAD", "rc": 0, "out": local_head()[:12]})
+
+    # v0.1.213 防御：git 不跟踪空目录，任何 stash / rebase / clean 都可能把
+    # 本轮刚建好的空报告目录顺手删掉。这里无条件补建一次，
+    # 保证后面写 console.log / env.json 时目录一定在。
+    os.makedirs(out_dir, exist_ok=True)
 
     # ---- 3. 重启服务 + 自测
     inproc = False

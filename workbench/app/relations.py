@@ -1031,7 +1031,29 @@ def load_relations() -> dict:
         ledger = _load_index().get("devices") or {}
     except Exception:  # noqa: BLE001
         ledger = {}
-    return _merge_index_devices(graph, ledger)
+    graph = _merge_index_devices(graph, ledger)
+
+    # v0.1.213：stats 恒为 dict，且计数与真实条数对齐。
+    #
+    # 缺陷（实测 2026-11-09，三台真实项目全部复现）：磁盘上的 relations.json
+    # 只有 devices / workshops / relations 三个键，**根本没有 stats**；
+    # 而 _merge_index_devices() 只在「确实补进了台账设备」时才顺手建 stats。
+    # 于是 /api/relations 返回 devices 有值、stats 却是 None，
+    # 自测阶段⑥「设备数自身一致」（断言 len(devices)==stats.devices）必挂，
+    # 而它看起来像业务数据坏了，实际是接口契约没兜底。
+    #
+    # stats 是派生摘要，读的时候按真实条数重算，让这个不变量由结构保证，
+    # 不再依赖「谁最后写了 stats」。
+    st = graph.get("stats")
+    if not isinstance(st, dict):
+        st = {}
+        graph["stats"] = st
+    devices_now = graph.get("devices") or []
+    workshops_now = graph.get("workshops") or []
+    st["devices"] = len(devices_now)
+    st["workshops"] = len(workshops_now)
+    st.setdefault("docs", 0)
+    return graph
 
 
 def save_relations(relations: dict):
