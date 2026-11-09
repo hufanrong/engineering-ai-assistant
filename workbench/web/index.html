@@ -654,6 +654,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
         <input id="supWorkshopInput" placeholder="车间名（留空=全厂）" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:160px">
         <button class="btn btn-sm" onclick="checkSupervision()">🔍 检查缺项</button>
         <button class="btn btn-sm btn-primary" onclick="runVolume()" style="background:#5B3EA8;border-color:#5B3EA8;color:#fff">📚 一键整卷</button>
+        <!-- v0.1.223：默认不覆盖卷内已有文件（B 类表是现场手填的实测数据），
+             但用户必须有办法主动重建。原来后端 VolumeReq 已有 overwrite，
+             页面一个像素的入口都没有 —— 等于是「保护住了」也「永远改不了」。 -->
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#555">
+          <input type="checkbox" id="supOverwrite"> 覆盖已有文件
+        </label>
       </div>
       <!-- v0.1.172：整编要求登记表导入入口。整卷依赖这份登记表，此前界面里没有任何导入入口，
            点「一键整卷」必然报「登记表不存在」，且用户无处可补。 -->
@@ -2640,7 +2646,8 @@ function runVolume() {
     fetch('/api/supervision/volume', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project_id: pid, book: book, workshop: ws})
+        body: JSON.stringify({project_id: pid, book: book, workshop: ws,
+                              overwrite: !!(document.getElementById('supOverwrite') || {}).checked})
     })
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -2780,6 +2787,13 @@ function runVolume() {
             html += '<br>⚠ 有 <b>' + _emp.length + '</b> 个卷没有归档件、不占盒号：'
                  + _emp.map(function(e){ return (e['车间'] || '') + '（' + (e['件数'] || 0) + ' 件）'; }).join('、')
                  + '　<span style="color:#888">清单与待办里已写明原因</span>';
+        }
+        // v0.1.223：卷内已有文件被保留（未覆盖）—— 必须说出来，否则用户只看到
+        // 「生成文件 0 个」会以为整卷失败。这里给出条目与「如何重建」。
+        var _kp = r.kept || [];
+        if (_kp.length) {
+            html += '<br>🔒 卷内已有文件已保留 <b>' + _kp.length + '</b> 项（未覆盖手填内容）'
+                 + '　<span style="color:#888">如需按当前台账重建，请勾选「覆盖已有文件」</span>';
         }
         if (_c && _c['装盒清单']) {
             html += '<br>📋 装盒清单：' + _c['装盒清单'];

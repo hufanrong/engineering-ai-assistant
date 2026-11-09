@@ -1108,7 +1108,7 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
             dst = os.path.join(vol, f'{seq}_{_safe_name}.docx')
             # v0.1.222：默认不覆盖已有卷内文件（B 类表是人工填写成果）
             _action, _ = _place_volume_file(dst, src_path, overwrite=overwrite)
-            _record_kept(results, _action, seq, name, dst)
+            _record_kept(results, _action, seq, name, dst, cls='国标兜底')
             results['gb_fallback'].append({
                 '序号': seq, '名称': name, '表号': _no,
                 '文件': os.path.basename(dst),
@@ -1117,8 +1117,10 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
                 '原表': '国标通用格式',
                 '原因': '模板库无对应模板',
             })
-            results['generated'].append(
-                {'序号': seq, '名称': name, '文件': os.path.basename(dst)})
+            # v0.1.223：同主路径 —— kept 不算「已生成」，否则界面虚报生成数。
+            if _action in ('created', 'replaced'):
+                results['generated'].append(
+                    {'序号': seq, '名称': name, '文件': os.path.basename(dst)})
             if _r.get('gb_blank'):
                 results.setdefault('gb_blank', []).append(
                     {'序号': seq, '名称': name})
@@ -1183,7 +1185,14 @@ def _generate_volume_impl(project_id, book, workshop='', _skip_boxing=False,
         # v0.1.222：默认不覆盖已有卷内文件；覆盖要显式勾选
         _action, _ = _place_volume_file(dst, src, overwrite=overwrite)
         _record_kept(results, _action, seq, name, dst)
-        results['generated'].append({'序号': seq, '名称': name, '文件': os.path.basename(dst)})
+        # v0.1.223：**kept 不能算「已生成」**。原来这里无条件 append，
+        # 于是「卷内文件一个没写、界面却说生成文件 2 个」—— 与生成的
+        # 真实结果对不上，正是本项目反复出现的「同一件事两个答案」。
+        # 口径：generated 只记本次真正写盘（created/replaced）；
+        #       kept 另记一本账，界面与待办清单分开说。
+        if _action in ('created', 'replaced'):
+            results['generated'].append({'序号': seq, '名称': name,
+                                         '文件': os.path.basename(dst)})
         for _g in (results.get('gb_fallback') or []):
             if _g.get('_待回填') and _g.get('序号') == seq:
                 _g['文件'] = os.path.basename(dst)

@@ -107,6 +107,12 @@ def main():
         check("kept 条目带序号/名称/文件",
               all(k.get("序号") and k.get("名称") and k.get("文件") for k in kept),
               str(kept[:1]))
+        # v0.1.223：kept 绝不能计入 generated —— 实测界面因此显示「生成文件 2 个」
+        # 而卷目录里一个文件都没被写（真实浏览器 13/0 全过却把这个数说错了）。
+        # 这是本项目的老毛病「同一件事两个答案」：返回体的 generated 数与磁盘不一致。
+        check("★ kept 项不计入 generated（否则界面虚报生成数）",
+              len(r1.get("generated") or []) == 0,
+              f"generated={len(r1.get('generated') or [])} kept={len(kept)}")
         check("★ 卷内文件字节未变（人工填写内容保住了）",
               md5(target) == h_before and os.path.getsize(target) == size_before,
               f"md5 {h_before} -> {md5(target)}, size {size_before} -> {os.path.getsize(target)}")

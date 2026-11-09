@@ -1644,6 +1644,45 @@ def phase6(samples_dir):
            "GET /api/projects/current 是无条件写盘的入口：打开页面就改 updated_at，"
            "而 updated_at 决定删除项目后的接任者 —— 看一眼就能改掉接任顺序")
 
+    # 6.20 整卷的「覆盖」入口前后端贯通（v0.1.223）。
+    # 实测缺陷：后端 VolumeReq 有 overwrite，页面 0 处提到 overwrite ——
+    # 用户能守住手填内容，但永远没法按新台账重建（只能手动删文件）。
+    # 与 6.16 的备份恢复同源：**后端有能力 + 前端没入口 = 功能半交付**。
+    try:
+        _web = os.path.join(_here, "web", "index.html")  # _here 已是工作台根
+        _txt = open(_web, encoding="utf-8").read()
+        # 判据必须**精确到 id 与字段名**。首版用子串 "supOverwrite"，
+        # 把 id 改成 supOverwriteTMP 仍算命中 —— 反向验证时 6.20 照样 PASS，
+        # 等于这条断言抓不住「入口被删」。改成整串匹配。
+        _ui = ('id="supOverwrite"' in _txt) and ("覆盖已有文件" in _txt)
+        _ui = bool(_ui) and ("overwrite:" in _txt)
+    except Exception:  # noqa: BLE001
+        _ui = False
+    record(P, "整卷「覆盖已有文件」入口前后端贯通（防半交付）",
+           "页面有勾选框、且请求体真的带上 overwrite 字段",
+           f"勾选框与字段都在={_ui}", _ui,
+           "后端支持 overwrite 而页面无入口，用户只能手动删文件才能重建")
+
+    # 6.21 kept 项不得计入 generated（v0.1.223）。
+    # 真实浏览器实测：第二次整卷界面显示「生成文件 2 个」，卷目录里一个都没写。
+    # 返回体与磁盘对不上 —— 同一个事实两个答案。
+    # 由 test_volume_no_overwrite.py 的「kept 项不计入 generated」断言守着，
+    # 这里再钉一次源码契约，避免有人把 if 条件改回无条件 append。
+    try:
+        _si_src = open(os.path.join(_here, "app", "supervision_integration.py"),
+                       encoding="utf-8").read()
+        _si_code = "\n".join(l for l in _si_src.splitlines()
+                              if not l.strip().startswith("#"))
+        _bad = _si_code.count("results['generated'].append")
+        _guard = _si_code.count("if _action in ('created', 'replaced')")
+        _gen_ok = (_bad == 2 and _guard == 2)
+    except Exception:  # noqa: BLE001
+        _gen_ok, _bad, _guard = False, -1, -1
+    record(P, "kept 项不计入 generated（防返回体与磁盘对不上）",
+           "两处 generated.append 都被 created/replaced 守卫包住",
+           f"append={_bad} guard={_guard}", _gen_ok,
+           "无条件 append 会让「保留 N 项」的整卷虚报生成数")
+
     # 6.19 重跑整卷不得覆盖已填写的卷内文件（v0.1.222）。
     # 实测缺陷：_generate_volume_impl 两处落盘都是 os.replace 无条件覆盖。
     # 登记表现有 6 条全为 B 类，B 类表就是留给现场人工填实测数据的 ——
