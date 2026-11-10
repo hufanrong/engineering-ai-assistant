@@ -124,10 +124,32 @@ def detect_environment() -> Dict:
         result["missing"].append("autocad")
         result["hint"].append(HELP_TEXT["autocad"])
 
+    # 4.5) 清稿工具包本身能不能导入（v0.1.227）
+    #
+    # 原来的 ready 只看 Windows/pywin32/pypdf/AutoCAD 四样，**从不检查
+    # tools/dwg_cleaner 这个包本身在不在**。于是出现过这种自相矛盾：
+    #   界面「环境自检 ready=true，可以清稿」→ 点下去
+    #   → 返回 status=failed，error=ModuleNotFoundError: No module named 'dwg_cleaner'
+    # 环境自检的作用就是「点之前告诉我行不行」，它自己说谎，这个功能就废了。
+    # 判据用真 import（不是看目录存在）：包在、但 __init__ 里少依赖时也能暴露。
+    try:
+        from dwg_cleaner import core as _dc_core  # noqa: F401
+        result["dwg_cleaner"] = {"importable": True,
+                                 "path": getattr(_dc_core, "__file__", "")}
+    except Exception as e:  # noqa: BLE001
+        result["dwg_cleaner"] = {"importable": False,
+                                 "error": f"{type(e).__name__}: {e}"}
+        result["missing"].append("dwg_cleaner")
+        result["hint"].append(
+            "清稿工具包 tools/dwg_cleaner 无法导入（%s: %s）。"
+            "请确认安装包完整（workbench/tools/dwg_cleaner 目录存在），"
+            "然后重启工作台。" % (type(e).__name__, e))
+
     # 5) 汇总
     result["ready"] = (
         result["windows"] and result["pywin32"] and result["pypdf"]
-        and result["autocad"]["installed"])
+        and result["autocad"]["installed"]
+        and bool(result.get("dwg_cleaner", {}).get("importable")))
     if not result["ready"] and not result["missing"]:
         result["missing"].append("unknown")
         result["hint"].append("环境检测异常，请检查工作台安装完整性后重试。")
@@ -367,7 +389,18 @@ def process_dwg_file(dwg_path: str, out_dir: Optional[str] = None,
 
     out = out_dir or _out_dir_for(project_id)
     last_err = None
-    for attempt in range(3):
+    # v0.1.227：RPC_E_CALL_REJECTED 的重试节奏从「3 次 × 3 秒」改成指数退避。
+    #
+    # 实测 2026-11-10 本机（AutoCAD 2020 + pywin32 都在，环境自检 ready=true）：
+    #   com_error: (-2147418111, '被呼叫方拒绝接收呼叫。', None, None)
+    # 这不是代码错，是 AutoCAD 的 COM 服务器**还没准备好**：AutoCAD 冷启动要
+    # 60~120 秒（首次还要加载字体映射/插件/许可校验），期间任何自动化调用都被
+    # 直接拒绝。原来的 3 次 × 3 秒 = 9 秒，等于冷启动还没过完就判定失败，
+    # 界面上显示「清稿失败」，用户以为是图纸有问题。
+    # 现在 6 次、退避 10/20/30/40/50 秒，合计约 150 秒，覆盖冷启动窗口；
+    # 真等到 AutoCAD 起来还是拒绝，才如实报失败。
+    _P4_BACKOFF = (10, 20, 30, 40, 50)
+    for attempt in range(len(_P4_BACKOFF) + 1):
         try:
             from dwg_cleaner import core
             cfg = _load_effective_config(project_id)
@@ -377,17 +410,21 @@ def process_dwg_file(dwg_path: str, out_dir: Optional[str] = None,
             err = result.get("error", "") or ""
             if "RPC_E_CALL_REJECTED" in err or "被呼叫方拒绝" in err:
                 last_err = err
-                import time
-                time.sleep(3)
-                continue
+                if attempt < len(_P4_BACKOFF):
+                    import time
+                    time.sleep(_P4_BACKOFF[attempt])
+                    continue
+                break
             return result
         except Exception as e:  # noqa: BLE001
             # 形态2：抛出异常携带 RPC 拒绝
             if "RPC_E_CALL_REJECTED" in str(e) or "被呼叫方拒绝" in str(e):
                 last_err = str(e)
-                import time
-                time.sleep(3)
-                continue
+                if attempt < len(_P4_BACKOFF):
+                    import time
+                    time.sleep(_P4_BACKOFF[attempt])
+                    continue
+                break
             return {
                 "status": "failed",
                 "file": dwg_path,
@@ -397,7 +434,10 @@ def process_dwg_file(dwg_path: str, out_dir: Optional[str] = None,
     return {
         "status": "failed",
         "file": dwg_path,
-        "error": "AutoCAD 持续拒绝 COM 调用（RPC_E_CALL_REJECTED），重试3次仍失败：%s" % last_err,
+        "error": "AutoCAD 持续拒绝 COM 调用（RPC_E_CALL_REJECTED），"
+                 "指数退避重试约 150 秒仍失败：%s。"
+                 "现场处置：先在桌面手动打开一次 AutoCAD（关掉许可/恢复/登录弹窗），"
+                 "保持它启动完成后再点清稿" % last_err,
         "hint": env["hint"],
     }
 
