@@ -1,0 +1,28 @@
+{"time": "20261025_0758", "type": "project", "content": "新建项目：马诺诺", "operator": "系统"}
+{"time": "20261025_0758", "type": "upload", "content": "上传 1 个文件", "operator": "电脑端"}
+{"time": "20261025_0907", "type": "upload", "content": "上传 1 个文件", "operator": "电脑端"}
+{"time": "20261025_0951", "type": "upload", "content": "上传 1 个文件", "operator": "电脑端"}
+{"time": "20261027_1523", "type": "generate", "content": "分析资料生成需求：", "operator": "系统"}
+{"time": "20261027_1532", "type": "generate", "content": "分析资料生成需求：", "operator": "系统"}
+{"time": "20261027_1533", "type": "generate", "content": "分析资料生成需求：重板给料机", "operator": "系统"}
+{"time": "20261027_1533", "type": "generate", "content": "分析资料生成需求：重板给料机", "operator": "系统"}
+{"time": "20261030_0911", "type": "project", "content": "新建项目：自测_20261030_091118", "operator": "系统"}
+{"time": "20261106_0807", "type": "project", "content": "新建项目：自测_20261106_080727", "operator": "系统"}
+{"time": "20261106_0808", "type": "project", "content": "新建项目：自测隔离_080813", "operator": "系统"}
+{"time": "20261110_0731", "type": "project", "content": "切换项目：马诺诺 → 自测_20261109_072445", "operator": "系统"}
+{"time": "20261110_0733", "type": "project", "content": "切换项目：（未选择） → 马诺诺", "operator": "系统"}
+{"time": "20261110_0733", "type": "delete", "content": "删除项目：自测_20261109_072445（id=c89d9667，含项目资料，删除前备份=deleted_自测_20261109_072445_20261110_073256.fgbak）", "operator": "系统"}
+{"time": "20261110_0733", "type": "project", "content": "切换项目：马诺诺 → 自测_20261030_091118", "operator": "系统"}
+{"time": "20261110_0733", "type": "project", "content": "切换项目：（未选择） → 马诺诺", "operator": "系统"}
+{"time": "20261110_0733", "type": "delete", "content": "删除项目：自测_20261030_091118（id=a8265932，仅删记录，资料已移入回收站：a8265932）", "operator": "系统"}
+{"time": "20261110_0734", "type": "delete", "content": "批量删除 2 个文件记录", "operator": "系统"}
+{"time": "20261110_0751", "type": "upload", "content": "上传 2 个文件", "operator": "电脑端"}
+{"time": "20261110_0755", "type": "upload", "content": "上传 46 个文件", "operator": "电脑端"}
+{"time": "20261110_0758", "type": "upload", "content": "上传 33 个文件", "operator": "电脑端"}
+{"time": "20261110_0826", "type": "project", "content": "切换项目：马诺诺 → 自测_20261110_082205", "operator": "系统"}
+{"time": "20261110_0833", "type": "project", "content": "新建项目：自测_20261110_083321（id=853a41e9）", "operator": "系统"}
+{"time": "20261110_0837", "type": "project", "content": "切换项目：自测_20261110_083321 → 自测_20261110_082205", "operator": "系统"}
+{"time": "20261110_0837", "type": "project", "content": "切换项目：自测_20261110_082205 → 自测_20261110_083321", "operator": "系统"}
+{"time": "20261110_0838", "type": "project", "content": "新建项目：自测隔离_083805（id=23419488）", "operator": "系统"}
+{"time": "20261110_0838", "type": "project", "content": "切换项目：自测隔离_083805 → 自测_20261110_083321", "operator": "系统"}
+{"time": "20261110_0843", "type": "project", "content": "切换项目：自测_20261110_083321 → 自测_20261110_082205", "operator": "系统"}

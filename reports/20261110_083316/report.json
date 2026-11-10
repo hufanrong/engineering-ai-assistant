@@ -1,0 +1,76 @@
+{
+  "run_id": "20261110_083316",
+  "started": "2026-11-10 08:33:16",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "233f2f6c8671e4dd014e907fb08560bb93335d69",
+      "err": ""
+    },
+    {
+      "step": "跳过拉取",
+      "rc": 0,
+      "out": "--no-pull"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 72, \"failed\": 5, \"skipped\": 1, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 1, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"4\": {\"passed\": 3, \"failed\": 3, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"p",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 1,
+      "out": "HTTPError: HTTP Error 502: Bad Gateway"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1 P72/F5/S1"
+    }
+  ],
+  "summary": {
+    "passed": 72,
+    "failed": 5,
+    "skipped": 1,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 1,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "4": {
+        "passed": 3,
+        "failed": 3,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 22,
+        "failed": 1,
+        "skipped": 1
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "233f2f6c8671e4dd014e907fb08560bb93335d69",
+  "finished": "2026-11-10 08:44:31",
+  "commit_before": "94348abfff059c9d9743bcb7d5f61dd7fe5013ae",
+  "commit_after": "94348abfff059c9d9743bcb7d5f61dd7fe5013ae"
+}
