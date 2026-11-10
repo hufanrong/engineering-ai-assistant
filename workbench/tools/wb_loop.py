@@ -458,6 +458,38 @@ def service_alive(timeout=3):
         return False
 
 
+def service_version(timeout=3):
+    """在线服务自报的版本号；拿不到就返回空串。
+
+    v0.1.229：用来判断「在跑的这一份是不是当前这份代码」。
+    以前每轮无条件 stop_service() + start_service()，等于每 5 小时把老板
+    正在用的工作台 taskkill 一次 —— 上传到一半、表单填到一半全没了。
+    """
+    import urllib.request
+    try:
+        with urllib.request.urlopen(BASE_URL + "/api/status", timeout=timeout) as r:
+            body = json.loads(r.read().decode("utf-8", "replace"))
+        return str((body or {}).get("version") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def code_version():
+    """工作区里 config.APP_VERSION 的值。
+
+    直接读源码正则，不 import —— import app.config 会连带拉起整个包，
+    在循环进程里既慢又可能因为依赖缺失而炸掉，只是想读个版本号而已。
+    """
+    try:
+        with open(os.path.join(WB_DIR, "app", "config.py"), encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("APP_VERSION"):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
 def stop_service():
     """尽力停掉占用端口的旧服务（Windows: netstat+taskkill；其它: pkill -f start.py）。"""
     steps = []
@@ -959,6 +991,7 @@ def one_round(args):
         finish("error", error=f"拿不到远端 HEAD：{err}")
         return "error"
 
+    behind = 0  # --no-pull 时不会赋值，后面判断「要不要重启服务」要用
     if args.no_pull:
         log("--no-pull：跳过拉取，直接用当前本地代码")
         rec["steps"].append({"step": "跳过拉取", "rc": 0, "out": "--no-pull"})
@@ -990,17 +1023,43 @@ def one_round(args):
             rec["steps"].append({"step": "拉取后 HEAD", "rc": 0, "out": local_head()[:12]})
 
     # ---- 3. 重启服务 + 自测
+    #
+    # v0.1.229：**不再无条件重启**。
+    # 原来每轮都是 stop_service() + start_service()，而现在的节奏是每 5 小时一轮：
+    # 等于每 5 小时把老板正在用的工作台 taskkill 一次 —— 上传到一半、组卷排队中、
+    # 表单填到一半，全部无声消失。而它换来的收益只是「顺带测一次启动链路」。
+    # 现在只在三种情况下重启：
+    #   ① 刚拉下来新代码（behind>0）；
+    #   ② 服务不在线（那就必须拉起来）；
+    #   ③ 在线服务的版本号与工作区里的 APP_VERSION 不一致（代码换了没生效）。
+    # 其余情况直接对着在跑的这份测 —— 测的正是用户此刻在用的那份，更有意义。
     inproc = False
     if not args.no_restart:
-        rec["steps"].extend(stop_service())
-        time.sleep(2)
-        ok, msg = start_service()
-        rec["steps"].append({"step": "启动服务", "rc": 0 if ok else 1, "out": msg})
-        if not ok:
-            # 服务起不来不等于代码坏：降级为进程内模式继续自测，别让整轮空转
-            inproc = True
-            rec["steps"].append({"step": "服务不可用，转进程内模式", "rc": 0,
-                                 "out": f"原因：{msg}"})
+        _alive = service_alive()
+        _sv, _cv = service_version(), code_version()
+        _need, _why = True, ""
+        if _alive and _sv and _cv and _sv == _cv and behind == 0:
+            _need, _why = False, f"服务在线且版本一致({_sv})，跳过重启（不打断正在使用的人）"
+        elif _alive and _sv and _cv and _sv != _cv:
+            _why = f"在线版本 {_sv} ≠ 工作区 {_cv}，需要重启"
+        elif not _alive:
+            _why = "服务不在线，需要拉起"
+        else:
+            _why = f"无法确认版本（在线={_sv or '空'} 工作区={_cv or '空'}），保守重启"
+        if _need:
+            rec["steps"].extend(stop_service())
+            time.sleep(2)
+            ok, msg = start_service()
+            rec["steps"].append({"step": "启动服务", "rc": 0 if ok else 1,
+                                 "out": f"{msg}（{_why}）"})
+            if not ok:
+                # 服务起不来不等于代码坏：降级为进程内模式继续自测，别让整轮空转
+                inproc = True
+                rec["steps"].append({"step": "服务不可用，转进程内模式", "rc": 0,
+                                     "out": f"原因：{msg}"})
+        else:
+            rec["steps"].append({"step": "沿用在线服务", "rc": 0, "out": _why})
+            log(f"   {_why}")
     if not service_alive():
         # v0.1.225：**服务没在线就不要降级跑自测**。
         #
