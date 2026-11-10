@@ -953,49 +953,180 @@ def _extract_title_block(labels, frame):
     return out
 
 
-def _find_oda_converter():
-    """自动发现 ODA File Converter 可执行文件（支持任意安装版本/目录）。
-    查找顺序：环境变量 ODA_CONVERTER → 常见安装路径（含带版本号目录）→
-    Program Files 下递归搜索 → PATH 中的 ODAFileConverter。
+_ODA_CACHE = None          # None=未查过；""=查过但没有；其它=路径
+_ODA_SEARCHED = []          # 查过哪些位置（写进错误信息，便于现场排查）
+
+
+def _find_external_tools():
+    r"""把本机可用的外部工具一次查清（ODA / AutoCAD 控制台 / Tesseract）。
+
+    为什么要有这个函数：v0.1.225 之前 ODA 只搜 `%ProgramFiles%`（= C 盘）和
+    写死的 `C:////ODA////...`。实测本机（2026-11-10）ODA 装在
+    `D:////ODA////ODAFileConverter////`、AutoCAD 2020 装在
+    `D:////Program Files\\Autodesk\\AutoCAD 2020\\` —— 两样都在 D 盘，
+    于是 25 张 DWG 全部报「未找到 ODA File Converter」，老板一句
+    「本机应该有这些条件」才发现是搜索范围写死了盘符。
+
+    搜索顺序（全部先看环境变量，再看注册表，再看各盘符常见目录，最后 where）：
+      ODA      : ODA_CONVERTER -> 注册表卸载项 InstallLocation -> <盘>:\ODA\ ->
+                 <盘>:\Program Files[ (x86)]\ODA\ -> PATH
+      AutoCAD  : acad 安装目录下的 accoreconsole.exe（无界面脚本引擎，
+                 ODA 不可用时的 DWG→DXF 备选方案）
+      Tesseract: TESSERACT_CMD -> <盘>:\Program Files\Tesseract-OCR\tesseract.exe -> PATH
     """
     import glob
     import subprocess
-    candidates = []
+
+    roots = []
+    for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+        d = letter + ":\\"
+        if os.path.isdir(d):
+            roots.append(d)
+    pf_names = ("Program Files", "Program Files (x86)")
+
+    def _reg_paths(match):
+        out = []
+        try:
+            import winreg
+        except Exception:  # noqa: BLE001
+            return out
+        keys = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+        ]
+        for hive, sub in keys:
+            try:
+                with winreg.OpenKey(hive, sub) as k:
+                    for i in range(winreg.QueryInfoKey(k)[0]):
+                        try:
+                            name = winreg.EnumKey(k, i)
+                            with winreg.OpenKey(k, name) as sk:
+                                dn = ""
+                                try:
+                                    dn = str(winreg.QueryValueEx(sk, "DisplayName")[0])
+                                except Exception:  # noqa: BLE001
+                                    pass
+                                if not match(dn):
+                                    continue
+                                try:
+                                    loc = str(winreg.QueryValueEx(sk, "InstallLocation")[0] or "")
+                                except Exception:  # noqa: BLE001
+                                    loc = ""
+                                if loc:
+                                    out.append(loc)
+                        except Exception:  # noqa: BLE001
+                            continue
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    # ---------- ODA File Converter ----------
+    oda = ""
+    cands = []
     env = os.environ.get("ODA_CONVERTER", "")
     if env:
-        candidates.append(env)
-    # 常见安装路径（含 27.x 等版本目录变体）
-    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
-    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-    candidates += [
-        os.path.join(pf, "ODA", "ODAFileConverter", "ODAFileConverter.exe"),
-        os.path.join(pf, "ODAFileConverter", "ODAFileConverter.exe"),
-        os.path.join(pf86, "ODA", "ODAFileConverter", "ODAFileConverter.exe"),
-        os.path.join(pf86, "ODAFileConverter", "ODAFileConverter.exe"),
-        r"C:\ODA\ODAFileConverter\ODAFileConverter.exe",
-    ]
-    for c in candidates:
+        cands.append(env)
+    for loc in _reg_paths(lambda n: "ODA" in n.upper() or "TEIGHA" in n.upper()):
+        cands.append(os.path.join(loc, "ODAFileConverter.exe"))
+        cands.append(os.path.join(loc, "ODAFileConverter", "ODAFileConverter.exe"))
+    for r in roots:
+        _ODA_SEARCHED.append(r)
+        cands += [
+            os.path.join(r, "ODA", "ODAFileConverter", "ODAFileConverter.exe"),
+            os.path.join(r, "ODA", "ODAFileConverter.exe"),
+            os.path.join(r, "ODAFileConverter", "ODAFileConverter.exe"),
+        ]
+        for pfn in pf_names:
+            cands += [
+                os.path.join(r, pfn, "ODA", "ODAFileConverter", "ODAFileConverter.exe"),
+                os.path.join(r, pfn, "ODAFileConverter", "ODAFileConverter.exe"),
+            ]
+    for c in cands:
         if c and os.path.isfile(c):
-            return c
-    # 递归搜索（覆盖 ODAFileConverter 27.1.0 / ODAFileConverter_27.1.0 等目录）
-    for base in (pf, pf86):
+            oda = c
+            break
+    if not oda:
+        # 深度受限的通配（只在 ODA* 目录里找，不做全盘递归，避免拖慢启动）
+        for r in roots:
+            for pat in (os.path.join(r, "ODA*", "**", "ODAFileConverter.exe"),
+                        os.path.join(r, "Program Files*", "ODA*", "**", "ODAFileConverter.exe")):
+                try:
+                    hits = glob.glob(pat, recursive=True)
+                except Exception:  # noqa: BLE001
+                    hits = []
+                hits = [h for h in hits if os.path.isfile(h)]
+                if hits:
+                    oda = sorted(hits, key=len)[0]
+                    break
+            if oda:
+                break
+    if not oda:
         try:
-            hits = glob.glob(os.path.join(base, "ODA", "**", "ODAFileConverter.exe"), recursive=True) + \
-                   glob.glob(os.path.join(base, "ODAFileConverter*", "ODAFileConverter.exe"))
-            for h in hits:
-                if os.path.isfile(h):
-                    return h
+            r = subprocess.run(["where", "ODAFileConverter"], capture_output=True,
+                               text=True, timeout=10)
+            lines = [x.strip() for x in (r.stdout or "").splitlines() if x.strip()]
+            if lines and os.path.isfile(lines[0]):
+                oda = lines[0]
         except Exception:  # noqa: BLE001
-            continue
-    # PATH 兜底
+            pass
+
+    # ---------- AutoCAD accoreconsole（ODA 缺失时的 DWG→DXF 备选） ----------
+    acc = ""
+    acands = []
+    for loc in _reg_paths(lambda n: "AUTOCAD" in n.upper()):
+        acands.append(os.path.join(loc, "accoreconsole.exe"))
+    for r in roots:
+        for pat in (os.path.join(r, "Program Files", "Autodesk", "AutoCAD*", "accoreconsole.exe"),
+                    os.path.join(r, "Program Files (x86)", "Autodesk", "AutoCAD*", "accoreconsole.exe"),
+                    os.path.join(r, "Autodesk", "AutoCAD*", "accoreconsole.exe")):
+            try:
+                acands += [h for h in glob.glob(pat) if os.path.isfile(h)]
+            except Exception:  # noqa: BLE001
+                pass
+            acands += [c for c in [os.path.join(r, "Program Files", "Autodesk", "AutoCAD 2020", "accoreconsole.exe")] if os.path.isfile(c)]
+    for c in acands:
+        if c and os.path.isfile(c):
+            acc = c
+            break
+
+    # ---------- Tesseract ----------
+    tess = os.environ.get("TESSERACT_CMD", "")
+    if not tess or not os.path.isfile(tess):
+        tess = ""
+        t_cands = []
+        for r in roots:
+            t_cands.append(os.path.join(r, "Program Files", "Tesseract-OCR", "tesseract.exe"))
+            t_cands.append(os.path.join(r, "Program Files (x86)", "Tesseract-OCR", "tesseract.exe"))
+            t_cands.append(os.path.join(r, "Tesseract-OCR", "tesseract.exe"))
+        for c in t_cands:
+            if os.path.isfile(c):
+                tess = c
+                break
+        if not tess:
+            try:
+                r2 = subprocess.run(["where", "tesseract"], capture_output=True,
+                                    text=True, timeout=10)
+                lines = [x.strip() for x in (r2.stdout or "").splitlines() if x.strip()]
+                if lines and os.path.isfile(lines[0]):
+                    tess = lines[0]
+            except Exception:  # noqa: BLE001
+                pass
+
+    return {"oda": oda, "accoreconsole": acc, "tesseract": tess, "searched_roots": roots}
+
+
+def _find_oda_converter():
+    """自动发现 ODA File Converter（v0.1.226：跨盘符 + 注册表，不再写死 C 盘）。"""
+    global _ODA_CACHE
+    if _ODA_CACHE is not None:
+        return _ODA_CACHE or None
     try:
-        out = subprocess.run(["where", "ODAFileConverter"], capture_output=True, text=True, timeout=10)
-        line = (out.stdout or "").strip().splitlines()
-        if line and os.path.isfile(line[0]):
-            return line[0]
+        tools = _find_external_tools()
+        _ODA_CACHE = tools.get("oda") or ""
     except Exception:  # noqa: BLE001
-        pass
-    return None
+        _ODA_CACHE = ""
+    return _ODA_CACHE or None
 
 
 def _dwg_to_dxf(dwg_path: str) -> Optional[str]:

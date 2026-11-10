@@ -706,7 +706,38 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #      「假 xls」其实是 HTML）。
 #   ④ .rar/.zip 压缩包被跳过时提示不明确：用户传了 5MB 图纸包，只看到「跳过」。
 
-APP_VERSION = "0.1.225"
+# v0.1.226：外部工具只搜 C 盘，把「本机有」误报成「本机没有」
+#   现象（2026-11-10 工位实测）：25 张 DWG 全部返回
+#     「未找到 ODA File Converter（可设环境变量 ODA_CONVERTER）」，解析文本 0 字；
+#     16/30 张扫描件 PDF 无文字层；竣工图清稿阶段超时。
+#   老板一句「本机应该有这些条件，你扩大一下检测范围」才发现：
+#     ODA      D:\ODA\ODAFileConverter\ODAFileConverter.exe
+#     AutoCAD  D:\Program Files\Autodesk\AutoCAD 2020\accoreconsole.exe
+#   两个都确实装着，只是**不在 C 盘**。
+#   根因：`_find_oda_converter()` 只查 `os.environ["ProgramFiles"]`（恒为 C 盘）
+#     加一个写死的 `C:\ODA\...`，全盘只覆盖一个盘符；注册表里的
+#     `InstallLocation`、其它盘符的 `\Program Files` 一概没看。
+#   后果不是「工具缺一个」，而是**资料库对图纸基本不可用**：
+#     60 个真实文件里只有 19 个能抽出正文（32%），其中 DWG 是 0/25。
+#   修法：新增 `_find_external_tools()`，一次把三样工具查清并缓存 ——
+#     ① 盘符枚举：C..Z 里真实存在的根目录全进搜索面（不再假设只在 C 盘）；
+#     ② 注册表：HKLM/HKCU 的 Uninstall\* 读 DisplayName→InstallLocation，
+#        覆盖任意安装路径（ODA/Teigha、AutoCAD）；
+#     ③ 通配兜底：只在 `<盘>:\ODA*`、`<盘>:\Program Files*\ODA*` 下递归，
+#        不做全盘扫描，避免拖慢启动；
+#     ④ PATH 兜底：`where`；
+#     ⑤ 同时返回 `accoreconsole.exe`（AutoCAD 无界面脚本引擎，ODA 缺位时的
+#        DWG→DXF 备份通道）与 `tesseract.exe`（扫描件 OCR）。
+#     查过哪些盘写进 `searched_roots`，报错信息带出来，现场不用再猜。
+#   验证：把 earlier 报「未找到转换器」的两张真图重跑 ——
+#     X398·301 Manono 粗碎车间布置图  parsed  text=1300  6.3s
+#     火法部分流程图                 parsed  text=26251 5.9s
+#   遗留（下一轮解决，不在本次范围内假装已修）：
+#     · `title_block` 仍为 {}，图签栏抽取另有缺陷；
+#     · 本机 Tesseract 只有 eng+osd，缺 chi_sim，中文扫描件仍走不通；
+#     · accoreconsole 已能定位但还没接进 DWG 转换链路。
+
+APP_VERSION = "0.1.226"
 
 # v0.1.218 —— 备份范围：项目「有什么」和「备了什么」是两套口径
 #     现象：备份/恢复与删除前自动备份，都按 project_backup.BACKUP_ITEMS 这份

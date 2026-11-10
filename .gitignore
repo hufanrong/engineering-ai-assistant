@@ -73,6 +73,10 @@ pnpm-lock.yaml
 workbench/tools/_samples/
 workbench/tools/selftest_report.json
 workbench/tools/selftest_report.md
+# 专项套件逐个 test_*.py 的机器可读报告（每轮重写，明细已进 reports/<ts>/suites.json）
+workbench/tools/test_*_report.json
+# 临时排查日志（reports/ 下带下划线前缀的都是，正式轮次目录是 <日期_时分秒>）
+reports/_*
 reports/service.log
 reports/.wb_loop.lock
 
