@@ -667,14 +667,41 @@ def phase1(samples_dir):
     code, body, err = call("POST", "/api/scan", {"folder": samples_dir, "force": True})
     record(P, "递归扫描启动", "200", f"{code} {str(body)[:80]}", code == 200, err)
     st = {}
-    for _ in range(120):
+    # v0.1.227：等待改成「按进度判断」，不再固定 120 次 × 2s。
+    #
+    # 原实现最多等 240 秒就放弃，而这一步的耗时**随资料内容剧烈变化**：
+    #   · 样本只有 txt/docx 时 10 秒内结束；
+    #   · 真实资料 63 个文件含 25 张 DWG（每张 ODA 转换 6 秒）+ 16 份扫描件 OCR，
+    #     实测要 8~20 分钟。
+    # 于是同一个「扫描完成」断言，在合成样本上绿、在马诺诺真实资料上必红 ——
+    # 而它红的原因不是产品慢，是**测试不肯等**，下游还会连带报出
+    # 「资料库条目数 0」「正文非空 0/N」「无设备数据」一大串假缺陷。
+    # 现在：总共最多等 30 分钟；但如果连续 90 秒 done 一动不动，判定卡死并提前放弃
+    # （真有死循环时不必陪跑到 30 分钟）。
+    _done_prev = -1
+    _stall = 0
+    _deadline = time.time() + 1800
+    while time.time() < _deadline:
         _, st, _ = call("GET", "/api/scan/status")
         if not (st or {}).get("running"):
             break
+        _d = int((st or {}).get("done") or 0)
+        if _d > _done_prev:
+            _done_prev = _d
+            _stall = 0
+        else:
+            _stall += 2
+            if _stall >= 90:
+                break
         time.sleep(2)
     stats = (st or {}).get("stats") or {}
     record(P, "扫描完成", "running=false 且有 stats", json.dumps(stats, ensure_ascii=False),
            not (st or {}).get("running") and bool(stats), f"耗时 {time.time()-t0:.1f}s")
+    if not (st or {}).get("running") and not stats:
+        # 扫完了却没有 stats：接口口径问题，单独记一条，别混进「解析成功率」
+        record(P, "扫描统计可读", "扫描结束时应返回 stats",
+               f"running=False 但 stats={stats}", False,
+               "扫描结束但拿不到统计 → 界面进度条会停在 100% 不给结果")
     if stats:
         record(P, "解析成功率", "failed=0", f"parsed={stats.get('parsed')} failed={stats.get('failed')}",
                stats.get("failed", 0) == 0, json.dumps(stats, ensure_ascii=False))
@@ -684,9 +711,16 @@ def phase1(samples_dir):
     items = res if isinstance(res, list) else ((res or {}).get("results") or [])
     record(P, "资料库条目数", f">= 样本数({len(os.listdir(samples_dir)) if os.path.isdir(samples_dir) else '?'})",
            f"条目 {len(items)}", len(items) > 0)
+    # v0.1.227：`details` 原来只在 `if items:` 里赋值，后面的 `if details:` 却在外面 ——
+    # 一旦条目数为 0（服务中途被删项目顺手杀掉、扫描没跑起来等），
+    # 整个 phase1 直接 UnboundLocalError 崩掉，报告里只剩一行
+    # 「阶段执行异常 … cannot access local variable 'details'」。
+    # 实测 2026-11-10 09:16 轮次：phase1 崩溃 → 样本没入库 → phase3 全部
+    # 报「无设备数据」，6 条红全部是这一个 Bug 的下游假象。
+    # 测试脚本自己崩掉，绝不能伪装成产品缺陷。
+    details, detail_fail = [], []
     if items:
         # 列表接口只返回索引信息，正文必须走详情接口 /api/results/{sha256}
-        details, detail_fail = [], []
         for it in items:
             sha = it.get("sha256")
             c2, d2, e2 = call("GET", f"/api/results/{sha}")
@@ -715,6 +749,21 @@ def phase1(samples_dir):
         record(P, "结构化解析", "至少表格类文件有 structure",
                f"{len(with_struct)}/{len(details)} 条有 structure", len(with_struct) >= 1,
                "；".join(str(d.get("file_name")) for d in with_struct[:4]))
+
+        # v0.1.227：DWG 图签栏（图号/图名/比例）能不能抽出来。
+        # 单独断言的理由：正文能抽 2 万多字、图签栏却是空的两张真实图纸被
+        # 之前「正文非空」一条盖过去了 —— 用户看图签空白会以为图纸没解析成功。
+        _dwgs = [d for d in details if str(d.get("ext") or "").lower() == ".dwg"]
+        _tb = [d for d in _dwgs
+               if ((d.get("structure") or {}).get("spatial") or {}).get("title_block")]
+        if _dwgs:
+            record(P, "DWG 图签栏抽取", "至少 1 张 DWG 抽出图号/图名等字段",
+                   f"{len(_tb)}/{len(_dwgs)} 张有图签；样例 "
+                   f"{[((d.get('structure') or {}).get('spatial') or {}).get('title_block') for d in _tb[:2]]}",
+                   len(_tb) >= 1,
+                   "全空通常是图框右下区域判断偏了（模型空间并排多图 / 包围盒被拉远）")
+        else:
+            record(P, "DWG 图签栏抽取", "本批无 DWG，跳过", "无 .dwg 样本", None)
 
     # 车间自动分类：以 /api/workshops + /api/workshop/list 为准（列表接口无 workshop 字段）
     code, wsl, err = call("GET", "/api/workshops")
@@ -747,6 +796,17 @@ def phase1(samples_dir):
            f"cache={((rec or {}).get('cache_files'))} 待补={need} "
            f"孤儿文件={((rec or {}).get('orphan_uploads'))}",
            code == 200 and need == 0, err)
+
+    # v0.1.227：解析器换代后老文件必须被重解析，否则「修了跟没修一样」。
+    # 刚扫描完的库里不该再有过期条目（stale=0）；不为 0 说明判重条件又只看
+    # status 了，或者缓存没写 parser_version。
+    code, rs, err = call("POST", "/api/index/reparse?dry_run=true")
+    stale = int((rs or {}).get("stale") or 0)
+    record(P, "解析器版本无过期条目", "stale=0（刚扫描完不应有旧版本结果）",
+           f"{code} total={((rs or {}).get('total'))} stale={stale} "
+           f"legacy={((rs or {}).get('legacy'))} "
+           f"按类型={json.dumps((rs or {}).get('by_ext') or {}, ensure_ascii=False)}",
+           code == 200 and stale == 0, err)
     for h in hits[:3]:
         m = h.get("meta") or {}
         print(f"      命中：{m.get('file_name')} 匹配 {m.get('matched_terms')}/{m.get('total_terms')} "
@@ -1730,7 +1790,8 @@ def phase6(samples_dir):
     if os.path.isfile(_sig_script):
         try:
             _cp = _sp.run([sys.executable, _sig_script], cwd=_here,
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=120)
             _sig_rc = _cp.returncode
             _sig_lines = [l for l in (_cp.stdout or "").strip().splitlines() if l.strip()]
             _sig_tail = _sig_lines[-1] if _sig_lines else ""
@@ -1759,7 +1820,8 @@ def phase6(samples_dir):
     if os.path.isfile(_ro_script):
         try:
             _cp2 = _sp.run([sys.executable, _ro_script], cwd=_here,
-                           capture_output=True, text=True, timeout=240)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=240)
             _ro_rc = _cp2.returncode
             _ro_lines = [l for l in (_cp2.stdout or "").strip().splitlines() if l.strip()]
             _ro_tail = _ro_lines[-1] if _ro_lines else ""
@@ -1826,7 +1888,8 @@ def phase6(samples_dir):
     if os.path.isfile(_ov_script):
         try:
             _cp3 = _sp.run([sys.executable, _ov_script], cwd=_here,
-                           capture_output=True, text=True, timeout=300)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=300)
             _ov_rc = _cp3.returncode
             # 汇总行不是最后一行（末尾有分隔线），必须按内容找：
             # 首版取 _lines[-1] 拿到了 "====="，于是 rc=0 却判 FAIL —— 假红灯。

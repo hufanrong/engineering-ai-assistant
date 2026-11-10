@@ -15,6 +15,22 @@ from . import upload_queue
 
 INDEX_FILE = None  # 兼容旧引用（main.py 仅判断存在性）；实际读写不再依赖此全局变量
 
+# v0.1.227：解析能力版本号。**凡是改变「同一份文件能抽出多少内容」的改动，
+# 都必须把这个号加一。**
+#
+# 为什么需要它：索引里的 status="parsed" 只说明「曾经解析过」，不说明
+# 「用当前的解析器解析过」。存量文件因此永远停在旧的解析结果上 ——
+# 实测 2026-11-10 马诺诺真实资料 0c9a4b2d：ODA 探测修好、DWG 已经能从
+# 0 字抽到 1300/26251 字，但 25 个 DWG 的缓存里仍是
+#   {"status":"partial","text":"","error":"未找到 ODA File Converter…"}
+# 扫描按 status=="parsed" 判重、直接跳过，于是**修好的解析器对老资料完全无效**，
+# 老板看到的还是「图纸查不到内容」。这类「改完跟没改一样」的坑，
+# 光靠重新上传是补不回来的（用户根本不知道该重传哪些）。
+#
+# 有了版本号，判重条件变成「parsed 且是当前版本解析的」，升级后第一次扫描
+# 自动把旧结果重解析一遍，不需要用户做任何事。
+PARSER_VERSION = config.PARSER_VERSION
+
 
 def _get_data_dir(data_dir=None):
     """获取数据目录：优先传入的data_dir，其次当前项目目录，最后全局目录。"""
@@ -135,6 +151,60 @@ def merge_index_entries(entries: dict, data_dir=None) -> int:
         if changed:
             _save_index(idx, data_dir)
         return changed
+
+
+def reparse_stale(data_dir=None, dry_run: bool = True) -> dict:
+    """统计「索引里有、但解析器已换代」的文件，供界面/自测核对（v0.1.227）。
+
+    背景见 PARSER_VERSION 那段注释：存量文件不会因为解析器修好而自动更新，
+    因为判重只看 status=="parsed"。修好 ODA 探测之后，25 张 DWG 在库里
+    依旧是「0 字」，看上去像没修 —— 这是「同一件事两个答案」的又一例：
+    磁盘上的解析器说能读，资料库里的结果说读不出。
+
+    本函数不做重解析，只回答三个数：
+      total  —— 索引里参与统计的文件数
+      stale  —— 需要重解析的（解析器换代，或从没用 present 版本解析过）
+      legacy —— 其中连 parser_version 字段都没有的历史条目
+    dry_run=False 时只把 stale 条目里的 parser_version 抹掉，使下一次
+    扫描/上传把它们当新文件重新解析（不动正文，出错也能回退）。
+    """
+    ddir = _get_data_dir(data_dir)
+    idx = _load_index(ddir)
+    if not isinstance(idx, dict):
+        idx = {}
+    skip = set(INDEX_RESERVED_KEYS) | set(INDEX_AUX_KEYS)
+    out = {"total": 0, "stale": 0, "legacy": 0, "by_ext": {},
+           "parser_version": PARSER_VERSION, "dry_run": bool(dry_run),
+           "sample": []}
+    touched = 0
+    for k, v in idx.items():
+        if k in skip or not isinstance(v, dict):
+            continue
+        out["total"] += 1
+        pv = v.get("parser_version")
+        if pv == PARSER_VERSION:
+            continue
+        out["stale"] += 1
+        if not pv:
+            out["legacy"] += 1
+        ext = str(v.get("ext") or os.path.splitext(str(v.get("file_name") or ""))[1] or "?").lower()
+        out["by_ext"][ext] = out["by_ext"].get(ext, 0) + 1
+        if len(out["sample"]) < 8:
+            out["sample"].append({"file_name": v.get("file_name"),
+                                  "status": v.get("status"),
+                                  "was_version": pv or "(无)"})
+        if not dry_run:
+            # 抹掉版本号而不是删条目：条目里的 file_path 还有用，
+            # 下次扫描会按 sha 命中并重解析，重解析失败也不会丢路径。
+            try:
+                idx[k] = {**v, "parser_version": ""}
+                touched += 1
+            except Exception:  # noqa: BLE001
+                pass
+    if not dry_run and touched:
+        _save_index(idx, ddir)
+        out["marked"] = touched
+    return out
 
 
 def reconcile_index(data_dir=None, dry_run: bool = False) -> dict:
@@ -329,7 +399,8 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     for block in iter(lambda: f.read(65536), b""):
                         h.update(block)
                 key = h.hexdigest()
-                if key in idx and idx[key].get("status") == "parsed":
+                if (key in idx and idx[key].get("status") == "parsed"
+                        and idx[key].get("parser_version") == PARSER_VERSION):
                     stats["duplicate"] += 1
                     if progress_cb:
                         progress_cb(i + 1, len(file_list), f"重复跳过 {os.path.basename(path)}")
@@ -428,6 +499,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 "entities": len(res.entities),
                 "retry_count": 0,
                 "ts": datetime.datetime.now().isoformat(),
+                "parser_version": PARSER_VERSION,
             }
             # v0.1.177：索引**分批落盘**，不再每个文件全量 dump。
             # 实测事故：索引写到上千条时，每解析一个文件就要把整个 index.json
@@ -547,6 +619,9 @@ def _save_parsed_cache(res: ParseResult, data_dir=None):
             "status": res.status, "error": res.error,
             "text": res.text[:20000], "structure": res.structure,
             "entities": res.entities, "created_at": res.created_at,
+            # v0.1.227：谁解析的、用哪一代解析器解析的，落盘留证。
+            # 缺这个字段的历史缓存会被下一次扫描判为「过期」并重解析。
+            "parser_version": PARSER_VERSION,
         }, f, ensure_ascii=False, indent=1)
 
 

@@ -19,6 +19,13 @@ pypdf>=4.2.0
 pdfplumber>=0.11.2
 python-docx>=1.1.2
 openpyxl>=3.1.5
+# xlrd：Excel 97-2003（.xls）必需。现场真实资料里箱单/设备表大量还是 .xls，
+#   缺了它 `parse_xls` 会在 `import xlrd` 处抛 ImportError，被 parse_file 记成
+#   「skipped / 缺少依赖」——用户传了文件，库里一条内容都没有。
+#   2026-11-10 实测：服务实际运行的 workbench/venv 里就没有 xlrd（系统 Python 有），
+#   即「我用哪个解释器测」与「老板双击 run_workbench.bat 用的解释器」不是同一个，
+#   于是 .xls 在本机自测通过、到真机运行时依然跳过。故必须写进依赖清单。
+xlrd>=2.0.1
 
 # 向量化（按 Python 版本分流）
 #   py<3.13：旧锁定版本久经验证

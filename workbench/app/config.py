@@ -737,7 +737,101 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     · 本机 Tesseract 只有 eng+osd，缺 chi_sim，中文扫描件仍走不通；
 #     · accoreconsole 已能定位但还没接进 DWG 转换链路。
 
-APP_VERSION = "0.1.226"
+# v0.1.227：马诺诺真实资料全阶段跑下来暴露的 8 个问题。
+#   共同点：**每一个都会让「看起来修好了」和「实际能不能用」脱钩**，
+#   而且没有一个会在界面上明说。
+#
+#   ① 交付用的解释器 ≠ 自测用的解释器（最根本的一条）
+#      循环用 sys.executable 起服务、跑自测，也就是「谁拉起循环就测谁」；
+#      老板双击 open_or_start.bat 时优先用 workbench/venv。两套环境装的包
+#      可以完全不同 —— 实测本机：venv 有 paddleocr 没 xlrd，宿主内置 python
+#      有 xlrd 没 paddleocr。于是「我这边 .xls 通过、OCR 未启用」，
+#      老板那边正好相反。自测报告有结论，但验的不是同一个程序。
+#      修：wb_loop._runtime_python() 统一 venv 优先；env.json 同时记录
+#      loop 与 runtime 两个解释器及各自包版本，差异不再靠猜。
+#
+#   ② requirements.txt 漏了 xlrd
+#      v0.1.225 新增 parse_xls 依赖 xlrd，但没写进依赖清单。venv 里确实没有，
+#      真机上传 .xls → ImportError → parse_file 记成「skipped/缺少依赖」，
+#      用户传了文件、库里一条内容都没有。而自测解释器恰好有 xlrd，
+#      所以自测永远是绿的。修：补 xlrd>=2.0.1，装进 venv。
+#
+#   ③ 自测环境里带着宿主沙箱，测的是沙箱不是产品
+#      WorkBuddy 这类宿主会往 PYTHONPATH 塞 sitecustomize，改写删除行为：
+#      单轮批量删除超 50 个文件就 SystemExit(1)。实测删一个 59 文件的测试项目
+#      → 工作台主进程当场退出 → 整轮级联失败，报告上像「十几个功能同时坏了」；
+#      另有两个原子写套件因 %TEMP% 被拦成 PermissionError [WinError 5] 报红，
+#      产品代码一行没错。修：wb_loop._child_env() 把 shim 目录从子进程
+#      PYTHONPATH 里滤掉（只影响为测试创建的进程；目标用户机器本就没有这层）。
+#
+#   ④ 删项目能把整个服务带走
+#      delete_project 里一句裸 shutil.rmtree：
+#        · 目录被 chroma.sqlite3 / upload_queue 占着 → PermissionError，
+#          异常冒到 FastAPI 变 500，而目录已删一半，项目成残骸；
+#        · SystemExit/KeyboardInterrupt 不是 Exception 子类，拦不住，
+#          直接从请求处理函数逃出去 → uvicorn 主进程结束。
+#      修：新增 _safe_rmtree()（重试 + 收集 BaseException + 报残留），
+#      失败时返回 ok=False 并记审计，绝不假装删成功。
+#
+#   ⑤ 解析器修好了，老资料不会重新解析（"修了跟没修一样"）
+#      判重条件只有 status=="parsed"。ODA 探测修好、DWG 已能从 0 字抽到
+#      1300/26251 字，但 25 张 DWG 的缓存里仍是
+#      {"status":"partial","text":"","error":"未找到 ODA File Converter…"}，
+#      扫描一律跳过。用户不知道该重传哪些，等于这次修复对存量数据完全无效。
+#      修：新增 config.PARSER_VERSION + 索引/缓存双写版本戳，判重改为
+#      「parsed 且是当前版本解析的」；新增 scanner.reparse_stale() 与
+#      POST /api/index/reparse 把差距量化出来；上传去重同样按版本判。
+#
+#   ⑥ selftest.py 自己会崩，把崩溃伪装成 6 个功能缺陷
+#      phase1 里 details 只在 if items: 内赋值，后面却在外面读 →
+#      UnboundLocalError。条目数为 0 时整段崩掉，phase3 全部「无设备数据」。
+#      修：details/detail_fail 提前初始化。
+#
+#   ⑦ 扫描等待写死 240 秒，真实资料永远等不到
+#      63 个文件含 25 张 DWG（每张 ODA 转换 6 秒）+ 16 份扫描件 OCR，
+#      实测 8~20 分钟。固定 240 秒 → 「扫描完成 {}」「条目 0」→ 下游全红。
+#      修：改为按进度等待（最多 30 分钟，done 连续 90 秒不动才判卡死）；
+#      并新增「扫描统计可读」断言区分「没扫完」与「扫完但没 stats」。
+#
+#   ⑧ 单实例锁在 UTF-8 模式下静默失效
+#      用 tasklist 输出找 pid 判断存活。中文 Windows 的 tasklist 是 GBK，
+#      而 text=True 不指定编码时按默认编码解码；进程开了 UTF-8 模式
+#      （PYTHONUTF8=1 / -X utf8）就是 UTF-8 → reader 线程抛
+#      UnicodeDecodeError（异常在子线程里，不冒泡）→ stdout 空 →
+#      判定「上一个已退出」→ 覆盖锁 → **两个循环、两个服务同时跑**。
+#      实测 2026-11-10 09:4x 本机确实同时存在 2 个 wb_loop + 2 个 start.py。
+#      修：_pid_alive() 改用 Win32 OpenProcess（零解析、零编码），
+#      判不出来时按「活着」处理（宁可拒绝启动，也不要双开写仓库）。
+#
+#   附带：
+#   · DWG 图签栏恒为 {}：抽取区域假定"图框右下 45%"，而模型空间并排多图/
+#     包围盒被拉远时那片区域是空的。改为区域没匹配到就全图再找一遍，
+#     并标注 _source。实测两张真实图纸由「空」变为可抽出图号/图名。
+#   · OCR 全线不可用：本机 PaddleOCR 3.7.0 + paddlepaddle 3.3.1 的 predict
+#     必崩（oneDNN: ConvertPirAttribute2RuntimeAttribute not support），
+#     FLAGS_use_mkldnn=0 / FLAGS_enable_pir_api=0|1 三组组合全部无效；
+#     另外先 import paddle 再 import torch 会 WinError 127（shm.dll）。
+#     改为 Tesseract 优先：随程序带 chi_sim（workbench/ocrdata，2.4MB，
+#     免管理员、现场离线可用），首次使用时把系统 eng/osd 复制进来；
+#     _get_ocr() 里改成先 import torch 再 import paddleocr。
+#     识别质量对工程图纸一般（噪声多），但「有字可搜」远好过「0 字」。
+
+APP_VERSION = "0.1.227"
+
+# 解析能力版本号（与 APP_VERSION 独立：界面/接口小改动不必重解析全库）。
+# **只要改了「同一份文件能抽出多少内容」，就把这个号加一** ——
+# scanner 用它判断索引里的旧结果是否还能复用，加了号升级后第一次扫描
+# 会自动重解析旧文件，用户不需要重新上传。
+# 取值用日期+序号，读起来就知道是哪天改的。
+#   2026-11-10.1  ODA/AutoCAD/Tesseract 跨盘符发现；.xls 双分支；
+#                 PDF 图形件 OCR 兜底；failed 不再被改写成 partial
+#   2026-11-10.2  图签栏全图兜底；Tesseract 中文 OCR 接管；
+#                 _get_ocr() 先 torch 后 paddleocr
+#   ⚠ 只要解析结果会变，就必须加号。有一轮我在改动中途跑自测，
+#     服务内存里还是旧解析器、却把 "2026-11-10.1" 写进了缓存 ——
+#     版本戳说"是最新的"，内容其实是旧的，比没有版本戳更误导。
+PARSER_VERSION = "2026-11-10.2"
+
 
 # v0.1.218 —— 备份范围：项目「有什么」和「备了什么」是两套口径
 #     现象：备份/恢复与删除前自动备份，都按 project_backup.BACKUP_ITEMS 这份

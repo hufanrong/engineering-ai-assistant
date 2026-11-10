@@ -265,6 +265,23 @@ def scan_status():
     }
 
 
+@app.post("/api/index/reparse")
+def index_reparse(dry_run: bool = True):
+    """统计/标记「解析器换代后还没重解析」的老文件（v0.1.227）。
+
+    dry_run=True（默认）只报数字；False 才把条目的 parser_version 抹掉，
+    下一次扫描/上传就会把这些文件重解析一遍。
+
+    为什么需要它：改好解析器 ≠ 老资料就能查到。判重条件原来是
+    status=="parsed"，于是 ODA 探测修好之后，25 张 DWG 在库里依旧是 0 字 ——
+    用户看到的是「修了跟没修一样」。这个接口把差距量化出来。
+    """
+    try:
+        return scanner.reparse_stale(dry_run=bool(dry_run))
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"统计失败：{e}"}
+
+
 @app.post("/api/index/reconcile")
 def index_reconcile(dry_run: bool = True):
     """用 parsed_cache 回填 index.json 缺失条目（v0.1.224）。
@@ -702,7 +719,14 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     # 现在每处理 5 个文件或超过 5 秒就 `merge_index_entries()` 合并一次：
     # 锁内「读最新 → 只写自己的键 → 写回」，既不会覆盖别人的新增，
     # 用户也能边传边看到文件进资料库。
-    seen = set(scanner._load_index().keys())   # 仅用于去重判断
+    # v0.1.227：去重只看「当前解析器版本解析过的」条目。
+    # 原来一句 `set(_load_index().keys())`，把「上次用坏掉的解析器解析的结果」
+    # 也算成已入库 —— 用户重新上传同一份 DWG 只会得到「已入库，自动跳过」，
+    # 永远刷不出正文。修好解析器之后必须让重传能真的重新解析。
+    _idx_now = scanner._load_index()
+    seen = {k for k, v in _idx_now.items()
+            if not isinstance(v, dict)
+            or v.get("parser_version") == scanner.PARSER_VERSION}
     pending = {}                               # 本批尚未落盘的条目
     n_flushed = 0
     last_flush = time.time()

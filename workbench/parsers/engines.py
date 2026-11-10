@@ -241,11 +241,18 @@ def _ocr_pdf_text(path: str, max_pages: int = 3, dpi: int = 150,
     global _OCR_PDF_DISABLED
     if _OCR_PDF_DISABLED:
         return "", _OCR_PDF_DISABLED
+    # v0.1.227：先看 Tesseract 能不能用（本机唯一稳定可用的引擎），
+    # 能用就完全不走 PaddleOCR —— 否则每份图形 PDF 都要先等 Paddle 崩一次。
+    _tess = (_find_external_tools().get("tesseract") or "")
+    ocr = None
     try:
         import tempfile
         import pymupdf as fitz
 
-        ocr = _get_ocr()
+        if _tess:
+            pass
+        else:
+            ocr = _get_ocr()
     except Exception as e:  # noqa: BLE001
         _OCR_PDF_DISABLED = f"OCR 引擎不可用：{type(e).__name__}: {e}"
         return "", _OCR_PDF_DISABLED
@@ -263,6 +270,13 @@ def _ocr_pdf_text(path: str, max_pages: int = 3, dpi: int = 150,
                 img = os.path.join(td, f"p{i}.png")
                 pix.save(img)
                 used += 1
+                if _tess:
+                    txt_i, _why = _ocr_png_with_tesseract(img)
+                    if txt_i:
+                        lines.extend([ln.strip() for ln in txt_i.splitlines() if ln.strip()])
+                        continue
+                    # Tesseract 这张没出字：不熔断，可能只是这一页空白
+                    continue
                 try:
                     result = ocr.ocr(img, cls=True)
                     for page in result or []:
@@ -291,7 +305,8 @@ def _ocr_pdf_text(path: str, max_pages: int = 3, dpi: int = 150,
                 doc.close()
             except Exception:  # noqa: BLE001
                 pass
-    note = (f"OCR 前 {used} 页，{len(lines)} 行，{time.time() - t0:.1f}s"
+    _eng_name = "tesseract" if _tess else "paddleocr"
+    note = (f"{_eng_name} OCR 前 {used} 页，{len(lines)} 行，{time.time() - t0:.1f}s"
             if not _OCR_PDF_DISABLED else _OCR_PDF_DISABLED)
     return "\n".join(lines), note
 
@@ -669,9 +684,103 @@ _ocr_engine = None
 _OCR_PDF_DISABLED = ""
 
 
+def _tessdata_dir():
+    """返回可用的 tessdata 目录（含中文字包），没有中文包就返回 ""。
+
+    为什么要在安装目录里放一份：Tesseract 的官方安装包默认只带 eng + osd，
+    中文图纸一个字都识别不出来，而装语言包要管理员权限写 Program Files ——
+    现场机器往往拿不到。所以随程序带一份 chi_sim（tessdata_fast 2.4MB），
+    放在 workbench/ocrdata/，通过 TESSDATA_PREFIX 指过去，免安装、免管理员。
+
+    Tesseract 要求**同一个目录**里放着所有要用的语种，所以首次使用时
+    把系统 tessdata 里的 eng/osd 复制过来（不随仓库分发，避免体积翻倍）。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))       # workbench/parsers
+    d = os.path.join(os.path.dirname(here), "ocrdata")      # workbench/ocrdata
+    if not os.path.isdir(d) or not os.path.isfile(os.path.join(d, "chi_sim.traineddata")):
+        return ""
+    sysdirs = []
+    tools = _find_external_tools()
+    tess = tools.get("tesseract") or ""
+    if tess:
+        sysdirs.append(os.path.join(os.path.dirname(tess), "tessdata"))
+    for s in sysdirs:
+        for fn in ("eng.traineddata", "osd.traineddata"):
+            dst = os.path.join(d, fn)
+            if os.path.isfile(os.path.join(s, fn)) and not os.path.isfile(dst):
+                try:
+                    import shutil as _sh
+                    _sh.copy2(os.path.join(s, fn), dst)
+                except Exception:  # noqa: BLE001
+                    pass
+    return d
+
+
+def _ocr_png_with_tesseract(png_path):
+    """用 Tesseract 识别一张图，返回 (文本, 说明)。不可用时返回 ("", 原因)。
+
+    为什么优先 Tesseract 而不是 PaddleOCR（2026-11-10 本机实测）：
+      PaddleOCR 3.7.0 + paddlepaddle 3.3.1 在这台机器上 predict 必崩：
+        NotImplementedError: ConvertPirAttribute2RuntimeAttribute not support
+        [pir::ArrayAttribute<pir::DoubleAttribute>] (onednn_instruction.cc:118)
+      试过 FLAGS_use_mkldnn=0 / FLAGS_enable_pir_api=0/1 三组组合，全部照样崩，
+      属 PaddlePaddle 3.3 的 oneDNN 后端缺陷，不是我们代码能修的。
+    Tesseract 5.4 同一台机器 1.7~2.7 秒/页，能出数字与部分中文 ——
+    对"图纸能不能被搜到"来说，有字远好过 0 字。
+      · 识别质量：工程图纸以尺寸数字/符号为主，Tesseract 对成段表格不如
+        PaddleOCR，但它至少能把图号、位号、尺寸值带进检索。
+    """
+    tools = _find_external_tools()
+    tess = tools.get("tesseract") or ""
+    if not tess:
+        return "", "未找到 Tesseract"
+    td = _tessdata_dir()
+    env = dict(os.environ)
+    lang = "eng"
+    if td:
+        env["TESSDATA_PREFIX"] = td
+        lang = "chi_sim+eng"
+    try:
+        import subprocess
+        r = subprocess.run(
+            [tess, png_path, "stdout", "-l", lang, "--psm", "11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, env=env)
+        txt = (r.stdout or "").strip()
+        if not txt:
+            return "", f"Tesseract 无输出（lang={lang}）"
+        # 质量闸门：工程图纸上 Tesseract 会吐出大量 "一一|"、"11"、"———" 这类
+        # 由线框/标注线引发的噪声。全部收进正文会把检索词表撑爆，也可能喂出
+        # 假设备位号。只保留「至少 2 个字母/数字/汉字」的行。
+        keep = []
+        for ln in txt.splitlines():
+            s = ln.strip()
+            if sum(1 for ch in s if ch.isalnum()) < 2:
+                continue
+            keep.append(s)
+        if not keep:
+            return "", f"Tesseract 只出噪声（lang={lang}）"
+        return "\n".join(keep), f"tesseract lang={lang}"
+    except Exception as e:  # noqa: BLE001
+        return "", f"Tesseract 失败：{type(e).__name__}: {e}"
+
+
 def _get_ocr():
     global _ocr_engine
     if _ocr_engine is None:
+        # v0.1.227：**先 import torch，再 import paddleocr**。
+        #
+        # paddlex 的导入链会走到 modelscope → torch。若 paddle 先加载、torch 后加载，
+        # torch/lib/shm.dll 会报 WinError 127「找不到指定的程序」——原因是两者各自
+        # 捆绑的 MKL/OpenMP DLL 冲突，后加载的那一方拿不到符号。
+        # 实测本机 venv：直接 `import paddleocr` 必崩；先 `import torch` 再导入
+        # paddleocr 则正常（torch 2.14.1 → paddleocr 导入 6.0s）。
+        # 这一步只解决"导不进来"；predict 的 oneDNN 崩溃见 _ocr_png_with_tesseract
+        # 的说明，那是 PaddlePaddle 自身的缺陷，靠 Tesseract 顶上。
+        try:
+            import torch  # noqa: F401
+        except Exception:  # noqa: BLE001
+            pass
         from paddleocr import PaddleOCR
         # v0.1.134：PaddleOCR 3.x 移除 use_angle_cls/show_log 参数（2.x 必需）；
         # 先按 3.x 构造，失败再按 2.x 构造，保证两版都可用
@@ -687,8 +796,24 @@ def _get_ocr():
 
 def parse_image(res: ParseResult):
     """图片 OCR：提取文本块（带置信度与位置）→ 铭牌结构化（位号/型号/参数/厂家）→ 全文。
-    支持 PaddleOCR 2.x（ocr.ocr）与 3.x（ocr.predict）。"""
+    支持 PaddleOCR 2.x（ocr.ocr）与 3.x（ocr.predict），Tesseract 作首选。
+    v0.1.227：优先 Tesseract（中文包随程序带，见 _tessdata_dir）—— 本机
+    PaddleOCR predict 必崩（oneDNN 缺陷），不加这条分支图片会一律 failed。"""
     res.parser = "ocr"
+    if _find_external_tools().get("tesseract"):
+        txt, why = _ocr_png_with_tesseract(res.file_path)
+        if txt:
+            res.text = txt
+            res.structure = {
+                "engine": why,
+                "line_count": len(txt.splitlines()),
+                "plate": {},
+                "is_plate": False,
+            }
+            return
+        res.status = "failed"
+        res.error = f"OCR 未取得文字：{why}"
+        return
     ocr = _get_ocr()
     lines = []
     blocks = []
@@ -921,35 +1046,59 @@ def _extract_title_block(labels, frame):
     zone = [lb for lb in labels
             if lb["x"] >= rx0 and lb["y"] >= ymin
             and lb["x"] <= xmax and lb["y"] <= ymax_limit]
-    if not zone:
-        return {}
+    # v0.1.227：区域为空**不再直接 return {}**，交给下面的全图兜底。
+    # 原来这一步就返回，等于"图框右下没东西 → 整张图的图签都不要了"，
+    # 而这恰恰是最常见的失败形态（模型空间并排多图 / 包围盒被拉远）。
     # 同一行按 y 聚拢，按 x 排序拼成行文本
-    rows = {}
-    for lb in zone:
-        key = round(lb["y"], 1)
-        rows.setdefault(key, []).append(lb)
-    row_texts = []
-    for key in sorted(rows.keys(), reverse=True):   # 从高到低（标题栏顶部行优先）
-        row_texts.append(" ".join(lb["text"] for lb in sorted(rows[key], key=lambda z: z["x"])))
+    def _rows_of(labels_):
+        rows_ = {}
+        for lb in labels_:
+            key = round(lb["y"], 1)
+            rows_.setdefault(key, []).append(lb)
+        return [
+            " ".join(lb["text"] for lb in sorted(rows_[k], key=lambda z: z["x"]))
+            for k in sorted(rows_.keys(), reverse=True)   # 从高到低（标题栏顶部行优先）
+        ]
 
-    out = {}
-    joined = "\n".join(row_texts)
-    for field, keys in _TITLE_KEYS:
-        if field in out:
-            continue
-        for k in keys:
-            # 独立键匹配："键 值" 或 "键:值"，键前必须是行首或分隔符（避免命中“1号车间”里的“车间”）
-            m = re.search(r"(?:^|[\s:：])({})[\s:：]*(.+)$".format(re.escape(k)), joined, re.M)
-            if not m:
+    def _match(lines_):
+        joined_ = "\n".join(lines_)
+        found = {}
+        for field, keys in _TITLE_KEYS:
+            if field in found:
                 continue
-            rest = m.group(2).strip()
-            if rest:
-                out[field] = rest
-                break
-    # 若整区无键词，取最大字体/首行作为图名候选
+            for k in keys:
+                # 独立键匹配："键 值" 或 "键:值"，键前必须是行首或分隔符（避免命中"1号车间"里的"车间"）
+                m = re.search(r"(?:^|[\s:：])({})[\s:：]*(.+)$".format(re.escape(k)), joined_, re.M)
+                if not m:
+                    continue
+                rest = m.group(2).strip()
+                if rest:
+                    found[field] = rest
+                    break
+        return found
+
+    out = _match(_rows_of(zone))
+    # v0.1.227：右下角区域没匹配到键词时，**再拿全图找一遍**。
+    #
+    # 原实现到此为止就 `return {}`（顶多给个"图名(候选)"），结果实测两张真实
+    # 布置图/流程图 DWG：正文能抽出 1300 / 26251 字，title_block 却是空的 ——
+    # 界面上"图号/图名/比例"整块是空白，看起来像图纸没解析。
+    #
+    # 原因不在抽取逻辑，在**几何范围假设**：取"图框右下 45%"要求模型空间只有
+    # 一张图。而现场图纸经常是模型空间里并排摆着几张图、或带大片空白/外部参照
+    # 残留，全局包围盒被拉到很远，右下角那一片其实什么都没有。
+    # 图签字段（"图号：XXX"）本身很独特，全图匹配比死守一块区域可靠得多。
+    if not out:
+        out = _match(_rows_of(labels))
+        if out:
+            out["_source"] = "全图匹配（图框右下区域无内容）"
+    # 若仍无键词，取最大字体/首行作为图名候选
     if not out and zone:
         zone_sorted = sorted(zone, key=lambda z: -z["y"])
         out["图名(候选)"] = zone_sorted[0]["text"]
+    if not out and labels:
+        out["图名(候选)"] = sorted(labels, key=lambda z: -z["y"])[0]["text"]
+        out["_source"] = "全图首行（未匹配到任何图签键词）"
     return out
 
 
@@ -1064,7 +1213,8 @@ def _find_external_tools():
     if not oda:
         try:
             r = subprocess.run(["where", "ODAFileConverter"], capture_output=True,
-                               text=True, timeout=10)
+                               text=True, encoding="utf-8", errors="replace",
+                               timeout=10)
             lines = [x.strip() for x in (r.stdout or "").splitlines() if x.strip()]
             if lines and os.path.isfile(lines[0]):
                 oda = lines[0]
@@ -1106,7 +1256,8 @@ def _find_external_tools():
         if not tess:
             try:
                 r2 = subprocess.run(["where", "tesseract"], capture_output=True,
-                                    text=True, timeout=10)
+                                    text=True, encoding="utf-8", errors="replace",
+                                    timeout=10)
                 lines = [x.strip() for x in (r2.stdout or "").splitlines() if x.strip()]
                 if lines and os.path.isfile(lines[0]):
                     tess = lines[0]

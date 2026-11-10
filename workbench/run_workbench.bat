@@ -4,8 +4,8 @@ title Fangong AI Workbench (foreground)
 setlocal enabledelayedexpansion
 
 rem ============================================================
-rem  v0.1.224 - start the workbench in THIS window (foreground,
-rem  logs visible, Ctrl+C stops it). Double-click entry point.
+rem  v0.1.224 / v0.1.227 - start the workbench in THIS window
+rem  (foreground, logs visible, Ctrl+C stops it). Double-click entry.
 rem
 rem  Two real defects fixed here, both hit on 2026-11-10:
 rem   1) The file was saved as UTF-8 WITH BOM. cmd then reads the
@@ -14,29 +14,19 @@ rem      floods the window with every command it runs. Verified:
 rem      with BOM -> "'?@echo' is not recognized ..."; without BOM
 rem      -> normal output.
 rem   2) It hard-required venv\Scripts\activate.bat. venv DOES exist
-rem      on this machine, so this was not the cause of the missing
-rem      workbench - but a fresh copy or a moved folder has no venv
-rem      and then this script just says 'run install.bat' and exits.
-rem      Now it probes the same python locations as open_or_start.bat
-rem      (venv -> .venv -> PATH -> LOCALAPPDATA -> bundled runtime)
-rem      so it degrades gracefully instead of dead-ending.
+rem      on this machine, so that was not the cause of the missing
+rem      workbench - but a fresh copy or a moved folder has no venv,
+rem      and then the old script just said "run install.bat" and
+rem      exited. Now it probes the same python locations as
+rem      open_or_start.bat (venv -> .venv -> PATH -> LOCALAPPDATA ->
+rem      bundled runtime) so it degrades gracefully instead of
+rem      dead-ending.
 rem
-rem ============================================================
-rem  v0.1.224 - start the workbench in THIS window (foreground,
-rem  logs visible, Ctrl+C stops it). Double-click entry point.
-rem
-rem  Two real defects fixed here, both hit on 2026-11-10:
-rem   1) The file was saved as UTF-8 WITH BOM. cmd then reads the
-rem      first line as "?@echo off", never enables echo-off, and
-rem      floods the window with every command it runs. Verified:
-rem      with BOM -> "'?@echo' is not recognized ..."; without BOM
-rem      -> normal output.
-rem   2) It required venv\Scripts\activate.bat. On this machine
-rem      there is NO venv, so double-clicking simply printed
-rem      "[hint] dependencies not installed, run install.bat" and
-rem      exited - the user could never open the workbench. Now it
-rem      probes the same python locations as open_or_start.bat and
-rem      falls back to the system interpreter.
+rem  v0.1.227 note: the interpreter picked here is the one the loop
+rem  must also use for self-testing (wb_loop._runtime_python follows
+rem  the same order). Testing with a different python than the user
+rem  runs is how ".xls works in the test, skipped in production"
+rem  happened.
 rem
 rem  Keep all `rem` comments ASCII. Chinese appears only inside
 rem  `echo` lines (renders fine under chcp 65001, verified).

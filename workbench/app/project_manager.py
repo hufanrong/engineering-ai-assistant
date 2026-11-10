@@ -12,6 +12,7 @@ import json
 import uuid
 import datetime
 import shutil
+import time
 from typing import Optional, List, Dict
 
 
@@ -362,6 +363,51 @@ def ensure_current_project() -> Dict:
             "message": f"当前项目指针缺失，已自动恢复为「{succ.get('name', '')}」"}
 
 
+def _safe_rmtree(path: str, retries: int = 3, delay: float = 0.5) -> tuple:
+    """删除整个目录，**永不向外抛异常**，返回 (成功?, 失败原因)。
+
+    为什么不是一句 shutil.rmtree(path)：
+
+      ① Windows 上的常态卡点。项目目录里有 chroma.sqlite3（向量库）、
+         upload_queue、parsed_cache —— 只要有线程还开着这些文件句柄，
+         rmtree 就抛 PermissionError [WinError 32]「另一个程序正在使用此文件」。
+         Windows 没有 unlink-on-open，唯一可行的做法是**等一会儿再试**。
+
+      ② 更致命的是 BaseException。SystemExit / KeyboardInterrupt 不是
+         Exception 的子类，`except Exception` 拦不住；它一旦从 FastAPI 的
+         请求处理函数里逃出去，uvicorn 主进程会直接结束。
+         实测 2026-11-10 09:22：删一个 59 文件的测试项目，sitecustomize 的
+         批量删除护栏抛 SystemExit(1) → 整个工作台当场退出 →
+         往后整轮自测全部级联失败，报告上看起来是「十几个功能同时坏了」，
+         真实原因只是删了一次项目。
+
+    所以这里把所有 BaseException 都收成 (False, 原因) —— 删除是用户主动发起、
+    可重试的操作，绝不该具备「结束服务」的能力。
+    """
+    if not os.path.exists(path):
+        return True, ""
+    last = ""
+    for i in range(max(1, retries)):
+        try:
+            shutil.rmtree(path)
+            return True, ""
+        except BaseException as e:  # noqa: BLE001 —— 有意连 SystemExit 一起收
+            last = f"{type(e).__name__}: {e}"
+            # 部分删成功的场景：目录还在就继续重试，删干净了就算成功
+            if not os.path.exists(path):
+                return True, ""
+            if i < retries - 1:
+                time.sleep(delay * (i + 1))
+    # 最后一次兜底：能删多少算多少，并把「还剩什么」说清楚，方便现场判断
+    leftover = ""
+    try:
+        names = sorted(os.listdir(path))[:6]
+        leftover = f"；残留 {len(os.listdir(path))} 项：{names}"
+    except Exception:  # noqa: BLE001
+        pass
+    return False, f"{last}{leftover}"
+
+
 def delete_project(project_id: str, force: bool = False, backup: bool = True,
                    delete_data: bool = True) -> Dict:
     """
@@ -431,8 +477,33 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
             pass
 
     # 删除项目目录
-    if os.path.exists(project_dir):
-        shutil.rmtree(project_dir)
+    _rm_ok, _rm_err = _safe_rmtree(project_dir)
+    if not _rm_ok:
+        # v0.1.227：删不掉就**不要继续往下走**，更不能假装删成功。
+        #
+        # 原实现是一句裸的 shutil.rmtree()：
+        #   ① Windows 上 vector_db/chroma.sqlite3、upload_queue 里的文件常被
+        #      正在写入的线程占着，抛 PermissionError(WinError 32) ——
+        #      异常冒到 FastAPI 变 500，而目录已经删了一半，项目变成残骸；
+        #   ② 更糟的是 BaseException 类（SystemExit / KeyboardInterrupt）
+        #      不会被 except Exception 拦住，会**把 uvicorn 主进程直接结束**。
+        #      实测 2026-11-10 09:22：删一个 59 文件的测试项目，
+        #      sitecustomize 的批量删除护栏抛 SystemExit(1)，
+        #      整个工作台进程当场退出，后面整轮自测全部级联失败 ——
+        #      界面上看起来是「一堆功能同时坏了」，真实原因只是删了一次项目。
+        # 现场意义：客户点「删除项目」，工作台不能跟着消失。
+        result = {
+            "ok": False,
+            "error": f"项目资料删除失败：{_rm_err}。项目未完全删除，"
+                     f"请关闭占用该目录的程序后重试"
+                     + ("（删除前备份已生成，可恢复）" if (backup_result or {}).get("ok") else ""),
+            "deleted_id": project_id,
+            "data_deleted": False,
+            "partial_delete": True,
+        }
+        _op_log.log_op("delete_failed",
+                       f"删除项目失败：{project['name']}（id={project_id}）：{_rm_err}")
+        return result
 
     result = {
         "ok": True,
