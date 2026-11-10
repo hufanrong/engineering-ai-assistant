@@ -158,11 +158,18 @@
       "out": "severity=major status=fixed",
       "err": "",
       "fix": "改为比对 refs/stash 是否变化来判定真的建了 stash；并实测确认 ':(exclude)reports' pathspec 被 git 接受（输出 No local changes to save）"
+    },
+    {
+      "step": "[OP-06][待决策] install.bat / install-full.bat / install_optional.bat / run_workbench.bat 仍是 UTF-8 BOM + 大量中文，双击存在同样的失效风险",
+      "rc": 1,
+      "out": "severity=major status=open",
+      "err": "待上游处理",
+      "fix": "按 open_or_start.bat 的做法统一处理：去 BOM、注释改 ASCII、中文只放 echo 内、末尾 pause。本次已修 run_loop.bat 与 open_or_start.bat，其余 4 个未动。"
     }
   ],
   "summary": {
     "passed": 17,
-    "failed": 5,
+    "failed": 6,
     "skipped": 0,
     "by_phase": {}
   },
