@@ -1,0 +1,84 @@
+{
+  "run_id": "20261110_105123",
+  "started": "2026-11-10 10:51:23",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "7524ffc777d04e77c86c5b2d0bb6ad39ba7f5bc4",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 33, \"failed\": 10, \"skipped\": 1, \"by_phase\": {\"1\": {\"passed\": 8, \"failed\": 4, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 7, \"failed\": 6, \"skipped\": 1}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}}}",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=135 parse_failed=25 -> telemetry_bundle.json"
+    },
+    {
+      "step": "专项回归套件",
+      "rc": 0,
+      "out": "P20/F0/T20 -> suites.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1 P33/F10/S1 suites_fail=0"
+    }
+  ],
+  "summary": {
+    "passed": 33,
+    "failed": 10,
+    "skipped": 1,
+    "by_phase": {
+      "1": {
+        "passed": 8,
+        "failed": 4,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 7,
+        "failed": 6,
+        "skipped": 1
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "7524ffc777d04e77c86c5b2d0bb6ad39ba7f5bc4",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-10 10:57:20",
+  "commit_before": "7524ffc777d04e77c86c5b2d0bb6ad39ba7f5bc4",
+  "commit_after": "7524ffc777d04e77c86c5b2d0bb6ad39ba7f5bc4"
+}
