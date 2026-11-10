@@ -1,0 +1,81 @@
+{
+  "run_id": "20261110_085217",
+  "started": "2026-11-10 08:52:17",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "aec4082fb47ad88033a2c2ee98810eec30819ed1",
+      "err": ""
+    },
+    {
+      "step": "跳过拉取",
+      "rc": 0,
+      "out": "--no-pull"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 54, \"failed\": 13, \"skipped\": 2, \"by_phase\": {\"1\": {\"passed\": 4, \"failed\": 3, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 7, \"failed\": 6, \"skipped\": 1}, \"4\": {\"passed\": 3, \"failed\": 3, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"pa",
+      "err": "Traceback (most recent call last):\n  File \"D:\\fangong-workbench\\workbench\\tools\\selftest.py\", line 2034, in main\n    {1: phase1, 2: phase2, 3: phase3, 4: phase4,\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n     5: phase5, 6: phase6}[ph](sdir)\n     ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File \"D:\\fang"
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 1,
+      "out": "HTTPError: HTTP Error 502: Bad Gateway"
+    },
+    {
+      "step": "专项回归套件",
+      "rc": 1,
+      "out": "P18/F2/T20 -> suites.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1 P54/F13/S2 suites_fail=2"
+    }
+  ],
+  "summary": {
+    "passed": 54,
+    "failed": 13,
+    "skipped": 2,
+    "by_phase": {
+      "1": {
+        "passed": 4,
+        "failed": 3,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 7,
+        "failed": 6,
+        "skipped": 1
+      },
+      "4": {
+        "passed": 3,
+        "failed": 3,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 22,
+        "failed": 1,
+        "skipped": 1
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "aec4082fb47ad88033a2c2ee98810eec30819ed1",
+  "finished": "2026-11-10 09:05:23",
+  "commit_before": "aec4082fb47ad88033a2c2ee98810eec30819ed1",
+  "commit_after": "aec4082fb47ad88033a2c2ee98810eec30819ed1"
+}

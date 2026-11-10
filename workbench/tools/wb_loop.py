@@ -801,9 +801,25 @@ def one_round(args):
             rec["steps"].append({"step": "服务不可用，转进程内模式", "rc": 0,
                                  "out": f"原因：{msg}"})
     if not service_alive():
-        inproc = True
-        rec["steps"].append({"step": "进程内自测", "rc": 0,
-                             "out": "服务不在线，用 FastAPI TestClient 跑真实路由"})
+        # v0.1.225：**服务没在线就不要降级跑自测**。
+        #
+        # 实测 2026-11-10 09:05 轮次（--no-restart，服务已被上一轮的清理连带杀掉）：
+        # 代码自动转「进程内模式」继续跑，结果 phase1 扫描返回 {}、资料库条目 0，
+        # phase3 全线「无设备数据」，phase4 清稿必然超时 —— 报告写着
+        # 54 通过 / 13 失败，读报告的人会以为业务代码坏了，实际只是服务没起来。
+        # 现场意义：老板看到的是一屏红色，真实结论是「工作台没开」。
+        # 改为：先补启一次；还起不来就判 error 并只留一句话，绝不把
+        # 「服务未就绪」伪装成 13 个功能缺陷。（进程内模式仍保留给沙箱/CI，
+        # 由 --inproc-mode 显式要求，不再在真机循环里自动启用。）
+        rec["steps"].append({"step": "服务健康检查", "rc": 1,
+                             "out": "服务未监听，尝试再拉起一次"})
+        ok2, msg2 = start_service()
+        rec["steps"].append({"step": "补启动服务", "rc": 0 if ok2 else 1, "out": msg2})
+        if not ok2 or not service_alive():
+            finish("error",
+                   error="服务未就绪：本轮未执行自测（避免把「工作台没开」"
+                         "误报成一堆功能缺陷）。请先双击 open_or_start.bat。")
+            return "error"
 
     rc, report, serr = run_selftest(args.phases, out_dir, inproc=inproc)
     summary = {}
