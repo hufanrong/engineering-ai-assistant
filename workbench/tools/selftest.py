@@ -66,6 +66,25 @@ AUDIT_SNAPSHOT = {}
 SELFTEST_TOKENS = []
 _AUDIT_AFTER = {}     # 清理之后的新快照；finally 里写，用于「流水未污染」断言
 
+# v0.1.224：数据集（老板 2026-11-10 明确要求）：
+#   「清掉自测项目残留，以后测试都用马诺诺项目资料」
+# 造出来的样本（P-101 / 1号车间 / 离心泵）只能证明代码能跑，证明不了
+# **这套东西放在真实工程资料上能不能用** —— 现场资料是 41 张 CAD、
+# 3 个「假 xls」箱单、一个 70 行的斗提机装箱表，样本里一个都没有。
+# 所以默认改成 real：直接扫用户当前项目的真实 uploads 目录，
+# 车间/设备位号/检索词全部从真实数据里发现，不再写死。
+# 没有真实数据（空项目）时才回落 sample，并在报告里明确标出来。
+DS = {
+    "mode": "sample",
+    "dir": "",                 # 待扫描目录
+    "project": "",             # 真实项目名（real 模式）
+    "workshop": "1号车间",
+    "tag": "P-101",
+    "name": "离心泵",
+    "query": "1号车间 离心泵 P-101",
+    "file_count": 0,
+}
+
 
 # ---------------- 后端选择：进程内 TestClient / 真实 HTTP ----------------
 _INPROC = None
@@ -528,6 +547,80 @@ def _make_dwg(folder):
     return out
 
 
+# ---------------- 真实工程资料：从当前项目里发现测试基准 ----------------
+def discover_real_dataset():
+    """从「用户当前项目」的真实资料里发现测试基准（车间 / 设备 / 检索词）。
+
+    返回 (ok, info)。ok=False 表示没有可用的真实资料（空项目 / 服务不可达），
+    调用方应回落到 sample 并在报告里标明 —— 不能假装跑过真实数据。
+
+    逐个字段都是「查出来的」而不是猜的：
+      workshops   → 选「既有资料又有设备」的车间（docgen/监理模板都需要车间）
+      equipment   → 台账里的真实设备名（马诺诺台账多数没有位号，位号可能为空）
+      query       → 用车间名检索，保证命中>0（车间名同时出现在文件名和正文里）
+    """
+    code, cur, err = call("GET", "/api/projects/current")
+    if code != 200:
+        return False, f"当前项目不可读：{code} {err}"
+    proj = (cur or {}).get("project") or (cur or {}).get("current") or {}
+    pid = proj.get("id") or ""
+    pname = proj.get("name") or ""
+    if not pid:
+        return False, "没有当前项目"
+
+    # 真实文件目录：项目自己的 uploads 优先，其次全局 data/uploads
+    cand = []
+    try:
+        _, st, _ = call("GET", "/api/status")
+        ddir = (st or {}).get("data_dir") or ""
+        if ddir:
+            cand.append(os.path.join(ddir, "uploads"))
+            cand.append(os.path.join(ddir, "projects", pid, "uploads"))
+    except Exception:  # noqa: BLE001
+        pass
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cand.append(os.path.join(here, "data", "uploads"))
+    cand.append(os.path.join(here, "data", "projects", pid, "uploads"))
+    real_dir = ""
+    for d in cand:
+        if d and os.path.isdir(d) and any(not f.startswith(".") for f in os.listdir(d)):
+            real_dir = d
+            break
+    if not real_dir:
+        return False, f"项目 {pname or pid} 没有落盘的资料文件"
+
+    _, wsl, _ = call("GET", "/api/workshops")
+    ws = (wsl or {}).get("workshops") or []
+    named = [w for w in ws if w.get("name") and "未归" not in str(w.get("name"))]
+    both = [w for w in named if w.get("file_count", 0) > 0 and w.get("device_count", 0) > 0]
+    pool = both or sorted(named, key=lambda w: w.get("file_count", 0), reverse=True)
+    workshop = pool[0].get("name") if pool else ""
+    if not workshop:
+        docgen = (wsl or {}).get("docgen_workshops") or []
+        workshop = docgen[0] if docgen else ""
+
+    tag, name = "", ""
+    _, eqd, _ = call("GET", "/api/supervision-templates/equipment")
+    items = (eqd or {}).get("equipment") or []
+    for it in items:
+        if it.get("name"):
+            name = it["name"]
+            tag = it.get("tag") or ""
+            break
+
+    ds = {
+        "mode": "real",
+        "dir": real_dir,
+        "project": pname or pid,
+        "workshop": workshop or "未归车间",
+        "tag": tag,
+        "name": name or "设备",
+        "query": workshop or (name or "图纸"),
+        "file_count": len([f for f in os.listdir(real_dir) if not f.startswith(".")]),
+    }
+    return True, ds
+
+
 # ---------------- 阶段 1：解析 / 分类 / 资料库 ----------------
 def phase1(samples_dir):
     P = 1
@@ -632,14 +725,28 @@ def phase1(samples_dir):
            f"识别车间 {[w.get('name') for w in named]}；已归类文件 {assigned}",
            len(named) >= 1 and assigned >= 1, err)
 
-    # 检索
-    code, sr, err = call("POST", "/api/search", {"query": "1号车间 离心泵 P-101", "top_k": 5})
+    # 检索（v0.1.224：检索词从真实资料发现，不再写死「1号车间 离心泵 P-101」）
+    code, sr, err = call("POST", "/api/search", {"query": DS["query"], "top_k": 5})
     hits = (sr or {}).get("results") or []
-    record(P, "资料库检索", "200 且命中>0", f"{code} hits={len(hits)} mode={(sr or {}).get('retrieval')}",
+    record(P, "资料库检索", "200 且命中>0",
+           f"{code} query={DS['query'][:20]} hits={len(hits)} mode={(sr or {}).get('retrieval')}",
            code == 200 and len(hits) > 0, err)
-    record(P, "检索模式声明", "vector 或 keyword", (sr or {}).get("retrieval"),
-           (sr or {}).get("retrieval") in ("vector", "keyword"),
+    record(P, "检索模式声明", "vector / keyword / vector+keyword（精确编号混合检索）",
+           (sr or {}).get("retrieval"),
+           (sr or {}).get("retrieval") in ("vector", "keyword", "vector+keyword"),
            f"vector_error={(sr or {}).get('vector_error')}")
+
+    # v0.1.224：索引与解析缓存必须对得上。
+    # 实测 2026-11-10 真实项目：parsed_cache 57 份解析结果，index.json 只有 43 条 ——
+    # 14 个文件解析成功却在资料库里不存在，界面一个字都不报。
+    # 这里每次自测都用 /api/index/reconcile 的 dry_run 验一遍差额，为 0 才算过。
+    code, rec, err = call("POST", "/api/index/reconcile?dry_run=true", {})
+    need = (rec or {}).get("added")
+    record(P, "索引与解析缓存一致", "缺失条目 added=0",
+           f"{code} index={((rec or {}).get('index_files'))} "
+           f"cache={((rec or {}).get('cache_files'))} 待补={need} "
+           f"孤儿文件={((rec or {}).get('orphan_uploads'))}",
+           code == 200 and need == 0, err)
     for h in hits[:3]:
         m = h.get("meta") or {}
         print(f"      命中：{m.get('file_name')} 匹配 {m.get('matched_terms')}/{m.get('total_terms')} "
@@ -680,11 +787,11 @@ def phase2(samples_dir):
         print(f"      类型样例：{[t.get('name') or t.get('type') or t for t in sample]}")
         first = sample[0].get("key") or sample[0].get("type") or sample[0].get("name")
 
-        code, pre, err = call("POST", "/api/docgen/prefill", {"doc_type": first, "workshop": "1号车间"})
+        code, pre, err = call("POST", "/api/docgen/prefill", {"doc_type": first, "workshop": DS["workshop"]})
         record(P, "模板预填", "200", f"{code} {str(pre)[:80]}", code == 200, err)
 
         code, gen, err = call("POST", "/api/docgen/generate",
-                              {"doc_type": first, "data": {"车间": "1号车间"}})
+                              {"doc_type": first, "data": {"车间": DS["workshop"]}})
         ok = code == 200 and not (isinstance(gen, dict) and gen.get("ok") is False)
         record(P, "单据生成", "200 且生成成功", f"{code} {str(gen)[:120]}", ok, err)
 
@@ -699,8 +806,8 @@ def phase2(samples_dir):
 
     # 批量生成（两步：模糊输入先拿候选，再用明确表类型生成）
     code, bg0, err = call("POST", "/api/supervision-templates/generate-batch",
-                          {"category": "仪表", "workshop": "1号车间",
-                           "equipment": [{"位号": "P-101", "名称": "离心泵"}]})
+                          {"category": "仪表", "workshop": DS["workshop"],
+                           "equipment": [{"位号": DS["tag"], "名称": DS["name"]}]})
     _b0 = bg0 or {}
     ambiguous_ok = (code == 200 and _b0.get("ok") is False
                     and (_b0.get("ambiguous") or bool(_b0.get("candidates") or _b0.get("error"))))
@@ -710,8 +817,8 @@ def phase2(samples_dir):
 
     _cat = (_b0.get("candidates") or ["变压器安装施工记录"])[0]
     code, bg, err = call("POST", "/api/supervision-templates/generate-batch",
-                         {"category": _cat, "workshop": "1号车间",
-                          "equipment": [{"位号": "P-101", "名称": "离心泵"}]})
+                         {"category": _cat, "workshop": DS["workshop"],
+                          "equipment": [{"位号": DS["tag"], "名称": DS["name"]}]})
     _b = bg or {}
     # v0.1.167：不能只看 200 —— 找不到模板时旧实现返回 ok=False 也算通过（空洞 PASS）。
     _produced = bool(_b.get("ok")) and bool(_b.get("output_file") or _b.get("file") or _b.get("files"))
@@ -857,7 +964,7 @@ def phase3(samples_dir):
            _reg_ok, err)
 
     code, vol, err = call("POST", "/api/supervision/volume",
-                          {"project_id": TEST_PROJECT_ID, "book": "第一册", "workshop": "1号车间"})
+                          {"project_id": TEST_PROJECT_ID, "book": "第一册", "workshop": DS["workshop"]})
     vr = (vol or {}).get("result") or (vol or {})
     generated = vr.get("generated") or []
     todo = vr.get("todo") or []
@@ -1803,6 +1910,9 @@ def main():
     ap.add_argument("--phase", default="all",
                     help="1/2/3/4/5/6/all（可逗号分隔，如 1,2）")
     ap.add_argument("--keep-samples", action="store_true", help="保留样本目录")
+    ap.add_argument("--dataset", choices=["real", "sample"], default="real",
+                    help="real=用当前项目的真实工程资料（默认，老板 2026-11-10 定的）；"
+                         "sample=用脚本造的样本。real 模式下没找到真实资料会自动回落 sample")
     ap.add_argument("--base", default=None, help="工作台地址，默认 127.0.0.1:8756")
     ap.add_argument("--inproc", metavar="WORKBENCH_DIR", default=None,
                     help="进程内模式：直接加载本地 workbench 代码跑真实路由（无需启动服务，沙箱/CI 用）")
@@ -1854,6 +1964,31 @@ def main():
     # v0.1.212：暴露给 phase6 —— 它必须切回用户原项目校验，
     # 否则全量自测时它验的是临时自测项目（详见 phase6 里的说明）。
     global _ORIGIN_PID, _ORIGIN_HAD_PROJECT
+    #
+    # v0.1.224：**还原目标本身不能是测试项目**。
+    # 实测 2026-11-10：上一轮自测收尾删测试项目被环境拦下，cb637fa5 留在
+    # 项目列表里而且成了「当前项目」；下一轮自测就把 cb637fa5 当成
+    # 「用户原项目」，跑完再切回它 —— 于是用户第二天打开繁工AI，
+    # 看到的是一个 60 文件的自测项目，自己那份 62 个文件的马诺诺不见了。
+    # 这正是 v0.1.195 想修的那个事故，只是换了一条路径复现。
+    # 规则：原项目名以「自测/实测」开头 → 不算，改取最近更新的真实项目。
+    if _origin_pid:
+        try:
+            _, _pl, _ = call("GET", "/api/projects")
+            _items = (_pl or {}).get("projects") or []
+            _cur = next((p for p in _items if p.get("id") == _origin_pid), {})
+            _nm = str(_cur.get("name") or "")
+            if _nm.startswith("自测") or _nm.startswith("实测"):
+                _real = [p for p in _items
+                         if not str(p.get("name") or "").startswith(("自测", "实测"))]
+                _real.sort(key=lambda p: str(p.get("updated_at") or ""), reverse=True)
+                if _real:
+                    print(f"[还原] 当前项目是测试残留「{_nm}」，"
+                          f"改用最近的真实项目「{_real[0].get('name')}」")
+                    _origin_pid = _real[0].get("id") or ""
+        except Exception:  # noqa: BLE001
+            pass
+
     _ORIGIN_PID = _origin_pid
     # v0.1.224：全新安装时 data/ 里没有任何项目，_origin_pid 本来就是空。
     # 这是**正常的初始状态**，不是「切不回去」。所以这里同时记下开跑前是否
@@ -1868,9 +2003,23 @@ def main():
           f"当前项目={_origin_pid or '无'}")
 
 
-    print(f"造样本 -> {sdir}")
-    build_samples(sdir, include_dwg=True)
-
+    # v0.1.224：数据集选择。real = 直接扫用户真实工程资料（默认）。
+    if a.dataset == "real":
+        ok_real, info = discover_real_dataset()
+        if ok_real:
+            DS.update(info)
+            sdir = DS["dir"]
+            print(f"[数据集] 真实工程资料：{DS['project']} / {DS['file_count']} 个文件")
+            print(f"         目录 {sdir}")
+            print(f"         基准 车间={DS['workshop']} 设备={DS['name']}(位号 {DS['tag'] or '无'}) "
+                  f"检索词={DS['query']}")
+        else:
+            print(f"[数据集] 真实资料不可用（{info}）→ 回落到内置样本")
+            DS["mode"] = "sample-fallback"
+            build_samples(sdir, include_dwg=True)
+    else:
+        print(f"造样本 -> {sdir}")
+        build_samples(sdir, include_dwg=True)
     phases = a.phase
     if phases == "all":
         # v0.1.210：加阶段 6（同一事实交叉比对）。它只读、不建样本、
@@ -1952,7 +2101,11 @@ def main():
 
     fails = write_report(os.path.join(here, "selftest_report.json"),
                          os.path.join(here, "selftest_report.md"), sdir)
-    if not a.keep_samples:
+    # v0.1.224：real 模式下 sdir 是**用户的真实 uploads 目录**，
+    # 绝对不能删 —— 这里原来无条件 rmtree，一旦 real 模式跑通就等于
+    # 把现场资料整个删掉。只删脚本自己造的样本目录。
+    if not a.keep_samples and DS.get("mode") != "real" \
+            and os.path.abspath(sdir).startswith(os.path.abspath(here)):
         shutil.rmtree(sdir, ignore_errors=True)
     sys.exit(0 if fails == 0 else 1)
 

@@ -841,15 +841,31 @@ def one_round(args):
         json.dump(collect_env(), f, ensure_ascii=False, indent=2)
 
     # ---- 4. 回传（写盘、提交、记账都在 finish 里按正确顺序做完）
-    # v0.1.224：专项套件有失败时本轮不得判 passed —— 否则「selftest 全绿」
-    # 会盖住整卷不覆盖、备份丢文件这类真实功能缺陷。
-    status = "passed" if (rc == 0 and summary.get("failed", 1) == 0
-                          and s_fail == 0) else "failed"
+    # v0.1.225：状态判定合并两侧口径 ——
+    #   ① 远端（v0.1.224）：专项套件 s_fail>0 时本轮不得判 passed，
+    #      否则「selftest 全绿」会盖住整卷不覆盖、备份丢文件这类真实功能缺陷；
+    #   ② 本地（实测 2026-11-10 07:19 全阶段 P74/F0/S2）：不能拿 selftest
+    #      退出码判死 —— 那轮的 rc=1 只因为收尾清理测试项目被本机安全删除策略
+    #      拦下（count:55 > threshold:50），业务断言全过（含 AutoCAD 阶段 4：
+    #      原图 MD5 未变、成果 PDF 5136B），报告里却连轮判 failed，
+    #      看的人以为系统坏了。
+    # 合起来：没拿到报告=error；有失败断言或专项套件失败=failed；否则 passed；
+    # 断言全过但 rc≠0 → passed，同时把 rc 与可能原因写进报告，不隐瞒。
     if not report:
         status = "error"
+    elif summary.get("failed", 1) != 0 or s_fail:
+        status = "failed"
+    else:
+        status = "passed"
+    if status == "passed" and rc != 0:
+        rec["steps"].append({
+            "step": "注意", "rc": rc,
+            "out": f"断言全过但 selftest 退出码={rc}（多为收尾清理被拦："
+                   f"安全删除阈值/文件占用），已判 passed，需人工看 console.log"})
     rec["steps"].append({"step": "判定", "rc": 0,
-                         "out": f"status={status} rc={rc}"})
-
+                         "out": f"status={status} rc={rc} "
+                                f"P{summary.get('passed', 0)}/F{summary.get('failed', 0)}"
+                                f"/S{summary.get('skipped', 0)} suites_fail={s_fail}"})
     finish(status, summary, error=rec.get("error", ""))
     return status
 

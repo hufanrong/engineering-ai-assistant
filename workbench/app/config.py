@@ -37,6 +37,11 @@ PARSE_WORD = True           # Word (.docx) 文本+表格提取
 PARSE_EXCEL = True          # Excel (.xlsx) 表格结构化（台账核心）
 PARSE_TEXT = True           # txt/csv/md 等纯文本
 PARSE_IMAGE = False         # 图片 OCR（需安装 PaddleOCR，见 requirements-ocr.txt）
+# v0.1.224：PDF 无文本层时是否用 OCR 兜底（默认开）。
+# 与 PARSE_IMAGE 分开：那个开关管「用户直接传 jpg/png」，
+# 这里管「PDF 里根本没有文字层」（CAD 直接打印的图形 PDF）。
+# 现场实测：马诺诺 30 份 PDF 里 16 份是这种，原文一个字都提不出来。
+PDF_OCR_FALLBACK = True
 PARSE_CAD = False           # CAD 图纸（需安装 ezdxf；DWG 需 ODA File Converter）
 PARSE_PROJECT = True        # Project 计划（支持 .xml 格式；.mpp 请先用 MS Project 另存为 .xml）
 
@@ -44,6 +49,12 @@ PARSE_PROJECT = True        # Project 计划（支持 .xml 格式；.mpp 请先�
 EXT_PDF = [".pdf"]
 EXT_WORD = [".docx"]
 EXT_EXCEL = [".xlsx", ".xlsm"]
+# v0.1.224：.xls（Excel 97-2003）单独列出，不复用 EXT_EXCEL ——
+# 凡是拿 EXT_EXCEL 判断「能用 openpyxl 读」的地方都不该被 .xls 命中。
+# 解析分派在 parsers/engines.py::_pick_parser 里显式走 parse_xls（xlrd）。
+# 现场实测：马诺诺项目一批 62 个文件里 3 个 .xls（斗提机表、两家箱单）
+# 上传后彻底消失，就是因为这里不认。
+EXT_EXCEL_LEGACY = [".xls"]
 EXT_TEXT = [".txt", ".csv", ".md", ".log", ".json"]
 EXT_IMAGE = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"]
 EXT_CAD = [".dwg", ".dxf"]
@@ -681,7 +692,21 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #   ③ relations._merge_index_devices 只在「从台账新增了设备」的分支写
 #      stats["devices"]，空项目/纯图纸项目直接 return → stats.devices 是 None
 #      而 devices 列表是 []，同一事实两个答案。改为出口处无条件写实际条数。
-APP_VERSION = "0.1.224"
+# v0.1.225：用马诺诺真实资料（65 个文件 / 62 个唯一内容，工位实测全天）
+#           跑出来的 4 个问题（与 v0.1.224 的专项套件改动互不冲突）
+#   ① 批次上传**整批末尾才写一次索引**：一次几十个大 DWG/PDF 要跑几分钟，
+#      这期间任何别的写入都会被末尾那次「旧快照整份覆盖」。实测同一天里
+#      index.json 从 51 条掉到 43 条，parsed_cache 有 57 份解析结果 ——
+#      14 个文件在资料库里凭空消失，界面一个字都不报。
+#      改为每 5 个文件/5 秒 `scanner.merge_index_entries()` 锁内合并。
+#   ② 缓存与索引没有对账机制：丢掉的条目没人补回来。
+#      新增 `scanner.reconcile_index()` + `/api/index/reconcile`。
+#   ③ .xls（Excel 97-2003）不在支持列表：现场 3 个箱单/斗提机表全被判 skipped，
+#      查不到内容。新增 `parse_xls`（xlrd + HTML 表格双分支，国内系统导出的
+#      「假 xls」其实是 HTML）。
+#   ④ .rar/.zip 压缩包被跳过时提示不明确：用户传了 5MB 图纸包，只看到「跳过」。
+
+APP_VERSION = "0.1.225"
 
 # v0.1.218 —— 备份范围：项目「有什么」和「备了什么」是两套口径
 #     现象：备份/恢复与删除前自动备份，都按 project_backup.BACKUP_ITEMS 这份

@@ -5,6 +5,7 @@
 from . import atomic_io as _atomic_io
 import os
 import json
+import re
 import threading
 import time
 from typing import Union, List
@@ -264,6 +265,24 @@ def scan_status():
     }
 
 
+@app.post("/api/index/reconcile")
+def index_reconcile(dry_run: bool = True):
+    """用 parsed_cache 回填 index.json 缺失条目（v0.1.224）。
+
+    dry_run 默认 True：只报「差多少」，不改盘 —— 自查用。
+    dry_run=False 才真正补写（补写走 merge_index_entries，锁内合并，
+    不会覆盖这两个动作之间别人新增的条目）。
+
+    为什么需要这个接口：实测 2026-11-10 项目 0c9a4b2d，parsed_cache 36 份
+    解析结果、index.json 只有 5 条，31 个文件在资料库里不存在而界面不报错。
+    修复写入路径（v0.1.224 增量合并）只能防今后，已经丢掉的必须靠它对账补回。
+    """
+    try:
+        return scanner.reconcile_index(dry_run=bool(dry_run))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"索引对账失败：{e}")
+
+
 @app.post("/api/scan/cancel")
 def cancel_scan():
     ce = SCAN_STATUS.get("cancel")
@@ -423,6 +442,25 @@ class SearchReq(BaseModel):
     platform: bool = False   # 同时检索平台级规范库（v0.1.10）
 
 
+# v0.1.224：单证号/订单号/箱号这类「精确编号」必须能被检索到。
+#
+# 实测（2026-11-10，马诺诺真实资料 62 个文件 / 941 个向量）：
+#   用户最常查的是「MNN-HN-179 这票货在哪份箱单里」，而向量检索按语义相近排序，
+#   编号这种低频 token 在 hundreds of chunks 里排不进前 3：
+#     查 "MNN-HN-179" → 返回 熟料磨风机箱单.pdf(0.372) / 熟料磨箱单.pdf(0.38)
+#     真正含 MNN-HN-179 的 熟料粉末斗提机.xls **一条都没进前 3**。
+#   同一个库，关键词检索能 100% 命中（3/3 词全中）。
+#
+# 做法：查询里出现「编号形态」的 token 时，先做关键词检索，把精确命中的片段
+# 排在向量结果前面（按 sha+chunk 去重，不丢向量结果）。只在有编号时才做，
+# 避免给纯语义查询拖慢速度。
+_IDENT_RE = re.compile(r"[A-Za-z]{2,}[-_/][A-Za-z0-9]{2,}(?:[-_/][A-Za-z0-9]+)*|\d{8,}")
+
+
+def _query_has_identifier(q: str) -> bool:
+    return bool(_IDENT_RE.search(q or ""))
+
+
 @app.post("/api/search")
 def search(req: SearchReq):
     retrieval = "vector"
@@ -442,6 +480,24 @@ def search(req: SearchReq):
             retrieval = "keyword"
         except Exception as e2:  # noqa: BLE001
             raise HTTPException(500, f"检索失败：{e}；降级检索亦失败：{e2}")
+    if retrieval == "vector" and _query_has_identifier(req.query):
+        try:
+            kw = _get_store().search_keyword(req.query, top_k=req.top_k)
+        except Exception:  # noqa: BLE001
+            kw = []
+        if kw:
+            merged, seen = [], set()
+            for r in list(kw) + list(results):
+                m = r.get("meta") or {}
+                key = (m.get("sha256"), m.get("chunk_index"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                r["source"] = r.get("source") or "project"
+                merged.append(r)
+            if len(merged) > len(results):
+                results = merged[:max(req.top_k, len(kw))]
+                retrieval = "vector+keyword"
     if req.platform:
         try:
             plat = platform_store.search(req.query, top_k=req.top_k)
@@ -633,8 +689,40 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     # v0.1.177：索引**整批只读写一次**。
     # 原实现每个文件都调一次 _load_index()+_save_index()，而 _save_index 是
     # 全量 JSON dump —— 一次上传 300 个文件 = 300 次全量重写，磁盘 IO 直接吃满。
-    idx = scanner._load_index()
-    idx_dirty = False
+    #
+    # v0.1.224：从「整批末尾写一次」改成「攒一小批就合并一次」。
+    # 实测事故（2026-11-10，项目 0c9a4b2d 马诺诺，现场真实资料 34 个文件）：
+    #   /api/upload-files 是同步阻塞到整批结束的，一批 31 个大 DWG/PDF 解析了
+    #   5 分钟以上。这 5 分钟里：
+    #     ① 资料库一直只显示 5 个文件（用户以为没传上去，会重复再传一遍）；
+    #     ② 期间任何别的写入（另开一批上传 / /api/scan / 设备同步）都会被
+    #        批次末尾那一次 `_save_index(旧快照)` 整份覆盖 —— 磁盘上
+    #        parsed_cache 36 份解析结果，index.json 只剩 5 条，
+    #        31 个文件从资料库里凭空消失，界面一个字都不报。
+    # 现在每处理 5 个文件或超过 5 秒就 `merge_index_entries()` 合并一次：
+    # 锁内「读最新 → 只写自己的键 → 写回」，既不会覆盖别人的新增，
+    # 用户也能边传边看到文件进资料库。
+    seen = set(scanner._load_index().keys())   # 仅用于去重判断
+    pending = {}                               # 本批尚未落盘的条目
+    n_flushed = 0
+    last_flush = time.time()
+
+    def _flush_index(force=False):
+        nonlocal pending, last_flush, n_flushed
+        if not pending:
+            last_flush = time.time()
+            return
+        if not force and len(pending) < 5 and (time.time() - last_flush) < 5:
+            return
+        try:
+            n_flushed += scanner.merge_index_entries(pending)
+            seen.update(pending.keys())
+        except Exception as _fe:  # noqa: BLE001
+            print(f"[upload] 索引合并失败（下次再试）：{_fe}")
+            return
+        pending = {}
+        last_flush = time.time()
+
     for fi, f in enumerate(files):
         try:
             name = os.path.basename(f.filename or "unnamed")
@@ -653,7 +741,9 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
                 continue
             sha = hashlib.sha256(raw).hexdigest()
             # 去重（v0.1.22）：与解析库 index 比对，已入库则跳过（断点重传/重复选文件夹安全）
-            if sha in idx:
+            # v0.1.224：同时比 seen（本批已合并进索引的 + 待合并的），否则同一批里
+            # 重复选到同一个文件会各解析一遍
+            if sha in seen or sha in pending:
                 results.append({"file": name, "status": "duplicate", "parser": "",
                                 "error": "已入库，自动跳过", "sha256": sha, "uploader": uploader})
                 continue
@@ -663,14 +753,13 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
             # v0.1.177：解析 + 向量化 + 入队全部丢到线程池，事件循环只负责收发字节。
             # 不这么改，几百个文件的上传会把 / 和 /api/status 一起堵死 30s 以上。
             out = await run_in_threadpool(
-                _upload_process_one, saved, name, sha, len(raw), idx,
+                _upload_process_one, saved, name, sha, len(raw), pending,
                 rel_paths[fi] if fi < len(rel_paths) else "", uploader)
-            idx_dirty = True
             results.append(out)
+            _flush_index()
         except Exception as e:  # noqa: BLE001
             results.append({"file": f.filename or "unnamed", "status": "failed", "error": str(e)})
-    if idx_dirty:
-        scanner._save_index(idx)
+    _flush_index(force=True)
     _refresh_project_stats()
 
     # v0.1.217：按**真实落盘结果**记审计（不是按请求里传了几个文件）。

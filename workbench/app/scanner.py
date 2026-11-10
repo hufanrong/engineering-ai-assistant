@@ -101,10 +101,137 @@ def _save_index(idx: dict, data_dir=None):
                 pass
 
 
+def merge_index_entries(entries: dict, data_dir=None) -> int:
+    """把若干条目**合并**进 index.json（v0.1.224）。
+
+    修的是「批次上传用旧快照整份覆盖，把并发写入的条目抹掉」。
+
+    实测事故（2026-11-10，项目 0c9a4b2d 马诺诺）：
+      /api/upload-files 在函数开头 `idx = scanner._load_index()` 拿一份快照，
+      整批传完才 `_save_index(idx)`。一次几十个文件的上传要跑好几分钟，
+      这几分钟里任何别的写入（网页另开一批上传、/api/scan、设备同步）
+      都会被批次末尾那一次 `_save_index` 用**旧快照**整份覆盖 ——
+      磁盘上 parsed_cache 有 36 个解析结果，index.json 里只有 5 条，
+      剩下 31 个文件在资料库里根本不存在，界面上一个字都不报。
+
+    `_save_index` 的 `_INDEX_LOCK` 只保证「这一次写」原子，管不住
+    「调用方拿的快照已经过期」。所以合并必须由本函数在锁内完成
+    「读最新 → 只覆盖自己的键 → 写回」，调用方不能再自己攒着写。
+    """
+    if not isinstance(entries, dict) or not entries:
+        return 0
+    with _INDEX_LOCK:
+        idx = _load_index(data_dir)
+        if not isinstance(idx, dict):
+            idx = {}
+        skip = set(INDEX_RESERVED_KEYS) | set(INDEX_AUX_KEYS)
+        changed = 0
+        for k, v in entries.items():
+            if not isinstance(k, str) or not k or k in skip:
+                continue
+            if idx.get(k) != v:
+                idx[k] = v
+                changed += 1
+        if changed:
+            _save_index(idx, data_dir)
+        return changed
+
+
+def reconcile_index(data_dir=None, dry_run: bool = False) -> dict:
+    """用 parsed_cache 回填 index.json 里缺失的文件条目（v0.1.224）。
+
+    parsed_cache/{sha}.json 是「这个文件确实解析过」的原始凭证 ——
+    上传和扫描两条路都先写缓存。index.json 则是资料库/去重/统计的唯一来源，
+    原本**只有写它的那条路**知道自己要写，一旦那条路覆盖丢了（见
+    merge_index_entries 的实测事故），没有任何人去比对两者，
+    文件就永久从资料库里消失：缓存还在、正文还能读，列表里没有。
+
+    本函数把缓存里存在、索引里没有的 sha 补回去，条目字段与
+    上传路径 `_upload_process_one()` 写入的完全一致（不新增字段，
+    避免下游按固定字段读取的地方取不到值）。
+    """
+    ddir = _get_data_dir(data_dir)
+    out = {"index_files": 0, "cache_files": 0, "added": 0,
+           "orphan_index": 0, "dry_run": bool(dry_run), "sample": []}
+    idx = _load_index(ddir)
+    if not isinstance(idx, dict):
+        idx = {}
+    out["index_files"] = count_index_files(idx)
+    cache_dir = os.path.join(ddir, "parsed_cache")
+    if not os.path.isdir(cache_dir):
+        return out
+    skip = set(INDEX_RESERVED_KEYS) | set(INDEX_AUX_KEYS)
+    idx_keys = set(idx.keys())
+    have = {k for k, v in idx.items()
+            if isinstance(v, dict) and k not in skip}
+    uploads = os.path.join(config.DATA_DIR, "uploads")
+    new_entries = {}
+    n_cache = 0
+    cache_shas = set()
+    for fn in os.listdir(cache_dir):
+        if not fn.endswith(".json"):
+            continue
+        sha = fn[:-5]
+        if len(sha) != 64:
+            continue
+        n_cache += 1
+        cache_shas.add(sha)
+        if sha in have:
+            continue
+        try:
+            with open(os.path.join(cache_dir, fn), encoding="utf-8") as f:
+                c = json.load(f)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(c, dict) or not c.get("file_name"):
+            continue
+        ents = c.get("entities")
+        new_entries[sha] = {
+            "file_name": c.get("file_name"),
+            "file_path": os.path.join(uploads, c.get("file_name")),
+            "status": c.get("status"),
+            "parser": c.get("parser"),
+            "error": c.get("error"),
+            "entities": len(ents) if isinstance(ents, (list, tuple)) else 0,
+            "retry_count": 0,
+            "uploader": "",
+            "orig_path": "",
+            "ts": c.get("created_at") or "",
+        }
+    out["cache_files"] = n_cache
+    out["added"] = len(new_entries)
+    out["sample"] = sorted(new_entries)[:5]
+    # 反向：索引里有、缓存里没有（文件被删/从未解析成功），只报数不改动
+    out["orphan_index"] = max(0, len(have) - (n_cache - len(new_entries)))
+    # 第三类：**落在 uploads 里但索引/缓存都没有**的文件 —— 批次上传被中断、
+    # 或解析前抛异常时留下的孤儿。它既不在资料库里、也不在缓存里，
+    # 除了对账没人会发现。落盘名是 `{sha[:12]}_{原名}`，按前缀比对即可，
+    # 不必重新哈希整个文件（现场 uploads 常有几百 MB）。
+    try:
+        up_dir = os.path.join(config.DATA_DIR, "uploads")
+        if os.path.isdir(up_dir):
+            known = {k[:12] for k in have} | {k[:12] for k in cache_shas}
+            orphans = []
+            for fn in os.listdir(up_dir):
+                pre = fn.split("_", 1)[0]
+                if len(pre) == 12 and pre in known:
+                    continue
+                orphans.append(fn)
+            out["orphan_uploads"] = len(orphans)
+            out["orphan_uploads_sample"] = sorted(orphans)[:8]
+    except Exception:  # noqa: BLE001
+        pass
+    if new_entries and not dry_run:
+        merge_index_entries(new_entries, ddir)
+        out["index_files_after"] = count_index_files(_load_index(ddir))
+    return out
+
+
 # 支持处理的扩展名集合（含未启用解析的类型，便于状态展示）
 SUPPORTED_EXTS = (
     config.EXT_PDF + config.EXT_WORD + config.EXT_EXCEL + config.EXT_TEXT
     + config.EXT_IMAGE + config.EXT_CAD + config.EXT_PROJECT
+    + list(getattr(config, "EXT_EXCEL_LEGACY", []))    # v0.1.224：.xls
 )
 
 # v0.1.134：索引保留键（非文件数据），遍历扁平键时必须跳过（P1 系列修复）

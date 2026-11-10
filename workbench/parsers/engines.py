@@ -5,10 +5,12 @@
 
 import os
 import re
+import time
 import json
 import hashlib
 import datetime
 from dataclasses import dataclass, field, asdict
+from html.parser import HTMLParser   # v0.1.224：解析「假 .xls」（内容为 HTML 表格）
 from typing import Optional
 
 from app import config
@@ -101,6 +103,10 @@ def _effective(switch: bool, dep: str) -> bool:
 def _pick_parser(ext: str):
     if ext in config.EXT_PROJECT and config.PARSE_PROJECT:
         return parse_project
+    # v0.1.224：.xls（Excel 97-2003）必须走 xlrd，openpyxl 读不了老格式；
+    # 判定放在 EXT_EXCEL 之前，否则会落到 openpyxl 分支直接抛异常。
+    if ext == ".xls" and config.PARSE_EXCEL:
+        return parse_xls
     if ext in config.EXT_EXCEL and config.PARSE_EXCEL:
         return parse_excel
     if ext == ".csv" and config.PARSE_EXCEL:
@@ -132,11 +138,28 @@ def parse_file(path: str) -> ParseResult:
     if parser is None:
         res.status = "skipped"
         res.parser = "unsupported"
-        res.error = "该类型当前未启用解析（可在 config.py 开启或安装可选依赖）"
+        if ext in (".rar", ".zip", ".7z", ".tar", ".gz"):
+            # 现场真实场景：用户把一批 CAD 图纸压成 rar/zip 直接上传，期望
+            # 「传上去就能查」。当前不自动解压，但必须说清原因并给出下一步，
+            # 否则用户看到的是一个「跳过了」的文件，不知道该怎么办。
+            res.error = ("压缩包当前不自动解压：请先在电脑上解压，"
+                         "再把里面的 pdf/dwg/xlsx 上传（解压后微信/QQ 传来的 "
+                         "dwg 也能按车间自动归类）")
+        else:
+            res.error = "该类型当前未启用解析（可在 config.py 开启或安装可选依赖）"
         return res
     try:
         parser(res)
-        if not res.text and not res.structure:
+        # v0.1.224：解析器自己已经判了 failed 的，不能被这里改回 partial。
+        #
+        # 实测（2026-11-10 马诺诺真实资料 60 个文件）：本机没装 ODA File Converter，
+        # 25 个 DWG 全部走 parse_cad 的「找不到转换器」分支，明确设了
+        # status="failed" + error="未找到 ODA File Converter…"；可下一行
+        # 「没有 text/structure 就记 partial」无条件把它覆盖成 partial ——
+        # 界面上 25 张图显示「部分解析」，用户根本看不出是**缺依赖**，
+        # 只会以为图纸内容提取不全。failed 与 partial 是两件事：
+        # 前者要装东西/换格式，后者是文件里确实没那么多字。
+        if res.status == "parsed" and not res.text and not res.structure:
             res.status = "partial"
         res.entities = extract_entities(res.text)
     except ImportError as e:
@@ -173,8 +196,104 @@ def parse_pdf(res: ParseResult):
         "tables": tables[:50],
     }
     if not res.text:
-        res.status = "partial"
-        res.error = "PDF 无可提取文本层（可能是扫描件，建议启用 OCR）"
+        # v0.1.224：没有文本层不等于没救 —— 先试 OCR，再决定报什么状态。
+        #
+        # 实测（2026-11-10 马诺诺真实资料）：30 份 PDF 里 16 份是厂家出的
+        # 「图形 PDF」（CAD 直接打印，文字被转成曲线，没有文本层），
+        # 原文一律 partial + text="" —— 资料库里搜不到，用户以为没传上去。
+        # 本机已装 PaddleOCR，所以这里直接兜底识别前几页；
+        # 识别出字就按 parsed 入库，识别不出才保留原来的 partial + 提示。
+        ocr_text, ocr_note = ("", "")
+        try:
+            if getattr(config, "PDF_OCR_FALLBACK", False):
+                ocr_text, ocr_note = _ocr_pdf_text(res.file_path)
+        except Exception as e:  # noqa: BLE001
+            ocr_note = f"OCR 失败：{type(e).__name__}: {e}"
+        if ocr_text.strip():
+            res.text = ocr_text
+            st = res.structure if isinstance(res.structure, dict) else {}
+            st["ocr_fallback"] = ocr_note or "ok"
+            st["text_chars"] = len(res.text)
+            res.structure = st
+            res.error = None
+        else:
+            res.status = "partial"
+            res.error = ("PDF 无可提取文本层（图形 PDF/扫描件）；"
+                         f"已尝试 OCR 未取得文字{'（' + ocr_note + '）' if ocr_note else ''}。"
+                         "建议改用原始 dwg 或另存为带文字的 PDF")
+
+
+def _ocr_pdf_text(path: str, max_pages: int = 3, dpi: int = 150,
+                  budget_s: float = 120.0) -> tuple:
+    """把 PDF 前几页渲染成图片再 OCR，返回 (文本, 说明)。
+
+    限量而非全量：一张 A1 图纸 150dpi 约 2500x1700，PaddleOCR 单页 3~8 秒。
+    16 份 PDF × 全部页数会把一次扫描拖到几十分钟，现场等不起；
+    取前 3 页足够拿到图号、设备名称、主要标注 —— 检索要的是「这份图讲什么」。
+
+    失败即熔断：本机实测（2026-11-10）PaddleOCR 3.x 在这台机器上 predict 直接抛
+        NotImplementedError: ConvertPirAttribute2RuntimeAttribute not support
+        [pir::ArrayAttribute<pir::DoubleAttribute>] (onednn_instruction.cc:118)
+    这是 PaddlePaddle 的 oneDNN 后端问题（设 FLAGS_use_mkldnn=0 也不解决），
+    与 PDF 本身无关。一次熔断后本进程内不再重试 —— 否则每份图形 PDF 都要
+    白等 2~3 秒，一次扫描 16 份就是 40 秒纯浪费，还会让人以为是「文件坏了」。
+    """
+    global _OCR_PDF_DISABLED
+    if _OCR_PDF_DISABLED:
+        return "", _OCR_PDF_DISABLED
+    try:
+        import tempfile
+        import pymupdf as fitz
+
+        ocr = _get_ocr()
+    except Exception as e:  # noqa: BLE001
+        _OCR_PDF_DISABLED = f"OCR 引擎不可用：{type(e).__name__}: {e}"
+        return "", _OCR_PDF_DISABLED
+    t0 = time.time()
+    lines = []
+    used = 0
+    with tempfile.TemporaryDirectory(prefix="fg_ocr_") as td:
+        doc = fitz.open(path)
+        try:
+            n = min(max_pages, doc.page_count if hasattr(doc, "page_count") else len(doc))
+            for i in range(n):
+                if time.time() - t0 > budget_s:
+                    break
+                pix = doc[i].get_pixmap(dpi=dpi)
+                img = os.path.join(td, f"p{i}.png")
+                pix.save(img)
+                used += 1
+                try:
+                    result = ocr.ocr(img, cls=True)
+                    for page in result or []:
+                        for item in page or []:
+                            try:
+                                txt = item[1][0]
+                            except Exception:  # noqa: BLE001
+                                continue
+                            if txt and txt.strip():
+                                lines.append(txt.strip())
+                except Exception:  # noqa: BLE001 —— PaddleOCR 3.x 走 predict
+                    try:
+                        out = ocr.predict(img)
+                        for blk in out or []:
+                            texts = blk.get("rec_texts") if isinstance(blk, dict) else None
+                            for txt in texts or []:
+                                if txt and str(txt).strip():
+                                    lines.append(str(txt).strip())
+                    except Exception as e2:  # noqa: BLE001
+                        # 引擎级故障（见 docstring 里的 oneDNN 报错）→ 熔断，
+                        # 本进程后面所有 PDF 直接返回原因，不再逐个白等。
+                        _OCR_PDF_DISABLED = f"OCR 引擎故障已熔断：{type(e2).__name__}: {str(e2)[:120]}"
+                        break
+        finally:
+            try:
+                doc.close()
+            except Exception:  # noqa: BLE001
+                pass
+    note = (f"OCR 前 {used} 页，{len(lines)} 行，{time.time() - t0:.1f}s"
+            if not _OCR_PDF_DISABLED else _OCR_PDF_DISABLED)
+    return "\n".join(lines), note
 
 
 def _extract_pdf_tables(path: str) -> list:
@@ -282,6 +401,193 @@ def parse_excel(res: ParseResult):
     res.structure = {"sheets": sheets, "total_rows": sum(s["row_count"] for s in sheets)}
 
 
+# ============ XLS（老版 Excel 97-2003，v0.1.224 新增） ============
+def parse_xls(res: ParseResult):
+    """老版 .xls（Excel 97-2003）结构化解析，输出与 parse_excel 完全同构。
+
+    为什么必须补：现场真实资料里大量箱单、设备表还是 .xls，而 config 原来只认
+    .xlsx/.xlsm —— 用户上传后一律被判 unsupported、状态「跳过」，台账内容一个字
+    都进不了库。实测 2026-11-10 项目 0c9a4b2d（马诺诺）真实资料：
+        熟料粉末斗提机.xls / 江西华欣拉链机箱单.xls / 滁州安瑞链板称箱单.xls
+    这 3 个文件上传后 status=skipped，用户在原话里问「我连工作台都看不到，
+    怎么上传资料」—— 传了查不到，等于没传。
+
+    两条真实分支（现场两种都遇到过，缺一条就有一批文件解析不出来）：
+      ① 真 BIFF 格式 → xlrd；
+      ② 后缀是 .xls、内容其实是 HTML 表格 —— 国内 ERP/电商/物流系统
+         「导出 Excel」出来的就是这种东西（文件头是 `<html xmlns:o=...>`）。
+         实测上面 3 个 .xls 全部是这种，xlrd 直接抛
+         `Expected BOF record; found b'<html xm'`。
+
+    structure 与 parse_excel 同构（sheets/header/rows/row_count/total_rows），
+    且 parser 标 "excel"，使 equipment_merge 按 parser=="excel" 取台账行的
+    下游逻辑对 .xls 一样生效（与 v0.1.167 处理 .csv 的做法一致）。
+    """
+    res.parser = "excel"
+    if _looks_like_html(res.file_path):
+        _parse_html_table(res)
+        return
+    try:
+        import xlrd
+        wb = xlrd.open_workbook(res.file_path)
+    except Exception as e:  # noqa: BLE001
+        # xlrd 认不出来，但内容可能是 HTML/XML 表格（见上②）；仍不行就把原始
+        # 异常抛上去，让上层记 failed 并保留错误原因，不做静默降级。
+        if _looks_like_html(res.file_path):
+            _parse_html_table(res)
+            return
+        raise
+    sheets = []
+    text_parts = []
+    for si in range(wb.nsheets):
+        ws = wb.sheet_by_index(si)
+        all_rows = []
+        for r in range(ws.nrows):
+            vals = [_xls_cell_text(ws.cell_value(r, c)) for c in range(ws.ncols)]
+            if any(v.strip() for v in vals):
+                all_rows.append(vals)
+        if not all_rows:
+            continue
+        header = _normalize_header(all_rows[0])
+        data_rows = []
+        for r in all_rows[1:]:
+            row = {}
+            for i, v in enumerate(r):
+                if i < len(header) and v.strip():
+                    row[header[i]] = v.strip()
+            if row:
+                data_rows.append(row)
+        sheets.append({
+            "sheet": ws.name,
+            "header": header,
+            "row_count": len(data_rows),
+            "rows": data_rows[:500],
+        })
+        text_parts.append(f"【工作表：{ws.name}】")
+        text_parts.append(" | ".join(header))
+        for row in data_rows:
+            text_parts.append(" | ".join(f"{k}={v}" for k, v in row.items()))
+    res.text = "\n".join(text_parts)
+    res.structure = {"sheets": sheets, "total_rows": sum(s["row_count"] for s in sheets)}
+
+
+def _xls_cell_text(v) -> str:
+    """xlrd 单元格值转字符串：整数值的 float 去掉 '.0'（数量 12 不能变成 12.0）。"""
+    if v is None:
+        return ""
+    if isinstance(v, float):
+        if v == int(v):
+            return str(int(v))
+        return str(v)
+    return str(v)
+
+
+def _looks_like_html(path: str) -> bool:
+    """文件头判断「后缀是表格、内容其实是网页表格」（国内系统导出的 .xls 常见）。"""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4096)
+    except OSError:
+        return False
+    head = head.lstrip(b"\xef\xbb\xbf").lstrip()
+    low = head[:1024].lower()
+    return low.startswith(b"<html") or low.startswith(b"<table") \
+        or b"<html" in low or b"<table" in low
+
+
+class _TableCollector(HTMLParser):
+    """从 HTML 里抓所有 <table> 的行列文本（只用标准库，不新增依赖）。"""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables = []
+        self._depth = 0
+        self._row = None
+        self._cell = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self._depth += 1
+            self.tables.append([])
+        elif self._depth and tag == "tr":
+            self._row = []
+        elif self._depth and tag in ("td", "th"):
+            self._cell = []
+        elif self._depth and tag == "br" and self._cell is not None:
+            self._cell.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag == "table" and self._depth:
+            self._depth -= 1
+            self._row = None
+            self._cell = None
+        elif self._depth and tag == "tr":
+            if self._row is not None and any(c.strip() for c in self._row):
+                self.tables[-1].append(self._row)
+            self._row = None
+        elif self._depth and tag in ("td", "th") and self._cell is not None:
+            if self._row is None:
+                self._row = []
+            self._row.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+def _read_full_text(path: str) -> str:
+    """整文件解码（utf-8 → gb18030 → latin1），不截断 —— 表格动辄几百 KB。"""
+    with open(path, "rb") as f:
+        raw = f.read()
+    for enc in ("utf-8", "gb18030", "latin1"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace")
+
+
+def _parse_html_table(res: ParseResult):
+    """解析 HTML 表格 → 与 parse_excel 同构的 structure.sheets。"""
+    html = _read_full_text(res.file_path)
+    tc = _TableCollector()
+    try:
+        tc.feed(html)
+    except Exception:  # noqa: BLE001
+        pass
+    sheets = []
+    text_parts = []
+    for ti, rows in enumerate(tc.tables):
+        rows = [[c.strip() for c in r] for r in rows]
+        rows = [r for r in rows if any(r)]
+        if len(rows) < 2:
+            continue
+        header = _normalize_header(rows[0])
+        data_rows = []
+        for r in rows[1:]:
+            row = {}
+            for i, v in enumerate(r):
+                if i < len(header) and v:
+                    row[header[i]] = v
+            if row:
+                data_rows.append(row)
+        sheets.append({
+            "sheet": f"表格{ti + 1}",
+            "header": header,
+            "row_count": len(data_rows),
+            "rows": data_rows[:500],
+        })
+        text_parts.append(f"【表格{ti + 1}】")
+        text_parts.append(" | ".join(header))
+        for row in data_rows:
+            text_parts.append(" | ".join(f"{k}={v}" for k, v in row.items()))
+    res.text = "\n".join(text_parts)
+    res.structure = {"sheets": sheets,
+                     "total_rows": sum(s["row_count"] for s in sheets),
+                     "source_format": "html"}
+
+
 # ============ CSV（台账结构化，v0.1.167 新增） ============
 def parse_csv(res: ParseResult):
     """CSV 台账结构化解析。
@@ -356,6 +662,11 @@ def parse_text(res: ParseResult):
 
 # ============ 图片 OCR（可选，需 PaddleOCR） ============
 _ocr_engine = None
+
+
+# v0.1.224：PDF 无文本层时的 OCR 兜底熔断标记。空串=可用；
+# 非空=本进程内已判定引擎不可用，原因就存在这里（见 _ocr_pdf_text）。
+_OCR_PDF_DISABLED = ""
 
 
 def _get_ocr():
