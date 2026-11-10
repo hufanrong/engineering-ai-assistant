@@ -678,25 +678,53 @@ def phase1(samples_dir):
     # 「资料库条目数 0」「正文非空 0/N」「无设备数据」一大串假缺陷。
     # 现在：总共最多等 30 分钟；但如果连续 90 秒 done 一动不动，判定卡死并提前放弃
     # （真有死循环时不必陪跑到 30 分钟）。
-    _done_prev = -1
-    _stall = 0
+    #
+    # v0.1.228 再修一次：90 秒这条线**太紧**，而且判据选错了。
+    #   实测 2026-11-10 105123 轮：93.6 秒就放弃，done 还停在 0，
+    #   于是「扫描完成」判 FAIL，紧接着「条目数 0」「车间 []」「检索 hits=0」
+    #   「组卷 无设备数据」连带报了 10 条 —— 全是这一个判据造成的假缺陷。
+    #   为什么 90 秒不动是**正常**的：63 个真文件里 25 张 DWG 每张要 ODA 转换
+    #   约 6 秒，十几份扫描件 PDF 要走 Tesseract OCR，**单个文件就能上百秒**；
+    #   done 是「处理完一个文件才 +1」，中途当然一动不动。
+    #   改成看服务端心跳：扫描线程每次回调都会刷新 SCAN_STATUS["heartbeat"]，
+    #   心跳断了才是真卡死。阈值放到 300 秒（单文件最长耗时的两倍以上）。
+    #   另外把「超时放弃」和「扫描报错」分开记，别都糊在一句 running=false 里。
+    _HB_LIMIT = 300
     _deadline = time.time() + 1800
+    _gave_up = ""
+    _done_prev = -1
+    _last_progress = time.time()
     while time.time() < _deadline:
         _, st, _ = call("GET", "/api/scan/status")
         if not (st or {}).get("running"):
             break
+        err = str((st or {}).get("error") or "")
+        if err:
+            _gave_up = f"扫描线程报错：{err}"
+            break
         _d = int((st or {}).get("done") or 0)
         if _d > _done_prev:
             _done_prev = _d
-            _stall = 0
-        else:
-            _stall += 2
-            if _stall >= 90:
-                break
+            _last_progress = time.time()
+        # 心跳优先；老版本服务不返心跳时退回按 done 计时，行为与以前一致
+        _hb = (st or {}).get("heartbeat")
+        _idle = (time.time() - float(_hb)) if _hb else (time.time() - _last_progress)
+        if _idle >= _HB_LIMIT:
+            _gave_up = (f"心跳停止 {_idle:.0f}s（阈值 {_HB_LIMIT}s），判定卡死；"
+                        f"done={_d}/{int((st or {}).get('total') or 0)}")
+            break
         time.sleep(2)
+    else:
+        _gave_up = "超过 30 分钟总上限仍未结束"
+
     stats = (st or {}).get("stats") or {}
     record(P, "扫描完成", "running=false 且有 stats", json.dumps(stats, ensure_ascii=False),
            not (st or {}).get("running") and bool(stats), f"耗时 {time.time()-t0:.1f}s")
+    if _gave_up:
+        # 单独一条：是「测试没等到」还是「程序有问题」，必须一眼分得清，
+        # 否则后续「条目数 0」这类断言会把这个原因彻底埋掉。
+        record(P, "扫描按时结束", f"心跳中断不超过 {_HB_LIMIT}s 且能正常收尾",
+               _gave_up, False, "未等到扫描结束，下游断言（条目数/分类/检索）不可信")
     if not (st or {}).get("running") and not stats:
         # 扫完了却没有 stats：接口口径问题，单独记一条，别混进「解析成功率」
         record(P, "扫描统计可读", "扫描结束时应返回 stats",

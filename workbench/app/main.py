@@ -233,16 +233,36 @@ def start_scan(req: ScanReq):
     def _scan_with_stats(folders, force, status):
         """扫描完成后自动更新项目统计。
         v0.1.144：_refresh_project_stats 挪到 finally——扫描异常时也保证统计刷新，
-        避免"索引已更新但 project_meta.file_count 仍为 0"。"""
+        避免"索引已更新但 project_meta.file_count 仍为 0"。
+
+        v0.1.228：**异常必须留痕**。
+        原来这里是裸的 background_scan 调用，线程里抛任何东西都直接消失：
+        running 停在 true、stats 是 None，界面上看起来就是「扫描跑完了，0 个文件」。
+        实测 2026-11-10 那一轮：65 个真文件在盘上、一个都没进索引，而所有接口
+        都正常返回 200，只有"资料库条目数 0"这种下游断言才间接暴露出来 ——
+        真机上用户只会以为程序坏了，看不到原因。
+        现在把异常写进 status["error"]，/api/scan/status 会带出来。
+        用 BaseException 收口：宿主环境的 sitecustomize 会抛 SystemExit，
+        它不是 Exception 子类，用 except Exception 拦不住，整条线程照样静默死掉。
+        """
         def _hb():
             try:
                 status["heartbeat"] = time.time()
             except Exception:  # noqa: BLE001
                 pass
         status["heartbeat"] = time.time()
+        status["error"] = ""
         try:
             scanner.background_scan(folders, force, status, progress_cb=lambda *_: _hb())
+        except BaseException as e:  # noqa: BLE001  见上面关于 SystemExit 的说明
+            status["error"] = f"{type(e).__name__}: {e}"[:500]
+            try:
+                import traceback
+                traceback.print_exc()
+            except Exception:  # noqa: BLE001
+                pass
         finally:
+            status["running"] = False
             try:
                 _refresh_project_stats()
             except Exception:  # noqa: BLE001
@@ -256,12 +276,27 @@ def start_scan(req: ScanReq):
 
 @app.get("/api/scan/status")
 def scan_status():
+    """扫描进度。
+
+    v0.1.228：把 heartbeat 与 error 一并返回。
+    原来只给 running/done/total/msg/stats，调用方**没法区分三种情况**：
+      · 真的跑完了（running=false 且 stats 有值）
+      · 正在啃一个大文件（running=true、done 半天不动）
+      · 扫描线程已经异常死掉（running 被 finally 之外的路径留在 true，
+        或者干脆 false 但 stats 是 None）
+    实测代价：63 个真实文件里有 25 张 DWG（每张 ODA 转换约 6 秒）和十几份
+    扫描件 PDF（Tesseract OCR 单页数秒），**第一个文件就可能跑上百秒**。
+    只看 done 变不变，会把「正常在解析」误判成「卡死」。
+    heartbeat 是扫描线程每次回调都刷新的时间戳，用它判活才准。
+    """
     return {
         "running": SCAN_STATUS.get("running", False),
         "done": SCAN_STATUS.get("done", 0),
         "total": SCAN_STATUS.get("total", 0),
         "msg": SCAN_STATUS.get("msg", ""),
         "stats": SCAN_STATUS.get("stats"),
+        "heartbeat": SCAN_STATUS.get("heartbeat"),
+        "error": SCAN_STATUS.get("error", ""),
     }
 
 

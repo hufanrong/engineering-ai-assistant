@@ -839,7 +839,26 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #         脏了就留证据到 reports/_dirty_after_push.txt，不再无声无息。
 #   验证：一轮跑完后 `git status --porcelain -uno` 必须为空；auto_round.py 可以退休。
 
-APP_VERSION = "0.1.228"
+# 【v0.1.229】扫描「跑完了、0 个文件」，而盘上明明有 65 个 —— 三个缺陷叠在一起。
+#
+#   现象：20261110_105123 轮 阶段1 报「扫描完成: {}」「资料库条目数 0」
+#         「识别车间 []」，下游连带 6 条「无设备数据」。接口全部 200，看不出错。
+#   根因①自测的卡死判据选错了：v0.1.227 定的规则是「done 连续 90 秒不动就放弃」。
+#         但 63 个真文件里 25 张 DWG 每张要 ODA 转换约 6 秒、十几份扫描件 PDF 走
+#         Tesseract OCR，**单个文件就能上百秒**，done 是「处理完一个才 +1」，
+#         中途当然一动不动。实测 93.6 秒就放弃 → 扫描被自己打断。
+#   根因②/api/scan/status 不返心跳：SCAN_STATUS 里维护着 heartbeat，却没暴露，
+#         调用方除了「done 变没变」没有别的判活依据，只能猜。
+#   根因③扫描线程吞异常：_scan_with_stats 里是裸的 background_scan 调用，
+#         线程里抛任何东西都直接消失，running 停在 true / stats 是 None，
+#         界面上看起来就是「扫描跑完了，0 个文件」。
+#   修法：① 状态接口补 heartbeat 与 error；② 扫描线程 except BaseException
+#         把异常写进 status["error"]（宿主 sitecustomize 抛的是 SystemExit，
+#         用 except Exception 拦不住）；③ 自测改看心跳，阈值 300 秒，
+#         并把「测试没等到」单独记一条，不再和「程序出错」混在一句里。
+#   验证：同一批 63 个真文件手工重扫 found=63 parsed=63 vectorized=63 failed=0。
+
+APP_VERSION = "0.1.229"
 
 # 解析能力版本号（与 APP_VERSION 独立：界面/接口小改动不必重解析全库）。
 # **只要改了「同一份文件能抽出多少内容」，就把这个号加一** ——

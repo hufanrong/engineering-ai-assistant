@@ -198,10 +198,33 @@ def release_lock():
         pass
 
 
+_LOG_FILE = os.path.join(REPORTS_DIR, "_loop.log")
+
+
 def log(msg):
+    """打一行日志：控制台 + reports/_loop.log。
+
+    v0.1.228：无人值守是用 pythonw.exe 被计划任务拉起来的，那种上下文里
+    sys.stdout 可能是 None，原来裸 print 会抛 AttributeError 把整轮带走，
+    而且**一点痕迹都不留** —— 计划任务那边只看得到 exit code，日志是空的。
+    （历史上就出现过「任务说跑了 391 次，但什么都没有」这种查不下去的局面。）
+    现在 print 包一层，同时把每行追加进 reports/_loop.log（reports/_* 已被
+    .gitignore 挡住，不进版本库）。下次再出「任务说跑了却没结果」，至少有现场。
+    """
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
-    print(line, flush=True)
+    try:
+        print(line, flush=True)
+    except Exception:  # noqa: BLE001  pythonw 下 stdout 可能是 None
+        pass
+    try:
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        if os.path.exists(_LOG_FILE) and os.path.getsize(_LOG_FILE) > 2 * 1024 * 1024:
+            os.replace(_LOG_FILE, _LOG_FILE + ".1")
+        with open(_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
     return line
 
 
