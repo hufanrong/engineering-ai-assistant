@@ -55,6 +55,46 @@ def path_lock(path):
         return lk
 
 
+def _replace_with_retry(src, dst, attempts=40, delay=0.03):
+    r"""用 os.replace 落地，遇到 Windows 的「被读方占着」就重试。
+
+    v0.1.227 实测（tools/test_atomic_write.py 的 [B] 段，10 线程 × 4 轮写同一路径）：
+      · 「并发期间 0 次读到损坏文件」PASS
+      · 「并发结束后是完整 800 条」PASS
+      · 「0 错误」FAIL —— 有若干次抛
+          PermissionError: [WinError 5] 拒绝访问
+    也就是说**原子性没问题，是可用性有问题**：写盘会偶发失败。
+
+    原因在 Windows 的语义，不是代码写错：
+      MoveFileEx(MOVEFILE_REPLACE_EXISTING) 要求目标文件当前**没有**被别的句柄
+      以「不共享删除」的方式打开。而 Python 的 open() 默认只共享
+      FILE_SHARE_READ | FILE_SHARE_WRITE，**不共享 DELETE**。
+      于是「扫描线程正在写 index.json」与「页面刷新在读 index.json」一撞，
+      写入方的 os.replace 就拿到 ERROR_ACCESS_DENIED(5)。
+    现实后果：用户在扫描过程中随手刷新一下页面，那次索引写入就被丢掉，
+    而且调用方通常 `except Exception: pass` —— 文件从资料库里静默消失，
+    正是本模块开头列的那类事故的另一种触发方式。
+
+    修法：短间隔重试。读者持有句柄的时间是毫秒级（一次 json.load），
+    40 次 × 30ms ≈ 1.2 秒足够跨过去；仍失败才向上抛，让调用方知道
+    （宁可报错，也不要静默丢一次索引写入）。
+    """
+    import time as _t
+    last = None
+    for i in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except (PermissionError, OSError) as e:
+            # 只对「共享冲突/拒绝访问」重试；其它错误（路径不存在、磁盘满）立刻抛
+            code = getattr(e, "winerror", None)
+            if code not in (5, 32, 33) and not isinstance(e, PermissionError):
+                raise
+            last = e
+            _t.sleep(delay * (1 + i // 10))
+    raise last if last else OSError(f"replace 失败：{src} -> {dst}")
+
+
 def write_json(path, obj, indent=2, ensure_ascii=False, fsync=True):
     """原子写一个 JSON 文件。
 
@@ -78,7 +118,7 @@ def write_json(path, obj, indent=2, ensure_ascii=False, fsync=True):
                     except OSError:
                         # 某些文件系统（如部分网络盘）不支持 fsync，不必因此失败
                         pass
-            os.replace(tmp, path)
+            _replace_with_retry(tmp, path)
         finally:
             try:
                 if os.path.exists(tmp):

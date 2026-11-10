@@ -96,7 +96,8 @@ def _save_idx(idx: dict) -> None:
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(idx, f, ensure_ascii=False)
-            os.replace(tmp, path)
+            # v0.1.227：统一走 atomic_io 的重试版 replace（WinError 5 = 被读方占着）
+            _atomic_io._replace_with_retry(tmp, path)
         except Exception as _e:  # noqa: BLE001
             # 不再静默：索引写失败会让去重失效、文件重复入队，必须留痕
             try:

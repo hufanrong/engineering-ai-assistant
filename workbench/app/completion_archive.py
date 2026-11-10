@@ -103,7 +103,8 @@ def _save_archive(archive: dict):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(archive, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
+        # v0.1.227：统一走 atomic_io 的重试版 replace（WinError 5 = 被读方占着）
+        _atomic_io._replace_with_retry(tmp, path)
     finally:
         # 替换失败也要把临时文件清掉，否则现场目录会堆一堆 .tmp
         try:

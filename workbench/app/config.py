@@ -793,13 +793,20 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #      修：改为按进度等待（最多 30 分钟，done 连续 90 秒不动才判卡死）；
 #      并新增「扫描统计可读」断言区分「没扫完」与「扫完但没 stats」。
 #
-#   ⑧ 单实例锁在 UTF-8 模式下静默失效
+#   ⑧ 单实例锁在 UTF-8 模式下会误判（机制成立，双开未实测到）
 #      用 tasklist 输出找 pid 判断存活。中文 Windows 的 tasklist 是 GBK，
 #      而 text=True 不指定编码时按默认编码解码；进程开了 UTF-8 模式
 #      （PYTHONUTF8=1 / -X utf8）就是 UTF-8 → reader 线程抛
-#      UnicodeDecodeError（异常在子线程里，不冒泡）→ stdout 空 →
-#      判定「上一个已退出」→ 覆盖锁 → **两个循环、两个服务同时跑**。
-#      实测 2026-11-10 09:4x 本机确实同时存在 2 个 wb_loop + 2 个 start.py。
+#      UnicodeDecodeError。这个异常在子线程里，**不冒泡**，于是 stdout 为空、
+#      「pid 已不在」→ 锁被当成过期 → 覆盖锁继续启动。
+#      实测证据：2026-11-10 09:29 与 09:37 两轮日志开头都留下
+#        "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xd0"
+#      这一行；也就是说判活确实走空了。只要此时真有一个循环在跑，
+#      就会变成两个循环写同一个仓库。
+#      ⚠ 更正：我最初看到「两个 wb_loop + 两个 start.py」就断定已经双开，
+#      这是错的 —— venv\Scripts\python.exe 是个 241KB 的启动器，
+#      它会再拉起真正的解释器，所以「启动器 + 真身」天然成对出现。
+#      机制成立，后果未实测到，按潜在缺陷修正，不夸大成已发生的事故。
 #      修：_pid_alive() 改用 Win32 OpenProcess（零解析、零编码），
 #      判不出来时按「活着」处理（宁可拒绝启动，也不要双开写仓库）。
 #

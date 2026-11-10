@@ -108,7 +108,9 @@ def _save_index(idx: dict, data_dir=None):
                     os.fsync(f.fileno())   # 落盘再替换，断电后新文件也是完整的
                 except OSError:
                     pass
-            os.replace(tmp, idx_file)
+            # v0.1.227：走统一的重试版 replace —— Windows 上读者持有句柄时
+            # os.replace 会抛 WinError 5，索引写入被静默丢掉（见 atomic_io 注释）
+            _atomic_io._replace_with_retry(tmp, idx_file)
         finally:
             try:
                 if os.path.exists(tmp):

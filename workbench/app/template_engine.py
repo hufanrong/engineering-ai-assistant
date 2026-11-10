@@ -83,7 +83,8 @@ def _save_template_index(index: Dict):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(index, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, TEMPLATE_INDEX_FILE)
+        # v0.1.227：统一走 atomic_io 的重试版 replace（WinError 5 = 被读方占着）
+        _atomic_io._replace_with_retry(tmp, TEMPLATE_INDEX_FILE)
     except Exception as e:  # noqa: BLE001
         _SAVE_ERR["last"] = f"{type(e).__name__}: {e}"
         try:
