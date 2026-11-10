@@ -1,0 +1,71 @@
+{
+  "task_name": "FangongAI-AutoFeedback",
+  "tested_version": "0.1.231",
+  "commit": "f2ffb6c",
+  "scheduled_task": {
+    "state": "Ready",
+    "last_run_time": "2026-11-10 16:04:10",
+    "last_result": 2,
+    "next_run_time": "2026-11-10 21:04:10",
+    "missed_runs": 0,
+    "execution_time_limit": "PT3H",
+    "stop_if_going_on_batteries": false,
+    "disallow_start_if_on_batteries": false
+  },
+  "exit_code_meaning": {
+    "code": 2,
+    "source": "workbench/tools/wb_loop.py main() → if not is_repo: return 2",
+    "message_intended": "[错误] REPO_DIR 不是 git 仓库，请先确认路径",
+    "message_actually_emitted": "无 —— print 在 pythonw 下抛 AttributeError"
+  },
+  "git_availability": {
+    "machine_path_git_entries": ["C:\\Program Files\\GitHub CLI\\"],
+    "machine_path_has_git_exe": false,
+    "user_path_git_entries": [],
+    "get_command_git": "",
+    "only_git_on_machine": "C:\\Users\\hufanrong\\.workbuddy\\binaries\\PortableGit\\versions\\1.3.0\\cmd\\git.exe",
+    "injected_by": "WorkBuddy 终端（shell 内 PATH 可见 /mingw64/bin/git，非系统环境）",
+    "conclusion": "计划任务的裸环境里没有 git，git rev-parse 必然失败"
+  },
+  "evidence": {
+    "loop_log_last_line_before": "[2026-11-10 11:30:15] 本轮结束 status=passed 报告在 reports/20261110_111426/",
+    "no_entry_at_1604": true,
+    "report_dirs_after_1604": []
+  },
+  "remote_state": {
+    "origin_main": "f2ffb6c",
+    "defect_reports_present": ["d13dcf2", "f2ffb6c"],
+    "pushed_by": "manual git push",
+    "auto_push_ever_succeeded": false
+  },
+  "silent_failure": {
+    "why_silent": "main() 中 `print(...)` 未使用 log()；pythonw.exe 下 sys.stdout 为 None → AttributeError；无文件日志",
+    "impact": "外部只看到退出码 2，_loop.log 零痕迹，所有人以为通道正常"
+  },
+  "workaround_applied": {
+    "file": "C:\\Users\\hufanrong\\AppData\\Local\\fangong\\run_loop.cmd",
+    "mechanism": "显式 set PATH 加入 PortableGit cmd/usr/bin/mingw64/bin 后调用 pythonw wb_loop.py",
+    "task_action_changed_to": "C:\\Users\\hufanrong\\AppData\\Local\\fangong\\run_loop.cmd",
+    "verified_at": "2026-11-10 16:45:17",
+    "verified_log": [
+      "[2026-11-10 16:45:17] ===== 本轮开始 20261110_164517，本地 f2ffb6ce1e45 =====",
+      "[2026-11-10 16:45:19] 远端没有新提交（本地领先 0 个未推送提交），跳过拉取",
+      "[2026-11-10 16:45:20]    服务在线且版本一致(0.1.231)，跳过重启（不打断正在使用的人）"
+    ],
+    "is_root_fix": false,
+    "fragility": "PortableGit 目录带版本号（1.3.0），WorkBuddy 升级后路径变化会再次断掉"
+  },
+  "fix_proposals": [
+    {"id": "R1", "title": "_find_git()：shutil.which → GIT_EXECUTABLE → 常见安装路径 → PortableGit 版本目录取最新", "core": true},
+    {"id": "R2", "title": "main() 启动即写日志（argv/cwd/sys.executable/PATH/git 解析结果），所有裸 print 改 log，return 前必须留原因"},
+    {"id": "R3", "title": "区分三种起不来：找不到 git / 真不是仓库 / 锁被占，不要都报「不是 git 仓库」"},
+    {"id": "R4", "title": "新增 --preflight：只检查 git/仓库/远端/服务四项，10 秒出结论"}
+  ],
+  "acceptance": {
+    "works_without_git_in_path": true,
+    "log_written_when_git_missing": true,
+    "all_return_branches_logged": true,
+    "preflight_within_sec": 10,
+    "three_consecutive_rounds_have_start_and_end_log": true
+  }
+}

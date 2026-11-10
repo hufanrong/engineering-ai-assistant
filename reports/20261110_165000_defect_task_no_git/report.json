@@ -1,0 +1,67 @@
+{
+  "run_id": "20261110_165000_defect_task_no_git",
+  "started": "2026-11-10 16:43:00",
+  "finished": "2026-11-10 16:52:00",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "手工整理的缺陷单（非自动轮次），schema 与自动轮次一致，ai_side.py 可直接读。针对「每 5 小时的自动回传任务一次都没真正跑起来」。",
+  "steps": [
+    {
+      "step": "核对远端是否收到本次回传",
+      "rc": 0,
+      "out": "origin/main = f2ffb6c，d13dcf2 与 f2ffb6c 两单在远端 —— 但均为手工 git push 推的，非自动回传"
+    },
+    {
+      "step": "查计划任务执行结果",
+      "rc": 1,
+      "out": "FangongAI-AutoFeedback：LastRunTime=2026-11-10 16:04:10（准时触发），LastResult=2，NextRunTime=21:04:10"
+    },
+    {
+      "step": "查循环日志",
+      "rc": 1,
+      "out": "_loop.log 最后一条停在 11:30:15（手工跑的上一轮）；16:04 那轮无「本轮开始」，一行未写；16:04 后无新报告目录"
+    },
+    {
+      "step": "定位退出码 2 的含义",
+      "rc": 1,
+      "out": "wb_loop.main() 中 is_repo=False 时 return 2 —— 判定路径为 git_dir_info() 调 `git rev-parse --git-dir`"
+    },
+    {
+      "step": "确认 git 是否可用",
+      "rc": 1,
+      "out": "Machine PATH 仅含 C:\\Program Files\\GitHub CLI\\（gh，无 git）；User PATH 无 git；Get-Command git 返回空。本机唯一 git 为 WorkBuddy PortableGit: ...\\PortableGit\\versions\\1.3.0\\cmd\\git.exe，仅由 WorkBuddy 终端注入 PATH"
+    },
+    {
+      "step": "确认静默原因",
+      "rc": 1,
+      "out": "main() 的 `print(f'[错误] {REPO_DIR} 不是 git 仓库…')` 未走 log()；pythonw 下 sys.stdout=None，print 抛 AttributeError，日志无任何痕迹 → 外部只看到退出码 2"
+    },
+    {
+      "step": "环境层临时处置并验证",
+      "rc": 0,
+      "out": "新增 C:\\Users\\hufanrong\\AppData\\Local\\fangong\\run_loop.cmd（显式把 PortableGit 加入 PATH 后调 wb_loop），计划任务动作改为指向它；手动触发后 _loop.log 出现「本轮开始 20261110_164517」，git 通、且正确判定「版本一致，跳过重启」"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed 自动回传通道此前 100% 未生效且完全静默；现经环境层绕过恢复，代码层未修"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 6,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 2,
+        "failed": 6,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "Windows 计划任务 FangongAI-AutoFeedback 每次都准时触发但立即退出（LastResult=2）：pythonw 运行在裸环境，系统 PATH 无 git（本机唯一 git 是 WorkBuddy 自带 PortableGit，不在 Machine/User PATH），wb_loop.git_dir_info() 的 `git rev-parse` 失败 → is_repo=False → return 2。且该分支用的是裸 print（pythonw 下 sys.stdout=None 会抛 AttributeError），_loop.log 一行不写 —— 失败完全静默，外部看起来「任务按时跑了、没报错」。结果：每 5 小时的自动回传一次都没真正执行，此前所有到达远端的提交均为手工推送。",
+  "commit_before": "f2ffb6c",
+  "commit_after": "f2ffb6c",
+  "detail_doc": "defects_task_no_git.md",
+  "evidence": "evidence_task_no_git.json"
+}
