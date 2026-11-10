@@ -1,0 +1,56 @@
+{
+  "run_id": "20261110_140100_defect_workshop",
+  "started": "2026-11-10 13:59:39",
+  "finished": "2026-11-10 14:01:15",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "本报告由 WORKbuddy 手工整理（非 wb_loop 自动轮次），专门针对「车间识别产出废字」这一缺陷。schema 与自动轮次一致，ai_side.py 可直接读取。",
+  "steps": [
+    {
+      "step": "读取真实项目归类结果",
+      "rc": 0,
+      "out": "workbench/data/projects/09e0d78f/workshop_assign.json：60 条，可归类 11 条，未归类 49 条"
+    },
+    {
+      "step": "按工程后缀筛合法车间",
+      "rc": 0,
+      "out": "合法仅 粗碎车间(2 文件)；异常 8 个名字 / 9 个文件 = 可归类文件的 82%"
+    },
+    {
+      "step": "回溯每个异常的来源字段",
+      "rc": 0,
+      "out": "content 4 例（置信度 0.55）／filename 4 例（置信度 0.75）；后者置信度更高却全错"
+    },
+    {
+      "step": "从解析缓存取原文上下文",
+      "rc": 0,
+      "out": "相对室 ← 「相对室外地坪高度」；件与件之间 ← 「件与件之间采用焊接连接」；相国四站 ← OCR 噪声独占一行"
+    },
+    {
+      "step": "定位代码规则",
+      "rc": 0,
+      "out": "workshop_assign.py:127 _WORKSHOP_RE 用惰性 {1,8}? 配单字后缀（室/间/站/厂/区/场/仓/房），把长词切成前缀"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed 车间名合法 2 通过 / 8 失败（按名字计，覆盖 9 个文件）"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 8,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 2,
+        "failed": 8,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "车间识别把设备名与正文碎片当成车间：可归类的 11 个文件里 9 个（82%）归错，仅「粗碎车间」正确。",
+  "commit_before": "fbd449cc0cb88ba83c465f48ce0de3361281b2f6",
+  "commit_after": "fbd449cc0cb88ba83c465f48ce0de3361281b2f6",
+  "detail_doc": "defects_workshop.md"
+}

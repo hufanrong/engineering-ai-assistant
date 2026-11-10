@@ -1,0 +1,114 @@
+{
+  "generated": "2026-11-10 14:01",
+  "project": "09e0d78f",
+  "total_entries": 60,
+  "assigned": 11,
+  "unassigned": 49,
+  "legal": [
+    "粗碎车间"
+  ],
+  "abnormal_count": 9,
+  "abnormal_files": 9,
+  "note": "文件名已脱敏（sha 前缀 + 图种 + 扩展名）；仓库是公开的，不放完整业务文件名。",
+  "cases": [
+    {
+      "workshop": "相国四站",
+      "source": "content",
+      "confidence": 0.55,
+      "candidates": [
+        "相国四站"
+      ],
+      "file_masked": "2c90ff4f3662_****润滑装置****.pdf",
+      "sha256_12": "2c90ff4f3662",
+      "raw_text_hint": "…回国图目 / ETE / la|h / 相国四站 / zs! / BEL…（OCR 噪声，本行只此一词）"
+    },
+    {
+      "workshop": "磨辊润滑站",
+      "source": "filename",
+      "confidence": 0.75,
+      "candidates": [
+        "磨辊润滑站"
+      ],
+      "file_masked": "411dc0ccb980_****外形图****.pdf",
+      "sha256_12": "411dc0ccb980",
+      "raw_text_hint": "（设备名，无正文截断）"
+    },
+    {
+      "workshop": "减速机润滑站",
+      "source": "filename",
+      "confidence": 0.75,
+      "candidates": [
+        "减速机润滑站"
+      ],
+      "file_masked": "434395375ec0_****外形图****.pdf",
+      "sha256_12": "434395375ec0",
+      "raw_text_hint": "（设备名，无正文截断）"
+    },
+    {
+      "workshop": "件与件之间",
+      "source": "content",
+      "confidence": 0.55,
+      "candidates": [
+        "件与件之间"
+      ],
+      "file_masked": "617056f2605a_****检修平台****.pdf",
+      "sha256_12": "617056f2605a",
+      "raw_text_hint": "…技术要求: / 件与件之间采用焊接连接，焊接要求应符合GB50205的规定；1. …"
+    },
+    {
+      "workshop": "液压站",
+      "source": "filename",
+      "confidence": 0.75,
+      "candidates": [
+        "液压站"
+      ],
+      "file_masked": "7d49cbfb4d75_****外形图****.pdf",
+      "sha256_12": "7d49cbfb4d75",
+      "raw_text_hint": "（设备名，无正文截断）"
+    },
+    {
+      "workshop": "相对室",
+      "source": "content",
+      "confidence": 0.55,
+      "candidates": [
+        "相对室"
+      ],
+      "file_masked": "7df8d3ccd3dc_****防雷接地****.dwg",
+      "sha256_12": "7df8d3ccd3dc",
+      "raw_text_hint": "…预埋不锈钢端子板 / 100X100X6mm, / 相对室外地坪高度 / 0.5m, / 用于测试或连接人工接地体…"
+    },
+    {
+      "workshop": "磨辊加载液压站",
+      "source": "content",
+      "confidence": 0.55,
+      "candidates": [
+        "磨辊加载液压站"
+      ],
+      "file_masked": "98c376188f17_****工艺图****.dwg",
+      "sha256_12": "98c376188f17",
+      "raw_text_hint": "（设备名，无正文截断）"
+    },
+    {
+      "workshop": "主减速机油站",
+      "source": "filename",
+      "confidence": 0.75,
+      "candidates": [
+        "主减速机油站"
+      ],
+      "file_masked": "a85547f154fb_****管路布置图****.pdf",
+      "sha256_12": "a85547f154fb",
+      "raw_text_hint": "（设备名，无正文截断）"
+    },
+    {
+      "workshop": "磨辊加载液压站",
+      "source": "content",
+      "confidence": 0.55,
+      "candidates": [
+        "磨辊加载液压站"
+      ],
+      "file_masked": "afa35f1cca51_****工艺图****.dwg",
+      "sha256_12": "afa35f1cca51",
+      "raw_text_hint": "（设备名，无正文截断）"
+    }
+  ]
+}
