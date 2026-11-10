@@ -92,3 +92,4 @@ workbench/data/projects/
 
 # 程序自更新下载的安装包/备份（运行期产物，不进版本库）
 workbench/updates/
+reports/service.out
