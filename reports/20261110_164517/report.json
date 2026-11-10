@@ -1,0 +1,84 @@
+{
+  "run_id": "20261110_164517",
+  "started": "2026-11-10 16:45:17",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "f2ffb6ce1e45e8d3a293a076f00a90e1a7f1d8e8",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "沿用在线服务",
+      "rc": 0,
+      "out": "服务在线且版本一致(0.1.231)，跳过重启（不打断正在使用的人）"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 50, \"failed\": 1, \"skipped\": 0, \"by_phase\": {\"1\": {\"passed\": 18, \"failed\": 1, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}}}",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=1344 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "专项回归套件",
+      "rc": 0,
+      "out": "P21/F0/T21 -> suites.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1 P50/F1/S0 suites_fail=0"
+    }
+  ],
+  "summary": {
+    "passed": 50,
+    "failed": 1,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 18,
+        "failed": 1,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "f2ffb6ce1e45e8d3a293a076f00a90e1a7f1d8e8",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-10 16:59:30",
+  "commit_before": "f2ffb6ce1e45e8d3a293a076f00a90e1a7f1d8e8",
+  "commit_after": "c5a35bbad4ec9ebe35063935d2fe7c53c40706a6"
+}

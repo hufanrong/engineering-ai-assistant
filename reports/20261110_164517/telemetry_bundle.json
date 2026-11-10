@@ -1,0 +1,640 @@
+{
+ "bundle_version": 1,
+ "generated_at": "2026-11-10 16:55:06",
+ "window": {
+  "from": "2026-11-10 11:27:34",
+  "to": "2026-11-10 16:55:06",
+  "span_min": 327.5
+ },
+ "requests": {
+  "total": 1344,
+  "by_route": [
+   {
+    "route": "GET /api/parse/queue",
+    "n": 842,
+    "p50_ms": 76.4,
+    "p95_ms": 123.8,
+    "max_ms": 2003.2,
+    "status_2xx": 842,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/scan/status",
+    "n": 252,
+    "p50_ms": 0.6,
+    "p95_ms": 46.4,
+    "max_ms": 209.0,
+    "status_2xx": 252,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/results/<id>",
+    "n": 60,
+    "p50_ms": 3.1,
+    "p95_ms": 28.1,
+    "max_ms": 527.4,
+    "status_2xx": 60,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/projects/current",
+    "n": 32,
+    "p50_ms": 26.0,
+    "p95_ms": 56.6,
+    "max_ms": 86.6,
+    "status_2xx": 32,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/status",
+    "n": 31,
+    "p50_ms": 7.6,
+    "p95_ms": 3108.7,
+    "max_ms": 9011.2,
+    "status_2xx": 31,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/workshops",
+    "n": 12,
+    "p50_ms": 20.5,
+    "p95_ms": 36.9,
+    "max_ms": 43.5,
+    "status_2xx": 12,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/delete",
+    "n": 11,
+    "p50_ms": 2878.1,
+    "p95_ms": 10406.1,
+    "max_ms": 10406.1,
+    "status_2xx": 11,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/projects",
+    "n": 10,
+    "p50_ms": 5.0,
+    "p95_ms": 48.9,
+    "max_ms": 48.9,
+    "status_2xx": 10,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/switch",
+    "n": 7,
+    "p50_ms": 9.6,
+    "p95_ms": 39.1,
+    "max_ms": 39.1,
+    "status_2xx": 7,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /",
+    "n": 7,
+    "p50_ms": 2.0,
+    "p95_ms": 117.0,
+    "max_ms": 117.0,
+    "status_2xx": 7,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files/tree",
+    "n": 6,
+    "p50_ms": 284.9,
+    "p95_ms": 430.6,
+    "max_ms": 430.6,
+    "status_2xx": 6,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files/pending",
+    "n": 6,
+    "p50_ms": 6.4,
+    "p95_ms": 8.8,
+    "max_ms": 8.8,
+    "status_2xx": 6,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completion-archive/stats",
+    "n": 6,
+    "p50_ms": 10.1,
+    "p95_ms": 32.4,
+    "max_ms": 32.4,
+    "status_2xx": 6,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/devices",
+    "n": 5,
+    "p50_ms": 11.2,
+    "p95_ms": 14.4,
+    "max_ms": 14.4,
+    "status_2xx": 5,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/scan/failed-list",
+    "n": 5,
+    "p50_ms": 19.5,
+    "p95_ms": 24.4,
+    "max_ms": 24.4,
+    "status_2xx": 5,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/update/check",
+    "n": 4,
+    "p50_ms": 1648.9,
+    "p95_ms": 2732.9,
+    "max_ms": 2732.9,
+    "status_2xx": 4,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/create",
+    "n": 3,
+    "p50_ms": 153.3,
+    "p95_ms": 314.3,
+    "max_ms": 314.3,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/completion-archive/all",
+    "n": 3,
+    "p50_ms": 127.8,
+    "p95_ms": 165.6,
+    "max_ms": 165.6,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/supervision/volume",
+    "n": 3,
+    "p50_ms": 13923.5,
+    "p95_ms": 18442.5,
+    "max_ms": 18442.5,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/export",
+    "n": 2,
+    "p50_ms": 154.4,
+    "p95_ms": 338.2,
+    "max_ms": 338.2,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive-enhanced/checklist",
+    "n": 2,
+    "p50_ms": 159.8,
+    "p95_ms": 205.7,
+    "max_ms": 205.7,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive/catalog",
+    "n": 2,
+    "p50_ms": 2.1,
+    "p95_ms": 26.4,
+    "max_ms": 26.4,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/supervision/registry",
+    "n": 2,
+    "p50_ms": 29.8,
+    "p95_ms": 431.7,
+    "max_ms": 431.7,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/files/level",
+    "n": 2,
+    "p50_ms": 173.1,
+    "p95_ms": 400.3,
+    "max_ms": 400.3,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/supervision-templates/equipment",
+    "n": 2,
+    "p50_ms": 4.3,
+    "p95_ms": 5.4,
+    "max_ms": 5.4,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/supervision-templates/generate-batch",
+    "n": 2,
+    "p50_ms": 105.9,
+    "p95_ms": 528.1,
+    "max_ms": 528.1,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completion-archive/missing",
+    "n": 2,
+    "p50_ms": 2.5,
+    "p95_ms": 3.5,
+    "max_ms": 3.5,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files",
+    "n": 1,
+    "p50_ms": 4.1,
+    "p95_ms": 4.1,
+    "max_ms": 4.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/upload-files",
+    "n": 1,
+    "p50_ms": 2202.7,
+    "p95_ms": 2202.7,
+    "max_ms": 2202.7,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/workshop/re-auto",
+    "n": 1,
+    "p50_ms": 2117.8,
+    "p95_ms": 2117.8,
+    "max_ms": 2117.8,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/update/restart",
+    "n": 1,
+    "p50_ms": 161.2,
+    "p95_ms": 161.2,
+    "max_ms": 161.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "HEAD /",
+    "n": 1,
+    "p50_ms": 0.9,
+    "p95_ms": 0.9,
+    "max_ms": 0.9,
+    "status_2xx": 0,
+    "status_4xx": 1,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/scan",
+    "n": 1,
+    "p50_ms": 7.3,
+    "p95_ms": 7.3,
+    "max_ms": 7.3,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/results",
+    "n": 1,
+    "p50_ms": 4.4,
+    "p95_ms": 4.4,
+    "max_ms": 4.4,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/search",
+    "n": 1,
+    "p50_ms": 1826.2,
+    "p95_ms": 1826.2,
+    "max_ms": 1826.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/index/reconcile",
+    "n": 1,
+    "p50_ms": 17.8,
+    "p95_ms": 17.8,
+    "max_ms": 17.8,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/index/reparse",
+    "n": 1,
+    "p50_ms": 4.2,
+    "p95_ms": 4.2,
+    "max_ms": 4.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/docgen/types",
+    "n": 1,
+    "p50_ms": 0.5,
+    "p95_ms": 0.5,
+    "max_ms": 0.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/docgen/prefill",
+    "n": 1,
+    "p50_ms": 11.1,
+    "p95_ms": 11.1,
+    "max_ms": 11.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/docgen/generate",
+    "n": 1,
+    "p50_ms": 146.3,
+    "p95_ms": 146.3,
+    "max_ms": 146.3,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/supervision-templates",
+    "n": 1,
+    "p50_ms": 6939.5,
+    "p95_ms": 6939.5,
+    "max_ms": 6939.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/docplan/status",
+    "n": 1,
+    "p50_ms": 3.1,
+    "p95_ms": 3.1,
+    "max_ms": 3.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/templates",
+    "n": 1,
+    "p50_ms": 5.5,
+    "p95_ms": 5.5,
+    "max_ms": 5.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completeness/check",
+    "n": 1,
+    "p50_ms": 34.1,
+    "p95_ms": 34.1,
+    "max_ms": 34.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completion-archive/requirements",
+    "n": 1,
+    "p50_ms": 0.9,
+    "p95_ms": 0.9,
+    "max_ms": 0.9,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive-enhanced/organize",
+    "n": 1,
+    "p50_ms": 333.7,
+    "p95_ms": 333.7,
+    "max_ms": 333.7,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive/export-enhanced",
+    "n": 1,
+    "p50_ms": 39.0,
+    "p95_ms": 39.0,
+    "max_ms": 39.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/__telemetry_probe_404__",
+    "n": 1,
+    "p50_ms": 1.1,
+    "p95_ms": 1.1,
+    "max_ms": 1.1,
+    "status_2xx": 0,
+    "status_4xx": 1,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/status",
+    "n": 1,
+    "p50_ms": 3919.6,
+    "p95_ms": 3919.6,
+    "max_ms": 3919.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/stats",
+    "n": 1,
+    "p50_ms": 67.2,
+    "p95_ms": 67.2,
+    "max_ms": 67.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   }
+  ],
+  "slow_routes": [
+   {
+    "route": "POST /api/supervision/volume",
+    "n": 3,
+    "p50_ms": 13923.5,
+    "p95_ms": 18442.5,
+    "max_ms": 18442.5,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/delete",
+    "n": 11,
+    "p50_ms": 2878.1,
+    "p95_ms": 10406.1,
+    "max_ms": 10406.1,
+    "status_2xx": 11,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/supervision-templates",
+    "n": 1,
+    "p50_ms": 6939.5,
+    "p95_ms": 6939.5,
+    "max_ms": 6939.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/status",
+    "n": 1,
+    "p50_ms": 3919.6,
+    "p95_ms": 3919.6,
+    "max_ms": 3919.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/status",
+    "n": 31,
+    "p50_ms": 7.6,
+    "p95_ms": 3108.7,
+    "max_ms": 9011.2,
+    "status_2xx": 31,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/update/check",
+    "n": 4,
+    "p50_ms": 1648.9,
+    "p95_ms": 2732.9,
+    "max_ms": 2732.9,
+    "status_2xx": 4,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/upload-files",
+    "n": 1,
+    "p50_ms": 2202.7,
+    "p95_ms": 2202.7,
+    "max_ms": 2202.7,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/workshop/re-auto",
+    "n": 1,
+    "p50_ms": 2117.8,
+    "p95_ms": 2117.8,
+    "max_ms": 2117.8,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/search",
+    "n": 1,
+    "p50_ms": 1826.2,
+    "p95_ms": 1826.2,
+    "max_ms": 1826.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   }
+  ]
+ },
+ "errors": [],
+ "parse_failures": {
+  "total_failed": 0,
+  "by_ext": {},
+  "by_fingerprint": [],
+  "by_project": {}
+ },
+ "environment": {
+  "system": "Windows",
+  "release": "11",
+  "python": "3.13.14",
+  "machine_bits": "AMD64",
+  "packages": {
+   "fastapi": "0.111.0",
+   "python-docx": "1.1.2",
+   "openpyxl": "3.1.5",
+   "ezdxf": "1.4.5",
+   "pypdf": "4.2.0",
+   "pywin32": "312",
+   "paddleocr": "3.7.0",
+   "python-multipart": "0.0.9"
+  },
+  "app_version": "0.1.231"
+ },
+ "privacy": {
+  "sanitized": true,
+  "note": "不含项目名/客户/地点/文件名/绝对路径；错误消息中的路径与长串已替换为占位符",
+  "rules": [
+   "绝对路径→<PATH>",
+   "长十六进制→<HASH>",
+   "长数字→<NUM>",
+   "引号内容→<STR>"
+  ]
+ }
+}
