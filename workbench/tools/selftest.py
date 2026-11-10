@@ -21,6 +21,7 @@
 """
 
 import argparse
+import datetime
 import json
 import os
 import platform
@@ -64,6 +65,13 @@ _ORIGIN_HAD_PROJECT = False
 #                      "哪几行是本进程写的"，清理时只删这些行
 AUDIT_SNAPSHOT = {}
 SELFTEST_TOKENS = []
+# 本次自测开始运行的时刻（%Y%m%d_%H%M），与审计流水 time 字段同格式。
+# 用来区分「本次自测写的行」与「用户历史行」，见 audit_purge_selftest_rows。
+_SELFTEST_RUN_STARTED = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+# 本次自测**自己发出的**切换动作会写进审计（"切换项目：A → B"）。
+# 这里登记确切文本，清理时逐条精确匹配，绝不按「凡切换就删」——
+# 用户自己在页面上切换的记录必须留下。见 audit_purge_selftest_rows。
+PURGE_SWITCH_ROWS = []
 _AUDIT_AFTER = {}     # 清理之后的新快照；finally 里写，用于「流水未污染」断言
 
 # v0.1.224：数据集（老板 2026-11-10 明确要求）：
@@ -273,7 +281,11 @@ def audit_snapshot():
     size 之前的历史行一个字节都不碰 —— 这样「清理自测痕迹」不可能
     误删用户的历史审计。
     """
-    snap = {"path": "", "exists": False, "lines": 0, "tail": "", "size": -1}
+    # run_started：本次运行的起始时间，格式与审计 time 字段一致（%Y%m%d_%H%M）。
+    # v0.1.230：用于把**本次自测自己写下的**「切换项目」行从流水里精确认出
+    # 来（详见 audit_purge_selftest_rows 里的说明）。历史切换记录一律不动。
+    snap = {"path": "", "exists": False, "lines": 0, "tail": "", "size": -1,
+            "run_started": _SELFTEST_RUN_STARTED}
     try:
         p = _audit_log_path()
     except Exception:  # noqa: BLE001
@@ -317,9 +329,15 @@ def audit_purge_selftest_rows():
         out["skipped"] = True
         return out
     tokens = [t for t in SELFTEST_TOKENS if t]
-    if not tokens:
-        out["skipped"] = True
-        return out
+    # v0.1.230：**没有自测项目 ≠ 没有可清理的行**。
+    # 实测（沙箱 2026-11-10，从空壳项目起跑 --phase 6）：
+    #   前=342 后=343 清除=0 建过测试项目=False
+    # 多出来的一行是阶段6 自己切回用户项目写下的「切换项目：A → B」。
+    # 原逻辑在这里 `if not tokens: skipped=True; return` —— 单跑阶段6
+    # 根本没建自测项目，于是直接跳过清理，那条切换行留在流水里，
+    # 而收尾断言要求行数完全相等 → 恒红。真机上的处置是把阶段6 整个
+    # 从 --phases 摘掉（1,2,3,5），连带 22 条跨接口一致性检查一起不测。
+    # 所以这里不能只认 tokens，还要按「本次运行窗口内的切换行」识别。
     start = AUDIT_SNAPSHOT.get("size", -1)
     if not isinstance(start, int) or start < 0:
         # v0.1.224：全新安装时 data/operation_log.jsonl 还不存在，开跑前没有字节可量，
@@ -342,12 +360,40 @@ def audit_purge_selftest_rows():
         prefix, suffix = raw[:start], raw[start:]
         text = suffix.decode("utf-8", "ignore")
         kept, removed = [], 0
+        # v0.1.230：**自测自己触发的「切换项目」行也要认出来**。
+        # 实测（2026-11-10 沙箱阶段6 单跑，真实数据 339 行）：
+        #   [FAIL] 跑完自测用户审计流水未被污染: 前=339 后=340 清除=0
+        # 多出来的那一行是
+        #   {"type":"project","content":"切换项目：实测_20261103_132055 → v01201实测_012805"}
+        # 它是本次自测自己切项目写下的，但两个端点都是**真实用户项目的名字**，
+        # tokens 里只有自测项目的名字/id，于是「精确清理」认不出它 ——
+        # 断言要求行数完全相等，就必然红。真机上的处置是把这个阶段整个
+        # 从 --phases 摘掉（1,2,3,5），连带 22 条跨接口一致性检查一起不测了。
+        # 这里按「本进程本次运行的时间窗」识别：切换行的时间戳落在本次运行内，
+        # 且形如「切换项目：A → B」，即视为自测产生的副作用精确删除。
+        # 切换行怎么识别 —— 这里必须**精确到条**，不能按「凡切换就删」。
+        # 反例：自测跑着的这十几分钟里，用户完全可能在页面上自己切一次项目，
+        # 那条是他真实的操作记录，删掉等于破坏审计的完整性 —— 而审计的
+        # 全部价值就在于事后能答出「谁在什么时候换过项目」。
+        # 所以只删「本次自测自己发出的切换」：switch_to() 每次切换前先读
+        # 当前项目名、切换后按同样的格式拼出预期行文本，登记进
+        # PURGE_SWITCH_ROWS；清理时只匹配这些**确切文本**。
+        _sw_rows = [s for s in PURGE_SWITCH_ROWS if s]
         for line in text.splitlines():
             if not line.strip():
                 continue
             if any(t in line for t in tokens):
                 removed += 1
                 continue
+            if _sw_rows:
+                try:
+                    _o = json.loads(line)
+                    _c = str(_o.get("content") or "")
+                except Exception:  # noqa: BLE001
+                    _c = ""
+                if _c and _c in _sw_rows:
+                    removed += 1
+                    continue
             kept.append(line)
         total_lines = sum(1 for ln in raw.decode("utf-8", "ignore").splitlines() if ln.strip())
         if removed:
@@ -363,6 +409,101 @@ def audit_purge_selftest_rows():
     except Exception as e:  # noqa: BLE001
         out["error"] = "%s: %s" % (type(e).__name__, e)
         return out
+
+
+def switch_for_selftest(target_id, target_name=""):
+    """自测专用的「切项目」，会把这次切换写下的审计行登记下来。（v0.1.230）
+
+    为什么必须登记：审计行 `切换项目：A → B` 是**业务动作真的写下来的**，
+    自测切了项目就会留下它。收尾断言要求「流水行数与开跑前完全一致」，
+    如果这条不清掉，断言恒红 —— 真机上的处置是把整个阶段6 从 --phases
+    摘掉（1,2,3,5），连带 22 条跨接口一致性检查一起不测。
+
+    但也不能「凡切换就删」：自测跑着的这十几分钟里，用户完全可能自己在
+    页面上切一次项目，那是真实操作记录。所以只登记**本次自测自己发出的
+    那几条**，按确切文本逐条匹配删除。
+
+    返回与 call() 相同的 (code, body, err)。
+    """
+    prev = ""
+    try:
+        _, _c, _ = call("GET", "/api/projects/current")
+        prev = str((((_c or {}).get("project") or {}).get("name") or "")
+                   or "（未选择）")
+    except Exception:  # noqa: BLE001
+        prev = "（未选择）"
+    res = call("POST", "/api/projects/switch", {"project_id": target_id})
+    # 目标名优先用调用方给的；没给就现查（切换后 /current 就是它）
+    name = target_name
+    if not name:
+        try:
+            _, _n, _ = call("GET", "/api/projects/current")
+            name = str((((_n or {}).get("project") or {}).get("name") or ""))
+        except Exception:  # noqa: BLE001
+            name = ""
+    # 切到自己是完全不写审计的（见 project_manager.set_current_project 的
+    # `_prev.get("id") != project_id`），所以同名同项目不登记。
+    if name and prev != name:
+        row = f"切换项目：{prev} → {name}"
+        if row not in PURGE_SWITCH_ROWS:
+            PURGE_SWITCH_ROWS.append(row)
+    return res
+
+
+def pick_restore_target(items, origin_pid):
+    """决定「自测收尾该把当前项目切回哪个」。（v0.1.230）
+
+    为什么单独抽成函数：这段逻辑原来内联在 run() 里，没法单独验，而它恰恰
+    踩过两次事故 ——
+      ① v0.1.195：跑完自测停在只有几份样本的自测项目上，用户以为资料丢了；
+      ② v0.1.230：上一轮残留的项目名以「自测/实测」开头就成了还原目标。
+    第二个修法是「名字像测试 → 不算」，但**名字是记录，不是判据**：
+    实测 2026-11-10 沙箱阶段6，用户真实项目叫「实测_20261103_132055」，
+    挂着 228 台设备，只因为名字以「实测」开头被判成残留，被换成
+    「v01201实测_012805」这个 0 文件 0 设备的空壳 —— 于是「防止资料丢了」
+    的代码，自己把用户的资料挪走了。
+
+    判据改为「有没有内容」：
+      · 名字像测试 **且** 文件数与设备数都为 0 → 残留，换到有内容的项目；
+      · 名字像测试但有内容 → 认定真实项目，保留（并打印说明便于复核）；
+      · 名字正常 → 保留。
+    接任者同样按内容挑，不按 updated_at：空壳刚被自测碰过、updated_at
+    反而最新，按时间挑必错。
+
+    返回 (target_id, 说明文案)。target_id 为空表示保持原样。
+    """
+    cur = next((p for p in items if p.get("id") == origin_pid), {})
+    nm = str(cur.get("name") or "")
+    fc = int(cur.get("file_count") or 0)
+    dc = int(cur.get("device_count") or 0)
+    looks_test = nm.startswith(("自测", "实测"))
+    empty = (fc == 0 and dc == 0)
+    # 判据顺序很重要：**先看内容，再看名字**。
+    # 名字不是判据 —— 「v01201实测_012805」这个名字根本不以「实测」开头，
+    # 按名字判会把它当成正常项目（本测试场景2 就是这么抓出来的）。
+    # 一个文件也没有、一台设备也没有的项目，不管叫什么，都不可能承载
+    # 用户那份现场资料；而只要它有内容，不管叫什么，都不能被换掉。
+    if not empty:
+        if looks_test:
+            return origin_pid, (f"[还原] 当前项目「{nm}」名字像测试，但有内容"
+                                f"（文件{fc}/设备{dc}）—— 认定为真实项目，保留")
+        return origin_pid, ""
+    if not looks_test:
+        # 完全空、但名字正常：仍按残留处理（空项目没有可用于校验的真实数据）
+        pass
+    real = [p for p in items
+            if int(p.get("file_count") or 0) > 0 or int(p.get("device_count") or 0) > 0]
+    real.sort(key=lambda p: (int(p.get("device_count") or 0),
+                             int(p.get("file_count") or 0),
+                             str(p.get("updated_at") or "")), reverse=True)
+    if not real:
+        return origin_pid, (f"[还原] 当前项目「{nm}」无文件无设备，"
+                            f"但库里没有别的有内容项目可切 —— 保持不动")
+    best = real[0]
+    return (best.get("id") or origin_pid,
+            f"[还原] 当前项目「{nm}」无文件无设备（测试残留），"
+            f"改用有内容的项目「{best.get('name')}」"
+            f"（文件{best.get('file_count')}/设备{best.get('device_count')}）")
 
 
 def record(phase, step, expected, actual, passed, evidence=""):
@@ -866,7 +1007,7 @@ def phase1(samples_dir):
 
     # 切回原项目
     if origin and isinstance(origin, dict) and origin.get("id"):
-        call("POST", "/api/projects/switch", {"project_id": origin["id"]})
+        switch_for_selftest(origin["id"])
 
 
 # ---------------- 阶段 2：工程资料生成 ----------------
@@ -881,7 +1022,7 @@ def phase2(samples_dir):
     # 「繁工AI_施工方案_2026...docx」这种自测产物，而 63 项断言全绿。
     # 修法：与 phase3 一样，显式切到自测项目；退出时（run() 的 finally）再切回。
     if TEST_PROJECT_ID:
-        call("POST", "/api/projects/switch", {"project_id": TEST_PROJECT_ID})
+        switch_for_selftest(TEST_PROJECT_ID)
 
     code, types, err = call("GET", "/api/docgen/types")
     tl = types if isinstance(types, list) else ((types or {}).get("types") or [])
@@ -951,7 +1092,7 @@ def phase3(samples_dir):
     # 不切过去的话，「竣工资料统计」读到的是用户当前项目的清单（通常是 0），
     # 这个 FAIL 是测试自己的上下文错了，不是产品缺陷。
     if TEST_PROJECT_ID:
-        call("POST", "/api/projects/switch", {"project_id": TEST_PROJECT_ID})
+        switch_for_selftest(TEST_PROJECT_ID)
     # 数据根：不能拿 --inproc 传进来的那个目录去推（那只是 sys.path 入口，
     # 代码实际所在目录可能不同）。进程内模式直接问产品自己的 config；
     # HTTP 模式取脚本所在目录的上一级（tools/selftest.py → workbench/data）。
@@ -1068,8 +1209,18 @@ def phase3(samples_dir):
            f"total={((rb or {}).get('registry') or {}).get('total')} err={err}",
            _reg_ok, err)
 
+    # v0.1.230：整卷接口在**真实资料**上要 85 秒以上。
+    # 实测（沙箱 2026-11-10，项目 322fef90 / 19 个车间 / 228 台设备）：
+    #   registry 上传 200 ready=True total=3
+    #   紧接着 volume 调用 code=-1，耗时 85.4s → 撞上默认 TIMEOUT=60
+    # 于是自测把「跑得太慢」记成 code=-1「静默空转」，判成功能失败。
+    # 这与真机遥测里 POST /api/supervision/volume 5625ms 是同一类信号：
+    # **把慢当成坏**。单独给这条足够的时间，并区分「超时」与「真失败」。
+    _VOLUME_TIMEOUT = 240
     code, vol, err = call("POST", "/api/supervision/volume",
-                          {"project_id": TEST_PROJECT_ID, "book": "第一册", "workshop": DS["workshop"]})
+                          {"project_id": TEST_PROJECT_ID, "book": "第一册",
+                           "workshop": DS["workshop"]},
+                          timeout=_VOLUME_TIMEOUT)
     vr = (vol or {}).get("result") or (vol or {})
     generated = vr.get("generated") or []
     todo = vr.get("todo") or []
@@ -1095,7 +1246,8 @@ def phase3(samples_dir):
         expect_txt = "无产出但把缺失登记表转化为待办（非静默空转）"
     else:
         ok = False
-        expect_txt = "无产出且无待办 → 静默空转"
+        expect_txt = ("超时未返回（%ds），本轮未判定功能对错" % _VOLUME_TIMEOUT
+                      if code == -1 else "无产出且无待办 → 静默空转")
     detail = (f"{code} generated={len(generated)} todo={len(todo)} "
               f"collect={len(collect_dir)} errors={len(errors)} "
               f"静默丢弃={_unaccounted} error={reason[:60]}")
@@ -1189,7 +1341,7 @@ def phase3(samples_dir):
             for _tk in (_new_id, _new_name):
                 if _tk and _tk not in SELFTEST_TOKENS:
                     SELFTEST_TOKENS.append(_tk)
-            call("POST", "/api/projects/switch", {"project_id": _new_id})
+            switch_for_selftest(_new_id)
             # 新项目里还没生成过任何竣工资料，设备数必须为 0
             _, st_b, _ = call("GET", "/api/completion-archive/stats")
             _dev_b = (st_b or {}).get("total_devices")
@@ -1201,7 +1353,7 @@ def phase3(samples_dir):
                    f"新项目 total_devices={_dev_b} missing={_miss_b}（对照 A={_code_a} 台）",
                    _isolated, "")
             # 切回原项目，确认 A 的数据还在（隔离不是丢数据）
-            call("POST", "/api/projects/switch", {"project_id": _home_id})
+            switch_for_selftest(_home_id)
             _, st_a2, _ = call("GET", "/api/completion-archive/stats")
             _dev_a2 = (st_a2 or {}).get("total_devices")
             record(P, "切回原项目仍读到本项清单",
@@ -1456,8 +1608,7 @@ def phase6(samples_dir):
     except Exception:  # noqa: BLE001
         pass
     if _ORIGIN_PID:
-        _code_sw, _sw, _ = call("POST", "/api/projects/switch",
-                                {"project_id": _ORIGIN_PID})
+        _code_sw, _sw, _ = switch_for_selftest(_ORIGIN_PID)
         _ok_sw = (_code_sw == 200 and (_sw or {}).get("ok", True))
     else:
         _ok_sw = False
@@ -1804,7 +1955,13 @@ def phase6(samples_dir):
     _st_path = os.path.join(_here, "tools", "selftest.py")
     _st_src = _src(_st_path)
     _p2 = _st_src.split("def phase2(", 1)[-1].split("def phase3(", 1)[0] if "def phase2(" in _st_src else ""
-    _p2_switch = "projects/switch" in _p2 and "TEST_PROJECT_ID" in _p2
+    # v0.1.230：切换调用已统一收口到 switch_for_selftest()（为了把「本次自测
+    # 写下的切换审计行」登记下来、收尾精确清理）。这条断言原来的判据是
+    # 源码里出现字面量 "projects/switch"，收口后自然找不到 —— 它验的是
+    # 「phase2 进入时切到了 TEST_PROJECT_ID」这个**行为**，不是某种写法，
+    # 所以两种写法都认。
+    _p2_switch = (("projects/switch" in _p2 or "switch_for_selftest(" in _p2)
+                  and "TEST_PROJECT_ID" in _p2)
     ok15 = bool(_st_src) and _p2_switch
     record(P, "生成类阶段先切到自测项目再生成",
            "phase2 进入时显式切到 TEST_PROJECT_ID，产物不落用户项目",
@@ -2099,15 +2256,11 @@ def main():
             _, _pl, _ = call("GET", "/api/projects")
             _items = (_pl or {}).get("projects") or []
             _cur = next((p for p in _items if p.get("id") == _origin_pid), {})
-            _nm = str(_cur.get("name") or "")
-            if _nm.startswith("自测") or _nm.startswith("实测"):
-                _real = [p for p in _items
-                         if not str(p.get("name") or "").startswith(("自测", "实测"))]
-                _real.sort(key=lambda p: str(p.get("updated_at") or ""), reverse=True)
-                if _real:
-                    print(f"[还原] 当前项目是测试残留「{_nm}」，"
-                          f"改用最近的真实项目「{_real[0].get('name')}」")
-                    _origin_pid = _real[0].get("id") or ""
+            _target, _msg = pick_restore_target(_items, _origin_pid)
+            if _msg:
+                print(_msg)
+            if _target and _target != _origin_pid:
+                _origin_pid = _target
         except Exception:  # noqa: BLE001
             pass
 
@@ -2161,8 +2314,7 @@ def main():
     finally:
         # 即使某阶段抛异常，也必须把用户的当前项目还回去
         if _origin_pid:
-            _code_r, _rb, _ = call("POST", "/api/projects/switch",
-                                   {"project_id": _origin_pid})
+            _code_r, _rb, _ = switch_for_selftest(_origin_pid)
             _ok_r = (_code_r == 200 and (_rb or {}).get("ok", True))
             print(f"[还原] 当前项目切回 {_origin_pid} → {'OK' if _ok_r else 'FAILED'}")
 
