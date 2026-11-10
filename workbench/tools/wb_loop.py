@@ -787,6 +787,51 @@ def run_suites(out_dir):
         log(f"  [WARN] suites.json 写入失败：{type(e).__name__}: {e}")
     return passed, failed, items
 
+def _write_transport(out_dir, run_id, pushed, steps):
+    """把回传结果落到 transport.json —— 本地留档，不进版本库。
+
+    v0.1.228：原来这些信息（pushed / git add|commit|push 三步的 rc）是 push 完
+    再调一次 write_report_files 补写进 report.json 的。可那次补写发生在 commit
+    之后，于是「提交 → 又改 → 不再提交」，每一轮收尾工作区都是脏的。下一轮
+    PULL 段的 `git stash -u` 又会把刚建好的空报告目录一起 stash 掉 —— 这是
+    外部包装 auto_round.py 存在的唯一理由。信息没丢，只是换了个不进库的地方。
+    """
+    try:
+        payload = {"run_id": run_id,
+                   "pushed": bool(pushed),
+                   "report_commit": local_head(),
+                   "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
+                   "steps": steps}
+        with open(os.path.join(out_dir, "transport.json"), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except OSError as e:  # 写不进去也不该影响本轮判定
+        log(f"[警告] transport.json 写入失败：{type(e).__name__}: {e}")
+
+
+def _assert_clean_after_push(out_dir, pushed):
+    """守门：回传结束后，工作区里不应再有「已修改」的跟踪文件。
+
+    这是这一轮修掉的根因的看门狗。脏了不抛异常（会把好端端的一轮判成失败），
+    但必须留证据，否则下一轮 PULL 悄悄走 git stash，又把报告目录吃掉，
+    现象和当初一模一样，却再也查不到是从哪一轮开始脏的。
+    证据写在 reports/_dirty_after_push.txt（reports/_* 已被 .gitignore 挡住）。
+    """
+    rc, out, err = git("status", "--porcelain", "--untracked-files=no")
+    if rc != 0:
+        log(f"[警告] 收尾自检拿不到 git status：{err[:120]}")
+        return
+    dirty = [l for l in out.splitlines() if l.strip()]
+    if not dirty:
+        return
+    log(f"[警告] 回传后仍有 {len(dirty)} 个跟踪文件被改动：{dirty[:5]}")
+    try:
+        with open(os.path.join(REPORTS_DIR, "_dirty_after_push.txt"), "w",
+                  encoding="utf-8") as f:
+            f.write(f"run={os.path.basename(out_dir)} pushed={pushed}\n")
+            f.write("\n".join(dirty) + "\n")
+    except OSError:
+        pass
+
 
 # ---------------------------------------------------------------- 一轮
 def one_round(args):
@@ -861,6 +906,11 @@ def one_round(args):
         """收尾：写盘 → （可选）提交回传 → 记账。
 
         顺序很重要：必须先落盘再 commit，否则 --once 的报告进不了远端。
+
+        v0.1.228：push 之后**不再**补写 report.json。补写发生在 commit 之后，
+        等于每轮都往工作区留一处脏改动，下一轮 PULL 的 `git stash -u` 可能连带
+        收走新建的报告目录。回传结果改记到 transport.json（.gitignore 已挡），
+        收尾后 `git status` 应为空，由 _assert_clean_after_push 把关。
         """
         write_report_files(status, summary, error)
         if push and not getattr(args, "no_push", False):
@@ -868,9 +918,8 @@ def one_round(args):
             pushed, psteps = commit_and_push(run_id, out_dir, status, summary or {},
                                              err_msg=error)
             rec["steps"].extend(psteps)
-            rec["pushed"] = pushed
-            # 提交后再写一次，保证 report.json 里也含回传结果
-            write_report_files(status, summary, error)
+            _write_transport(out_dir, run_id, pushed, psteps)
+            _assert_clean_after_push(out_dir, pushed)
         record_state(status, summary)
         log(f"本轮结束 status={status} 报告在 reports/{run_id}/")
         return status

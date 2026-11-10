@@ -823,7 +823,23 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #     _get_ocr() 里改成先 import torch 再 import paddleocr。
 #     识别质量对工程图纸一般（噪声多），但「有字可搜」远好过「0 字」。
 
-APP_VERSION = "0.1.227"
+# 【v0.1.228】自测循环每轮收尾后工作区必定是脏的 —— 根因是「先提交、后补写」。
+#
+#   现象：reports/<ts>/report.json 与 reports/.wb_loop_state.json 在远端提交里
+#         是旧内容，本地却是新内容；每轮结束 `git status` 都有 2~3 个文件被改。
+#   根因：wb_loop.finish() 先落盘再 commit（这一步是对的），但 push 完成后又把
+#         回传结果（pushed / git add|commit|push 的 rc）补写回 report.json；
+#         记账函数 record_state 也在 commit 之后写 .wb_loop_state.json。两个文件
+#         都是**跟踪文件**，于是「提交 → 又改 → 不再提交」，脏状态每轮必现。
+#   后果：下一轮 PULL 段看到脏工作区就 `git stash -u`，而 stash 会把刚 makedirs
+#         出来的**空报告目录**一并收走 → 那一轮报告目录凭空消失。外部包装脚本
+#         D:\fangong-auto\auto_round.py 当初就是为了绕开这个缺陷才写的。
+#   修法：① push 结果改记 reports/<ts>/transport.json，状态文件挪出跟踪范围，
+#         两者都进 .gitignore；② 收尾多加一道 _assert_clean_after_push()，
+#         脏了就留证据到 reports/_dirty_after_push.txt，不再无声无息。
+#   验证：一轮跑完后 `git status --porcelain -uno` 必须为空；auto_round.py 可以退休。
+
+APP_VERSION = "0.1.228"
 
 # 解析能力版本号（与 APP_VERSION 独立：界面/接口小改动不必重解析全库）。
 # **只要改了「同一份文件能抽出多少内容」，就把这个号加一** ——

@@ -1,0 +1,26 @@
+$ D:\fangong-workbench\workbench\venv\Scripts\python.exe D:\fangong-workbench\workbench\tools\selftest.py --phase 4 --base http://127.0.0.1:8756
+
+[stdout]
+[审计] 开跑前流水：23 行（D:\fangong-workbench\workbench\data\operation_log.jsonl）
+[审计] 开跑前项目：有 当前项目=0c9a4b2d
+[数据集] 真实工程资料：马诺诺 / 65 个文件
+         目录 D:\fangong-workbench\workbench\data\uploads
+         基准 车间=粗碎车间 设备=Y0#胶带输送机(位号 无) 检索词=粗碎车间
+
+=== 阶段 4：竣工图清稿 ===
+  [PASS] 清稿环境自检: 200 ready=True missing=[] platform=Windows
+  [PASS] 待清稿图纸清单: 200 count=25
+  [FAIL] 清稿执行: -1 status=(空) failed=None None
+  [PASS] 原图 MD5 不变: c76077df05e6 -> c76077df05e6
+  [FAIL] 处理日志: log_file=(空) exists=False; 顶层条目=0
+  [FAIL] 成果 PDF:  (0B)
+[还原] 当前项目切回 0c9a4b2d → OK
+[审计] 本次运行未建测试项目，无可清理行
+
+===== 汇总：通过 3 / 失败 3 =====
+报告：D:\fangong-workbench\workbench\tools\selftest_report.json
+     D:\fangong-workbench\workbench\tools\selftest_report.md
+
+
+[stderr]
+

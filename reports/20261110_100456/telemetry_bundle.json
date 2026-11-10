@@ -1,0 +1,219 @@
+{
+ "bundle_version": 1,
+ "generated_at": "2026-11-10 10:10:06",
+ "window": {
+  "from": "2026-11-10 10:02:06",
+  "to": "2026-11-10 10:10:06",
+  "span_min": 8.0
+ },
+ "requests": {
+  "total": 32,
+  "by_route": [
+   {
+    "route": "GET /api/status",
+    "n": 11,
+    "p50_ms": 9.2,
+    "p95_ms": 1790.2,
+    "max_ms": 1790.2,
+    "status_2xx": 11,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/projects/current",
+    "n": 7,
+    "p50_ms": 26.7,
+    "p95_ms": 51.7,
+    "max_ms": 51.7,
+    "status_2xx": 7,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/switch",
+    "n": 2,
+    "p50_ms": 3.7,
+    "p95_ms": 24.5,
+    "max_ms": 24.5,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/projects",
+    "n": 2,
+    "p50_ms": 2.9,
+    "p95_ms": 5.8,
+    "max_ms": 5.8,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/export",
+    "n": 1,
+    "p50_ms": 56.8,
+    "p95_ms": 56.8,
+    "max_ms": 56.8,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files",
+    "n": 1,
+    "p50_ms": 3.1,
+    "p95_ms": 3.1,
+    "max_ms": 3.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files/tree",
+    "n": 1,
+    "p50_ms": 11.5,
+    "p95_ms": 11.5,
+    "max_ms": 11.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files/pending",
+    "n": 1,
+    "p50_ms": 3.0,
+    "p95_ms": 3.0,
+    "max_ms": 3.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/create",
+    "n": 1,
+    "p50_ms": 51.5,
+    "p95_ms": 51.5,
+    "max_ms": 51.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/upload-files",
+    "n": 1,
+    "p50_ms": 1977.5,
+    "p95_ms": 1977.5,
+    "max_ms": 1977.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/workshops",
+    "n": 1,
+    "p50_ms": 3.8,
+    "p95_ms": 3.8,
+    "max_ms": 3.8,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/supervision-templates/equipment",
+    "n": 1,
+    "p50_ms": 4.6,
+    "p95_ms": 4.6,
+    "max_ms": 4.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/tools/dwg-cleaner/status",
+    "n": 1,
+    "p50_ms": 385.7,
+    "p95_ms": 385.7,
+    "max_ms": 385.7,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/tools/dwg-cleaner/drawings",
+    "n": 1,
+    "p50_ms": 2.7,
+    "p95_ms": 2.7,
+    "max_ms": 2.7,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   }
+  ],
+  "slow_routes": [
+   {
+    "route": "POST /api/upload-files",
+    "n": 1,
+    "p50_ms": 1977.5,
+    "p95_ms": 1977.5,
+    "max_ms": 1977.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/status",
+    "n": 11,
+    "p50_ms": 9.2,
+    "p95_ms": 1790.2,
+    "max_ms": 1790.2,
+    "status_2xx": 11,
+    "status_4xx": 0,
+    "status_5xx": 0
+   }
+  ]
+ },
+ "errors": [],
+ "parse_failures": {
+  "total_failed": 25,
+  "by_ext": {
+   ".dwg": 25
+  },
+  "by_fingerprint": [
+   {
+    "fingerprint": "failed|未找到 ODA File Converter：请安装（自动搜索 Program Files 任意版本目录），或设置环境变量 ODA_CONVERTER 指向 ODAFileConverter.exe，或用 AutoCAD 另存为 DXF",
+    "count": 25
+   }
+  ],
+  "by_project": {
+   "ffe3de74": 25
+  }
+ },
+ "environment": {
+  "system": "Windows",
+  "release": "11",
+  "python": "3.13.14",
+  "machine_bits": "AMD64",
+  "packages": {
+   "fastapi": "0.111.0",
+   "python-docx": "1.1.2",
+   "openpyxl": "3.1.5",
+   "ezdxf": "1.4.5",
+   "pypdf": "4.2.0",
+   "pywin32": "312",
+   "paddleocr": "3.7.0",
+   "python-multipart": "0.0.9"
+  },
+  "app_version": "0.1.227"
+ },
+ "privacy": {
+  "sanitized": true,
+  "note": "不含项目名/客户/地点/文件名/绝对路径；错误消息中的路径与长串已替换为占位符",
+  "rules": [
+   "绝对路径→<PATH>",
+   "长十六进制→<HASH>",
+   "长数字→<NUM>",
+   "引号内容→<STR>"
+  ]
+ }
+}
