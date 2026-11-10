@@ -1,0 +1,95 @@
+{
+  "run_id": "20261110_071929",
+  "started": "2026-11-10 07:19:29",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "21e2ab55ab9505b82bc236b2876dcfda57926981",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "taskkill 11368",
+      "rc": 0,
+      "out": "SUCCESS: The process with PID 11368 has been terminated.",
+      "err": ""
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 74, \"failed\": 0, \"skipped\": 2, \"by_phase\": {\"1\": {\"passed\": 15, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"4\": {\"passed\": 6, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"p",
+      "err": "D:\\fangong-workbench\\workbench\\venv\\Lib\\site-packages\\fitz\\__init__.py:17: FutureWarning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.\n  warnings.warn(\n[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {\"count\":55,\"threshold\":50,\"scope\":\"turn\",\"targets\":[\""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=149 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1"
+    }
+  ],
+  "summary": {
+    "passed": 74,
+    "failed": 0,
+    "skipped": 2,
+    "by_phase": {
+      "1": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "4": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 2
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "21e2ab55ab9505b82bc236b2876dcfda57926981",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-10 07:24:27",
+  "commit_before": "21e2ab55ab9505b82bc236b2876dcfda57926981",
+  "commit_after": "21e2ab55ab9505b82bc236b2876dcfda57926981"
+}
