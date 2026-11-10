@@ -49,6 +49,10 @@ TEST_PROJECT_ID = ""
 # （沙箱里累积 74 个测试残留、59 个 0 文件 0 设备）。
 CREATED_PIDS = []
 _ORIGIN_PID = ""      # run() 记下的用户原项目 id；phase6 用它切回来校验真实项目
+# v0.1.224：全新安装时（data/ 里一个项目都没有）本来就没有「用户原项目」可切回。
+# 这不是缺陷，但原来一律记成 FAIL，于是用户装好第一次跑自检就看到 2 条红：
+# 一条「切不回去」、一条「审计被污染」。判断依据要分开记：开跑前到底有没有项目。
+_ORIGIN_HAD_PROJECT = False
 
 # v0.1.217：自测是"真的在建项目/切项目/删项目"，因此会真的写审计流水。
 # 上一轮实测：一次全量自测把用户真实 data/operation_log.jsonl 从 325 行涨到
@@ -299,8 +303,17 @@ def audit_purge_selftest_rows():
         return out
     start = AUDIT_SNAPSHOT.get("size", -1)
     if not isinstance(start, int) or start < 0:
-        out["error"] = "无开跑前字节边界，跳过清理（历史行未动）"
-        return out
+        # v0.1.224：全新安装时 data/operation_log.jsonl 还不存在，开跑前没有字节可量，
+        # 快照 size 是 -1。原来的处理是「无边界 → 跳过清理」，于是本次自测写的
+        # 6 行全部留在用户流水里，收尾断言「行数与开跑前一致」必然失败 ——
+        # 用户装好第一次跑自检就看到一条红，而他什么也没做错。
+        # 正确语义：文件开跑前不存在 == 历史为空 == 历史边界在字节 0，
+        # 之后整个文件都是本次运行写的，按 token 精确删即可，删完应为 0 行。
+        if not AUDIT_SNAPSHOT.get("exists"):
+            start = 0
+        else:
+            out["error"] = "无开跑前字节边界，跳过清理（历史行未动）"
+            return out
     try:
         with open(p, "rb") as f:
             raw = f.read()
@@ -1224,11 +1237,21 @@ def phase6(samples_dir):
         _ok_sw = False
     # 无论成功与否都要落一条记录：这条断言的作用是证明「下面那些比对是在用户
     # 真实项目上做的」，不记录就等于无法核实（全绿也可能是验错了项目）。
-    record(P, "在用户原项目上校验",
-           "切回用户原项目后再做交叉比对",
-           f"切换前={_cur_before or '?'} 目标={_ORIGIN_PID or '?'} 切换={_ok_sw}",
-           bool(_ok_sw) and bool(_ORIGIN_PID),
-           "切不回去时本阶段验的是临时项目，6.11 这类断言会假通过")
+    # v0.1.224：全新安装（data/ 里没有任何项目）时没有「用户原项目」可切，
+    # 这属于初始状态而不是缺陷 —— 记 SKIP（None），并把判据写清楚。
+    # 只有在「开跑前确实有项目、却切不回去」时才算失败，那才是真的验错了地方。
+    if not _ORIGIN_HAD_PROJECT and not _ORIGIN_PID:
+        record(P, "在用户原项目上校验",
+               "全新安装无用户项目时跳过（下面比对的仍是真实空库）",
+               f"开跑前项目=无 当前项目={'无' if not _cur_before else _cur_before}",
+               None,
+               "无项目可切回属初始状态，不是缺陷；有项目时切不回才算失败")
+    else:
+        record(P, "在用户原项目上校验",
+               "切回用户原项目后再做交叉比对",
+               f"切换前={_cur_before or '?'} 目标={_ORIGIN_PID or '?'} 切换={_ok_sw}",
+               bool(_ok_sw) and bool(_ORIGIN_PID),
+               "切不回去时本阶段验的是临时项目，6.11 这类断言会假通过")
 
     # 6.1 版本号：把**所有**对外报版本的接口摆在一起比，而不是只比两点。
     # v0.1.211：原来只比 /api/status 与 /api/update/check 两处，于是漏掉了
@@ -1830,8 +1853,19 @@ def main():
             pass
     # v0.1.212：暴露给 phase6 —— 它必须切回用户原项目校验，
     # 否则全量自测时它验的是临时自测项目（详见 phase6 里的说明）。
-    global _ORIGIN_PID
+    global _ORIGIN_PID, _ORIGIN_HAD_PROJECT
     _ORIGIN_PID = _origin_pid
+    # v0.1.224：全新安装时 data/ 里没有任何项目，_origin_pid 本来就是空。
+    # 这是**正常的初始状态**，不是「切不回去」。所以这里同时记下开跑前是否
+    # 存在项目，phase6 据此区分「无项目可切（跳过）」与「有项目却没切回（失败）」。
+    try:
+        _code_p0, _p0, _ = call("GET", "/api/projects")
+        _had = int((_p0 or {}).get("total") or 0) > 0 if isinstance(_p0, dict) else False
+    except Exception:  # noqa: BLE001
+        _had = bool(_origin_pid)
+    _ORIGIN_HAD_PROJECT = bool(_had or _origin_pid)
+    print(f"[审计] 开跑前项目：{'有' if _ORIGIN_HAD_PROJECT else '无（全新安装）'} "
+          f"当前项目={_origin_pid or '无'}")
 
 
     print(f"造样本 -> {sdir}")

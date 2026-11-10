@@ -928,6 +928,18 @@ def _merge_index_devices(graph: dict, ledger: dict) -> dict:
     """
     devs = _normalize_device_list(graph.get("devices"))
     graph["devices"] = devs
+    # v0.1.224：stats.devices 必须**任何情况下**都等于实际条数。
+    # 缺陷（真机实测暴露）：原来只在「从台账新增了设备」的分支里写
+    # stats["devices"]，空项目/纯图纸项目（ledger 为空）直接 return，
+    # stats 还是 _blank_graph() 里的 {} → stats.devices 取出来是 None，
+    # 而 devices 列表是 []。同一时刻两个来源对「有几台设备」给出不同答案：
+    # 列表说 0、stats 说「没有这个字段」，界面/下游按 stats 读就变成未知。
+    # 这与本项目反复出现的「同一件事两个答案」是同一母题，所以在出口处统一写。
+    _st0 = graph.get("stats")
+    if not isinstance(_st0, dict):
+        _st0 = {}
+        graph["stats"] = _st0
+    _st0["devices"] = len(devs)
     if not ledger:
         return graph
     have = {d.get("tag") for d in devs if isinstance(d, dict)}
@@ -1031,29 +1043,7 @@ def load_relations() -> dict:
         ledger = _load_index().get("devices") or {}
     except Exception:  # noqa: BLE001
         ledger = {}
-    graph = _merge_index_devices(graph, ledger)
-
-    # v0.1.221：stats 恒为 dict，且计数与真实条数对齐。
-    #
-    # 缺陷（实测 2026-11-09，三台真实项目全部复现）：磁盘上的 relations.json
-    # 只有 devices / workshops / relations 三个键，**根本没有 stats**；
-    # 而 _merge_index_devices() 只在「确实补进了台账设备」时才顺手建 stats。
-    # 于是 /api/relations 返回 devices 有值、stats 却是 None，
-    # 自测阶段⑥「设备数自身一致」（断言 len(devices)==stats.devices）必挂，
-    # 而它看起来像业务数据坏了，实际是接口契约没兜底。
-    #
-    # stats 是派生摘要，读的时候按真实条数重算，让这个不变量由结构保证，
-    # 不再依赖「谁最后写了 stats」。
-    st = graph.get("stats")
-    if not isinstance(st, dict):
-        st = {}
-        graph["stats"] = st
-    devices_now = graph.get("devices") or []
-    workshops_now = graph.get("workshops") or []
-    st["devices"] = len(devices_now)
-    st["workshops"] = len(workshops_now)
-    st.setdefault("docs", 0)
-    return graph
+    return _merge_index_devices(graph, ledger)
 
 
 def save_relations(relations: dict):

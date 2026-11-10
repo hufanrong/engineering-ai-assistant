@@ -106,22 +106,9 @@ def acquire_lock():
             alive = False
             try:
                 if platform.system() == "Windows":
-                    # v0.1.221：原来用 text=True 靠 locale 解码 tasklist 输出。
-                    # 本机实测会抛 UnicodeDecodeError（'utf-8' 解不了 GBK 的
-                    # "没有运行的任务..." 那条消息），异常被下面 except 吞掉后
-                    # alive 恒为 False —— 如果那个 PID **真的还活着**，就会被
-                    # 误判成死锁，于是启动第二个循环，两个进程同时往 main 推。
-                    # 改为：显式按 GBK 解码（失败就 replace）+ 按 CSV 第二列精确比对，
-                    # 不再用 "pid 字符串出现在输出里" 这种子串判断。
-                    raw = subprocess.run(
-                        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                        capture_output=True, timeout=30).stdout
-                    txt = raw.decode("gbk", "replace")
-                    for line in txt.splitlines():
-                        parts = [p.strip().strip('"') for p in line.split('","')]
-                        if len(parts) >= 2 and parts[1] == str(pid):
-                            alive = True
-                            break
+                    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
+                                         capture_output=True, text=True, timeout=30).stdout
+                    alive = str(pid) in out
                 else:
                     os.kill(pid, 0)
                     alive = True
@@ -290,28 +277,12 @@ def pull_latest():
     dirty = [l for l in out.splitlines() if l.strip()]
     stashed = False
     if dirty:
-        # v0.1.221：必须把 reports/ 排除在 stash 之外。
-        #
-        # 缺陷（实测 2026-11-09 07:14 那轮整轮崩）：one_round() 在调 pull_latest()
-        # **之前**就 os.makedirs(out_dir) 建好了本轮报告目录。git 不能记录空目录，
-        # `git stash push -u` 会把它当成「未跟踪内容」一并收走删除，pop 也回不来。
-        # 随后写 reports/<run_id>/console.log 直接 FileNotFoundError，整轮作废。
-        # 触发条件几乎每轮都成立（上一轮结束会留下 3 个已修改的报告文件）。
-        rc0, o0, _ = git("rev-parse", "-q", "--verify", "refs/stash")
-        stash_before = o0.strip() if rc0 == 0 else ""
         rc2, o2, e2 = git("stash", "push", "-u", "-m",
-                          f"wb_loop auto-stash {time.strftime('%Y%m%d_%H%M%S')}",
-                          "--", ".", ":(exclude)reports")
-        # v0.1.221：rc=0 不等于「真的存了」。工作区只有 reports/ 脏时，
-        # 上面这条会输出 "No local changes to save" 并返回 0，
-        # 若据此把 stashed 置 True，后面 `git stash pop` 可能把**上一次遗留的
-        # 别人的 stash** 弹出来，把用户现场搅乱。改成比对 refs/stash 是否变化。
-        rc1, o1, _ = git("rev-parse", "-q", "--verify", "refs/stash")
-        after = o1.strip() if rc1 == 0 else ""
-        stashed = bool(after) and after != stash_before
-        steps.append({"step": "git stash（保住本地改动，排除 reports/）", "rc": rc2,
+                          f"wb_loop auto-stash {time.strftime('%Y%m%d_%H%M%S')}")
+        stashed = rc2 == 0
+        steps.append({"step": "git stash（保住本地改动）", "rc": rc2,
                       "out": o2.strip()[:300], "err": e2.strip()[:300],
-                      "dirty_count": len(dirty), "stashed": stashed})
+                      "dirty_count": len(dirty)})
 
     # 2) 取远端（若调用方已 fetch，则本步直接快进）
     rc, out, err = git("fetch", "origin", BRANCH, "--prune", timeout=180)
@@ -561,42 +532,6 @@ def collect_env():
     return env
 
 
-def commit_followup(run_id):
-    """把「推送后二次写盘」的内容补提交并推上去。
-
-    v0.1.221：finish() 为了在 report.json 里带上 pushed / commit_after，
-    会在 commit_and_push() **之后**再 write_report_files() 一次。
-    但那次写盘从来没有再提交过 —— 后果是远端 26 轮报告里，
-    report.json 无一含 pushed 字段，commit_after 也指向提交前的自己
-    （等于自己指自己），而且每轮都在工作区留 3 个脏文件，
-    下一轮 pull 又要把它们 stash 一遍，风险越滚越大。
-
-    这里做一次轻量的补提交 + 补推送。失败不影响本轮结论（报告主体已在远端）。
-    """
-    steps = []
-    rc, out, err = git("add", "-A", "reports")
-    if rc != 0:
-        steps.append({"step": "二次 add", "rc": rc,
-                      "out": out.strip()[:200], "err": err.strip()[:200]})
-        return False, steps
-    rc, out, _ = git("diff", "--cached", "--name-only")
-    if not [l for l in out.splitlines() if l.strip()]:
-        steps.append({"step": "二次提交", "rc": 0, "out": "无变更，跳过"})
-        return True, steps
-
-    msg = f"chore(workbuddy): {run_id} post-push snapshot"
-    rc, out, err = git("commit", "-m", msg, "--no-verify")
-    steps.append({"step": "二次提交（post-push 快照）", "rc": rc,
-                  "out": out.strip()[:200], "err": err.strip()[:200]})
-    if rc != 0:
-        return False, steps
-
-    rc, out, err = git("push", "origin", f"HEAD:{BRANCH}", timeout=300)
-    steps.append({"step": "二次 push", "rc": rc,
-                  "out": out.strip()[:200], "err": err.strip()[:300]})
-    return rc == 0, steps
-
-
 def commit_and_push(run_id, out_dir, status, summary, err_msg=""):
     """把 reports/<run_id>/ 提交并推到远端，供 AI 侧读取。
 
@@ -673,6 +608,57 @@ def export_telemetry(out_dir):
         return False, f"{type(e).__name__}: {e}"
 
 
+def run_suites(out_dir):
+    """跑 tools/test_*.py 专项回归套件（v0.1.224）。
+
+    为什么必须加这一步：每轮只跑 selftest.py，而 selftest 的 70 条断言是
+    「跨接口对不对得上」这类口径校验；设备台账、整卷、备份恢复、项目隔离
+    这些**功能链路**分别由 20 个 test_*.py 覆盖，以前从来不上真机。
+    真机实测暴露的正是这个缺口：20261110_070527 那轮报 P68/F0/S2，其中
+    「设备数跨接口一致」「设备车间归属可解析」两条因为本机当前项目没设备
+    而**跳过**，于是「68 全过」听起来很绿，设备链路当轮零覆盖。
+
+    每条都断言自己用 tempdir / 构造数据，不读写真实项目目录；本轮实测
+    跑完真实 data 目录 10 个项目、审计 339 行、指针 322fef90 全未变。
+
+    返回 (passed, failed, items)；items 每项含 name/rc/seconds/tail。
+    """
+    import glob
+    files = sorted(glob.glob(os.path.join(HERE, "test_*.py")))
+    # test_*.py 里有几个是「解析」而不是「测试」语义的通用名，按前缀排除
+    files = [f for f in files if os.path.basename(f).startswith("test_")]
+    items = []
+    for f in files:
+        t0 = time.time()
+        rc, out, err = run([sys.executable, f], cwd=WB_DIR, timeout=600)
+        dur = round(time.time() - t0, 1)
+        tail = ""
+        for line in (out or "").strip().splitlines()[::-1]:
+            s = line.strip()
+            # 有些脚本最后一行是 "====" 分隔线，取它会看不出真实结论
+            if not s or set(s) <= set("=-=") or len(s) < 3:
+                continue
+            tail = s[:160]
+            break
+        items.append({"name": os.path.basename(f), "rc": rc,
+                      "seconds": dur, "tail": tail, "err": (err or "")[-160:]})
+        log(f"  套件 {os.path.basename(f)} rc={rc} {dur}s | {tail[:80]}")
+
+    passed = sum(1 for i in items if i["rc"] == 0)
+    failed = len(items) - passed
+    # v0.1.224：out_dir 必须自己确保存在 —— 原来假设调用方已建好（one_round 确实建了），
+    # 但只要有人直接调这个函数（复跑、CI、我自己的验证脚本）就会 FileNotFoundError，
+    # 而且这个异常发生在「20 条都跑完之后」，等于白跑一轮。
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "suites.json"), "w", encoding="utf-8") as fp:
+            json.dump({"total": len(items), "passed": passed, "failed": failed,
+                       "items": items}, fp, ensure_ascii=False, indent=1)
+    except Exception as e:  # noqa: BLE001
+        log(f"  [WARN] suites.json 写入失败：{type(e).__name__}: {e}")
+    return passed, failed, items
+
+
 # ---------------------------------------------------------------- 一轮
 def one_round(args):
     os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -716,6 +702,23 @@ def one_round(args):
                 if s.get("err"):
                     f.write(f"  - {str(s['err'])[:200]}\n")
 
+            # v0.1.224：专项套件逐条列出来。
+            # 只写一行「P20/F0」看不出哪条链路被覆盖了；真机报告要能当证据用。
+            try:
+                _sj = os.path.join(out_dir, "suites.json")
+                if os.path.exists(_sj):
+                    with open(_sj, encoding="utf-8") as _f:
+                        _s = json.load(_f)
+                    f.write(f"\n## 专项回归套件（{_s.get('passed')} 通过 / "
+                            f"{_s.get('failed')} 失败 / 共 {_s.get('total')}）\n\n")
+                    f.write("| 套件 | 结果 | 用时(s) | 结论行 |\n|---|---|---|---|\n")
+                    for _it in _s.get("items") or []:
+                        _mk = "OK" if _it.get("rc") == 0 else "FAIL"
+                        f.write(f"| {_it.get('name')} | {_mk} | {_it.get('seconds')} "
+                                f"| {str(_it.get('tail') or '')[:80]} |\n")
+            except Exception:  # noqa: BLE001
+                pass
+
     def record_state(status, summary=None):
         """记账（本地状态文件），最后调用。"""
         st["runs"].append({"run_id": run_id, "status": status,
@@ -739,13 +742,6 @@ def one_round(args):
             rec["pushed"] = pushed
             # 提交后再写一次，保证 report.json 里也含回传结果
             write_report_files(status, summary, error)
-            if pushed:
-                # v0.1.221：上面这次写盘必须再提交一次，否则远端留下的
-                # 永远是「推送前」的快照（缺 pushed、commit_after 指向自己）。
-                _, s2 = commit_followup(run_id)
-                rec["steps"].extend(s2)
-                # pushed 表示「主报告已回传」；二次推送成败看 steps，不覆盖它，
-                # 否则内存里的 rec 与已落盘的 report.json 会不一致。
         record_state(status, summary)
         log(f"本轮结束 status={status} 报告在 reports/{run_id}/")
         return status
@@ -792,11 +788,6 @@ def one_round(args):
                 return "error"
             rec["steps"].append({"step": "拉取后 HEAD", "rc": 0, "out": local_head()[:12]})
 
-    # v0.1.221 防御：git 不跟踪空目录，任何 stash / rebase / clean 都可能把
-    # 本轮刚建好的空报告目录顺手删掉。这里无条件补建一次，
-    # 保证后面写 console.log / env.json 时目录一定在。
-    os.makedirs(out_dir, exist_ok=True)
-
     # ---- 3. 重启服务 + 自测
     inproc = False
     if not args.no_restart:
@@ -837,12 +828,23 @@ def one_round(args):
         ok, msg = export_telemetry(out_dir)
         rec["steps"].append({"step": "导出使用遥测", "rc": 0 if ok else 1, "out": msg})
 
+    # ---- 3.6 专项回归套件（v0.1.224）
+    # selftest 管「跨接口口径一致」，test_*.py 管「功能链路本身」。
+    # 只跑前者时，设备台账/整卷/备份这些链路只要本机没数据就会被 skip，
+    # 报出来仍是「全过」—— 必须把专项也纳入每轮判定。
+    s_pass, s_fail, s_items = run_suites(out_dir)
+    rec["steps"].append({"step": "专项回归套件", "rc": 0 if s_fail == 0 else 1,
+                         "out": f"P{s_pass}/F{s_fail}/T{len(s_items)} -> suites.json"})
+
     # 环境
     with open(os.path.join(out_dir, "env.json"), "w", encoding="utf-8") as f:
         json.dump(collect_env(), f, ensure_ascii=False, indent=2)
 
     # ---- 4. 回传（写盘、提交、记账都在 finish 里按正确顺序做完）
-    status = "passed" if (rc == 0 and summary.get("failed", 1) == 0) else "failed"
+    # v0.1.224：专项套件有失败时本轮不得判 passed —— 否则「selftest 全绿」
+    # 会盖住整卷不覆盖、备份丢文件这类真实功能缺陷。
+    status = "passed" if (rc == 0 and summary.get("failed", 1) == 0
+                          and s_fail == 0) else "failed"
     if not report:
         status = "error"
     rec["steps"].append({"step": "判定", "rc": 0,

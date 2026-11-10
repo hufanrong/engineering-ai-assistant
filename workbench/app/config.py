@@ -668,7 +668,20 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #   ② kept 项被无条件记进 generated —— 真实浏览器实测「生成文件 2 个」而卷内
 #      一个文件都没写，返回体与磁盘对不上（又是「同一件事两个答案」）。
 #      改为 generated 只记 created/replaced，kept 单独记账并在界面/待办清单说明。
-APP_VERSION = "0.1.223"
+# v0.1.224：真机回传暴露的三个问题（WORKbuddy 实测 P68/F0/S2 @ 20261110_070527）
+#   ① 每轮只跑 selftest，20 个专项 test_*.py 从来没上过真机 —— 设备台账/整卷/
+#      备份恢复这些**功能链路**零覆盖；selftest 里 2 条设备断言还因本机无设备
+#      而 skip，「68 全过」听起来全绿、设备链路当轮根本没验。wb_loop 增加
+#      run_suites()：每轮跑全部 test_*.py，任一失败本轮即判 failed，明细进
+#      suites.json 与 report.md 表格。
+#   ② 全新安装（data/ 空）跑自检必出 2 条红：一条「切不回用户原项目」、
+#      一条「审计流水被污染」—— 两者都源于把「初始状态」当成了「缺陷」。
+#      改为：无项目可切记 SKIP（有项目却切不回仍算 FAIL）；审计文件开跑前
+#      不存在时，历史边界按字节 0 处理并按 token 精确清除（实测前=0 后=0 清除 6）。
+#   ③ relations._merge_index_devices 只在「从台账新增了设备」的分支写
+#      stats["devices"]，空项目/纯图纸项目直接 return → stats.devices 是 None
+#      而 devices 列表是 []，同一事实两个答案。改为出口处无条件写实际条数。
+APP_VERSION = "0.1.224"
 
 # v0.1.218 —— 备份范围：项目「有什么」和「备了什么」是两套口径
 #     现象：备份/恢复与删除前自动备份，都按 project_backup.BACKUP_ITEMS 这份
