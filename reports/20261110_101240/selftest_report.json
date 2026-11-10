@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-11-10 10:20:50",
+  "base_url": "http://127.0.0.1:8756",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "python": "3.13.14"
+  },
+  "samples_dir": "D:\\fangong-workbench\\workbench\\data\\uploads",
+  "summary": {
+    "4": {
+      "passed": 3,
+      "failed": 3,
+      "skipped": 0
+    }
+  },
+  "results": [
+    {
+      "phase": 4,
+      "step": "清稿环境自检",
+      "expected": "ready=true",
+      "actual": "200 ready=True missing=[] platform=Windows",
+      "passed": true,
+      "skipped": false,
+      "evidence": "[]"
+    },
+    {
+      "phase": 4,
+      "step": "待清稿图纸清单",
+      "expected": "200",
+      "actual": "200 count=25",
+      "passed": true,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 4,
+      "step": "清稿执行",
+      "expected": "200 且 status 非失败、失败条数为 0",
+      "actual": "200 status=done failed=1 {'status': 'done', 'total': 1, 'success': 0, 'failed': 1, 'results': [{'status': 'failed', 'file': 'D:\\\\fangong-workbenc",
+      "passed": false,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 4,
+      "step": "原图 MD5 不变",
+      "expected": true,
+      "actual": "c76077df05e6 -> c76077df05e6",
+      "passed": true,
+      "skipped": false,
+      "evidence": "设计目标质量底线：原文件 MD5 全程不变"
+    },
+    {
+      "phase": 4,
+      "step": "处理日志",
+      "expected": "有逐图日志文件或日志条目",
+      "actual": "log_file=(空) exists=False; 顶层条目=0",
+      "passed": false,
+      "skipped": false,
+      "evidence": ""
+    },
+    {
+      "phase": 4,
+      "step": "成果 PDF",
+      "expected": "生成合并 PDF（文件存在且非空）",
+      "actual": " (0B)",
+      "passed": false,
+      "skipped": false,
+      "evidence": "pdf=(空) exists=False size=0B pages=None"
+    }
+  ]
+}
