@@ -1,0 +1,629 @@
+{
+ "bundle_version": 1,
+ "generated_at": "2026-11-10 11:27:34",
+ "window": {
+  "from": "2026-11-10 10:53:56",
+  "to": "2026-11-10 11:27:34",
+  "span_min": 33.6
+ },
+ "requests": {
+  "total": 669,
+  "by_route": [
+   {
+    "route": "GET /api/scan/status",
+    "n": 379,
+    "p50_ms": 2.2,
+    "p95_ms": 58.0,
+    "max_ms": 497.5,
+    "status_2xx": 379,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/parse/queue",
+    "n": 96,
+    "p50_ms": 156.9,
+    "p95_ms": 4133.5,
+    "max_ms": 4752.0,
+    "status_2xx": 96,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/results/<id>",
+    "n": 60,
+    "p50_ms": 6.0,
+    "p95_ms": 55.1,
+    "max_ms": 67.1,
+    "status_2xx": 60,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/status",
+    "n": 18,
+    "p50_ms": 20.3,
+    "p95_ms": 5403.0,
+    "max_ms": 5697.7,
+    "status_2xx": 18,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/projects/current",
+    "n": 17,
+    "p50_ms": 48.4,
+    "p95_ms": 1797.2,
+    "max_ms": 2356.0,
+    "status_2xx": 17,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/workshops",
+    "n": 10,
+    "p50_ms": 36.1,
+    "p95_ms": 621.3,
+    "max_ms": 621.3,
+    "status_2xx": 10,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/switch",
+    "n": 9,
+    "p50_ms": 22.5,
+    "p95_ms": 392.1,
+    "max_ms": 392.1,
+    "status_2xx": 9,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files/tree",
+    "n": 6,
+    "p50_ms": 49.3,
+    "p95_ms": 10522.0,
+    "max_ms": 10522.0,
+    "status_2xx": 6,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files/pending",
+    "n": 6,
+    "p50_ms": 18.2,
+    "p95_ms": 280.3,
+    "max_ms": 280.3,
+    "status_2xx": 6,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/projects",
+    "n": 5,
+    "p50_ms": 44.9,
+    "p95_ms": 1114.7,
+    "max_ms": 1114.7,
+    "status_2xx": 5,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/scan/failed-list",
+    "n": 5,
+    "p50_ms": 83.8,
+    "p95_ms": 615.7,
+    "max_ms": 615.7,
+    "status_2xx": 5,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completion-archive/stats",
+    "n": 5,
+    "p50_ms": 21.0,
+    "p95_ms": 206.3,
+    "max_ms": 206.3,
+    "status_2xx": 5,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/update/check",
+    "n": 4,
+    "p50_ms": 1088.3,
+    "p95_ms": 1275.2,
+    "max_ms": 1275.2,
+    "status_2xx": 4,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/create",
+    "n": 3,
+    "p50_ms": 428.5,
+    "p95_ms": 533.0,
+    "max_ms": 533.0,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /",
+    "n": 3,
+    "p50_ms": 124.5,
+    "p95_ms": 200.3,
+    "max_ms": 200.3,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/devices",
+    "n": 3,
+    "p50_ms": 416.8,
+    "p95_ms": 812.9,
+    "max_ms": 812.9,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completion-archive/missing",
+    "n": 3,
+    "p50_ms": 5.5,
+    "p95_ms": 6.9,
+    "max_ms": 6.9,
+    "status_2xx": 3,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/export",
+    "n": 2,
+    "p50_ms": 104.6,
+    "p95_ms": 684.0,
+    "max_ms": 684.0,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/scan",
+    "n": 2,
+    "p50_ms": 7.5,
+    "p95_ms": 8.0,
+    "max_ms": 8.0,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/results",
+    "n": 2,
+    "p50_ms": 4.1,
+    "p95_ms": 7.7,
+    "max_ms": 7.7,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/supervision-templates/equipment",
+    "n": 2,
+    "p50_ms": 7.1,
+    "p95_ms": 9.9,
+    "max_ms": 9.9,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/supervision-templates/generate-batch",
+    "n": 2,
+    "p50_ms": 114.5,
+    "p95_ms": 303.4,
+    "max_ms": 303.4,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/completion-archive/all",
+    "n": 2,
+    "p50_ms": 304.5,
+    "p95_ms": 325.1,
+    "max_ms": 325.1,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/delete",
+    "n": 2,
+    "p50_ms": 197.8,
+    "p95_ms": 8754.7,
+    "max_ms": 8754.7,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/files",
+    "n": 1,
+    "p50_ms": 5.4,
+    "p95_ms": 5.4,
+    "max_ms": 5.4,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/upload-files",
+    "n": 1,
+    "p50_ms": 4551.6,
+    "p95_ms": 4551.6,
+    "max_ms": 4551.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/index/stats",
+    "n": 1,
+    "p50_ms": 2.3,
+    "p95_ms": 2.3,
+    "max_ms": 2.3,
+    "status_2xx": 0,
+    "status_4xx": 1,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/search",
+    "n": 1,
+    "p50_ms": 2878.0,
+    "p95_ms": 2878.0,
+    "max_ms": 2878.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/index/reconcile",
+    "n": 1,
+    "p50_ms": 31.4,
+    "p95_ms": 31.4,
+    "max_ms": 31.4,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/index/reparse",
+    "n": 1,
+    "p50_ms": 4.9,
+    "p95_ms": 4.9,
+    "max_ms": 4.9,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/docgen/types",
+    "n": 1,
+    "p50_ms": 1.3,
+    "p95_ms": 1.3,
+    "max_ms": 1.3,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/docgen/prefill",
+    "n": 1,
+    "p50_ms": 117.1,
+    "p95_ms": 117.1,
+    "max_ms": 117.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/docgen/generate",
+    "n": 1,
+    "p50_ms": 208.5,
+    "p95_ms": 208.5,
+    "max_ms": 208.5,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/supervision-templates",
+    "n": 1,
+    "p50_ms": 5874.1,
+    "p95_ms": 5874.1,
+    "max_ms": 5874.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/docplan/status",
+    "n": 1,
+    "p50_ms": 4.6,
+    "p95_ms": 4.6,
+    "max_ms": 4.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/templates",
+    "n": 1,
+    "p50_ms": 9.3,
+    "p95_ms": 9.3,
+    "max_ms": 9.3,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completeness/check",
+    "n": 1,
+    "p50_ms": 86.8,
+    "p95_ms": 86.8,
+    "max_ms": 86.8,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/completion-archive/requirements",
+    "n": 1,
+    "p50_ms": 1.6,
+    "p95_ms": 1.6,
+    "max_ms": 1.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive-enhanced/checklist",
+    "n": 1,
+    "p50_ms": 284.2,
+    "p95_ms": 284.2,
+    "max_ms": 284.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive/catalog",
+    "n": 1,
+    "p50_ms": 5.0,
+    "p95_ms": 5.0,
+    "max_ms": 5.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive-enhanced/organize",
+    "n": 1,
+    "p50_ms": 350.2,
+    "p95_ms": 350.2,
+    "max_ms": 350.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/supervision/registry",
+    "n": 1,
+    "p50_ms": 335.6,
+    "p95_ms": 335.6,
+    "max_ms": 335.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/supervision/volume",
+    "n": 1,
+    "p50_ms": 7429.1,
+    "p95_ms": 7429.1,
+    "max_ms": 7429.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/archive/export-enhanced",
+    "n": 1,
+    "p50_ms": 46.2,
+    "p95_ms": 46.2,
+    "max_ms": 46.2,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/__telemetry_probe_404__",
+    "n": 1,
+    "p50_ms": 1.7,
+    "p95_ms": 1.7,
+    "max_ms": 1.7,
+    "status_2xx": 0,
+    "status_4xx": 1,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/status",
+    "n": 1,
+    "p50_ms": 3247.0,
+    "p95_ms": 3247.0,
+    "max_ms": 3247.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/stats",
+    "n": 1,
+    "p50_ms": 160.0,
+    "p95_ms": 160.0,
+    "max_ms": 160.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   }
+  ],
+  "slow_routes": [
+   {
+    "route": "GET /api/files/tree",
+    "n": 6,
+    "p50_ms": 49.3,
+    "p95_ms": 10522.0,
+    "max_ms": 10522.0,
+    "status_2xx": 6,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/projects/delete",
+    "n": 2,
+    "p50_ms": 197.8,
+    "p95_ms": 8754.7,
+    "max_ms": 8754.7,
+    "status_2xx": 2,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/supervision/volume",
+    "n": 1,
+    "p50_ms": 7429.1,
+    "p95_ms": 7429.1,
+    "max_ms": 7429.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/supervision-templates",
+    "n": 1,
+    "p50_ms": 5874.1,
+    "p95_ms": 5874.1,
+    "max_ms": 5874.1,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/status",
+    "n": 18,
+    "p50_ms": 20.3,
+    "p95_ms": 5403.0,
+    "max_ms": 5697.7,
+    "status_2xx": 18,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/upload-files",
+    "n": 1,
+    "p50_ms": 4551.6,
+    "p95_ms": 4551.6,
+    "max_ms": 4551.6,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/parse/queue",
+    "n": 96,
+    "p50_ms": 156.9,
+    "p95_ms": 4133.5,
+    "max_ms": 4752.0,
+    "status_2xx": 96,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/telemetry/status",
+    "n": 1,
+    "p50_ms": 3247.0,
+    "p95_ms": 3247.0,
+    "max_ms": 3247.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "POST /api/search",
+    "n": 1,
+    "p50_ms": 2878.0,
+    "p95_ms": 2878.0,
+    "max_ms": 2878.0,
+    "status_2xx": 1,
+    "status_4xx": 0,
+    "status_5xx": 0
+   },
+   {
+    "route": "GET /api/projects/current",
+    "n": 17,
+    "p50_ms": 48.4,
+    "p95_ms": 1797.2,
+    "max_ms": 2356.0,
+    "status_2xx": 17,
+    "status_4xx": 0,
+    "status_5xx": 0
+   }
+  ]
+ },
+ "errors": [],
+ "parse_failures": {
+  "total_failed": 25,
+  "by_ext": {
+   ".dwg": 25
+  },
+  "by_fingerprint": [
+   {
+    "fingerprint": "failed|未找到 ODA File Converter：请安装（自动搜索 Program Files 任意版本目录），或设置环境变量 ODA_CONVERTER 指向 ODAFileConverter.exe，或用 AutoCAD 另存为 DXF",
+    "count": 25
+   }
+  ],
+  "by_project": {
+   "ffe3de74": 25
+  }
+ },
+ "environment": {
+  "system": "Windows",
+  "release": "11",
+  "python": "3.13.14",
+  "machine_bits": "AMD64",
+  "packages": {
+   "fastapi": "0.111.0",
+   "python-docx": "1.1.2",
+   "openpyxl": "3.1.5",
+   "ezdxf": "1.4.5",
+   "pypdf": "4.2.0",
+   "pywin32": "312",
+   "paddleocr": "3.7.0",
+   "python-multipart": "0.0.9"
+  },
+  "app_version": "0.1.229"
+ },
+ "privacy": {
+  "sanitized": true,
+  "note": "不含项目名/客户/地点/文件名/绝对路径；错误消息中的路径与长串已替换为占位符",
+  "rules": [
+   "绝对路径→<PATH>",
+   "长十六进制→<HASH>",
+   "长数字→<NUM>",
+   "引号内容→<STR>"
+  ]
+ }
+}
