@@ -1,0 +1,53 @@
+{
+  "endpoint": "POST /api/update/restart",
+  "tested_version": "0.1.230",
+  "code_version": "0.1.231",
+  "commit": "e2b85c7",
+  "api_response": {
+    "ok": true,
+    "message": "服务已重新启动（端口 8756），新进程已后台运行",
+    "killed_pids": [],
+    "port": 8756
+  },
+  "actual_effect": {
+    "version_before": "0.1.230",
+    "version_after_polls": ["0.1.230", "0.1.230", "0.1.230", "0.1.230", "0.1.230"],
+    "poll_interval_sec": 2,
+    "pid_before": 24808,
+    "pid_after": 24808,
+    "restarted": false
+  },
+  "restart_log_evidence": {
+    "file": "workbench/updates/restart.log",
+    "entry_time": "2026-11-10 14:38:34",
+    "line": "ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8756): [winerror 10048] 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。",
+    "meaning": "旧进程未被杀，新进程抢不到端口后崩溃"
+  },
+  "root_cause": {
+    "file": "workbench/app/auto_updater.py",
+    "function": "restart_service",
+    "lines": "752-811",
+    "offending_code": "for pid in pids:\\n    if pid == os.getpid():\\n        continue\\n    if _kill_process_tree(pid):\\n        killed.append(pid)",
+    "explanation": "uvicorn 单进程模式下，监听端口的 PID 就是处理本请求的进程自己；跳过自己 = 跳过唯一目标，killed 恒为空",
+    "secondary": "Popen 之后无健康检查、无版本核对，接口无条件返回 ok:true"
+  },
+  "manual_workaround_verified": {
+    "action": "外部 taskkill /PID 24808 /T /F → 端口释放 → 拉起 start.py",
+    "health_ok_after_sec": 2,
+    "version_after": "0.1.231",
+    "conclusion": "只要真的杀掉并重新拉起，重启是可工作的；缺陷在判断逻辑"
+  },
+  "fix_proposals": [
+    {"id": "R1", "title": "分离的助手进程：先起后死（推荐方案A）", "core": true},
+    {"id": "R2", "title": "killed 为空时返回 ok:false，不许说谎"},
+    {"id": "R3", "title": "重启后探 /api/status 校验版本，回传 old/new version"},
+    {"id": "R4", "title": "_get_pid_by_port 的 except: pass 要留日志，别把解析失败当没监听"}
+  ],
+  "acceptance": {
+    "restart_works_within_sec": 10,
+    "killed_pids_nonempty": true,
+    "version_must_change": true,
+    "no_fake_ok": true,
+    "single_listener_after_two_calls": true
+  }
+}

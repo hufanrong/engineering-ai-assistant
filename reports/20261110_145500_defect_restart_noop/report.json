@@ -1,0 +1,62 @@
+{
+  "run_id": "20261110_145500_defect_restart_noop",
+  "started": "2026-11-10 14:45:00",
+  "finished": "2026-11-10 14:56:00",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "手工整理的缺陷单（非自动轮次），schema 与自动轮次一致，ai_side.py 可直接读。针对「重启服务接口返回成功但实际没重启」。",
+  "steps": [
+    {
+      "step": "确认服务版本落后于代码",
+      "rc": 0,
+      "out": "/api/status 返回 0.1.230，仓库 config.APP_VERSION 已是 0.1.231"
+    },
+    {
+      "step": "调用官方重启接口",
+      "rc": 0,
+      "out": "POST /api/update/restart -> 200，body={ok:true, killed_pids:[], port:8756, message:'服务已重新启动…'}"
+    },
+    {
+      "step": "核对是否真的换了进程",
+      "rc": 1,
+      "out": "killed_pids 为空；连续 5 次（间隔 2s）探 /api/status 全是 0.1.230；进程 PID 依旧是 24808（重启前后不变）"
+    },
+    {
+      "step": "查 restart.log",
+      "rc": 1,
+      "out": "14:38:34 条目：ERROR [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8756) —— 新进程绑不上端口后崩溃"
+    },
+    {
+      "step": "定位根因",
+      "rc": 1,
+      "out": "auto_updater.restart_service() 第 764 行 `if pid == os.getpid(): continue` —— 占用端口的正是自己，被跳过，killed 恒为空"
+    },
+    {
+      "step": "手工验证可行路径",
+      "rc": 0,
+      "out": "外部 taskkill 24808 /T /F → 端口释放 → 拉起 start.py → 2s 后 /api/status 返回 0.1.231，证明只要真杀掉就能换版本"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed 重启接口 100% 无效且返回 ok:true（主动说谎）"
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 5,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 2,
+        "failed": 5,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "POST /api/update/restart 返回 ok:true 但从不重启：restart_service() 遍历端口 PID 时用 `if pid == os.getpid(): continue` 跳过自己，而 uvicorn 单进程模式下占用端口的正是自己，导致 killed 恒为空；随后 Popen 新 start.py 因端口占用抛 WinError 10048 崩溃，接口仍回 ok:true。用户以为已换新版本，实际还在跑旧代码。",
+  "commit_before": "d13dcf2",
+  "commit_after": "d13dcf2",
+  "detail_doc": "defects_restart_noop.md",
+  "evidence": "evidence_restart_noop.json"
+}
