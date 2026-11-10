@@ -40,6 +40,24 @@ TIMEOUT = 60
 RESULTS = []          # 每步一条
 PHASE_SUMMARY = {}    # 阶段 -> {"passed":n,"failed":n,"skipped":n}
 
+# v0.1.232：**实际跑了哪几个阶段**这件事必须进报告。
+#
+# 真机实测（reports/20261110_164517）的 console.log 第一行是
+#     selftest.py --phase 1,2,3,5
+# 也就是阶段 4（竣工图清稿）与阶段 6（同一事实交叉比对，23 条断言）
+# **从来没在真机上跑过一次**；而 report.md 只写「通过 50 / 失败 1」，
+# 读报告的人会以为这是一次完整体检。这就是「同一件事两个答案」：
+# 报告说全面检查，实际漏了 2/6。
+#
+# 漏测的原因还不是程序决定的：run_loop.bat 传的是 `--phases all`，
+# 说明真机是用别处的显式参数起的循环（重装/手工改快捷方式都可能）。
+# 所以这里不去猜是谁改的，而是让每份报告自己把「跑了什么、漏了什么」
+# 写清楚 —— 漏测就不再是隐形损失。
+ALL_PHASES = [1, 2, 3, 4, 5, 6]
+PHASE_LABEL = {1: "① 解析/分类/资料库", 2: "② 资料生成管理", 3: "③ 竣工资料生成",
+               4: "④ 竣工图清稿", 5: "⑤ 使用遥测/脱敏自检", 6: "⑥ 同一事实交叉比对"}
+RAN_PHASES = []       # 本次实际请求的阶段（按 --phase 解析）
+
 # v0.1.173：自测建的测试项目 id。phase1 用完会切回原项目，但 phase3 的
 # 竣工/整卷断言必须在「有设备数据的那一个项目」上跑 —— 原来没记这个 id，
 # phase3 直接在用户的当前项目上跑，结果是 0。这里把 id 记下来，phase3 显式切过去。
@@ -2166,13 +2184,48 @@ def _walk_keys(obj, depth=0):
 
 
 # ---------------- 报告 ----------------
+def phase_coverage():
+    """本次实际请求了哪些阶段、漏了哪些，以及各自的人话标签。（v0.1.232）"""
+    ran = sorted(set(RAN_PHASES) or []) if RAN_PHASES else sorted(PHASE_SUMMARY)
+    missed = [p for p in ALL_PHASES if p not in ran]
+    return {
+        "ran": ran,
+        "missed": missed,
+        "ran_labels": [PHASE_LABEL.get(p, str(p)) for p in ran],
+        "missed_labels": [PHASE_LABEL.get(p, str(p)) for p in missed],
+        "complete": not missed,
+    }
+
+
 def write_report(out_path_json, out_path_md, samples_dir):
+    # v0.1.232：**覆盖断言记在这里，不是记在 main() 里**。
+    # 理由：任何绕过 main() 直接写报告的人（回归脚本、后续重构）都会漏掉它，
+    # 于是报告又能自称「通过 N / 失败 0」而实际漏测两个阶段。
+    # 把它绑在「生成报告」这个动作本身，谁出报告谁就得先回答覆盖问题。
+    # 只在**真的漏了**且没漏掉阶段 6 时才判红：单跑 `--phase 1` 做局部调试
+    # 是正常用法，不该被误伤；而漏掉阶段 6 本身已有单独的断言在管。
+    cov = phase_coverage()
+    _missed_now = cov["missed"]
+    # 条件**不能**写成「阶段6 跑了才记」—— 漏掉阶段6 的那一轮（真机现状
+    # --phase 1,2,3,5）正是最该报警的一轮，那样写等于漏在漏处。
+    # 只要漏了任何阶段就记一条，落阶段 6（覆盖检查归它）。
+    if _missed_now and not any(
+            "阶段覆盖完整" in str(r.get("step")) for r in RESULTS):
+        record(6, "阶段覆盖完整（漏测要计数，不能只写进报告头）",
+               "本次自测覆盖全部 6 个阶段",
+               f"只跑了 {len(cov['ran'])}/6，漏测 " + "、".join(cov["missed_labels"]),
+               False,
+               "真机实测 20261110_164517 的 console.log 首行是 --phase 1,2,3,5，"
+               "阶段 4（竣工图清稿）与阶段 6（23 条跨接口一致性比对）从未执行，"
+               "而报告只写「通过 50 / 失败 1」，读者会当成完整体检。"
+               "这条断言的作用就是把「漏测」显式变成红灯。")
     payload = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "base_url": BASE,
         "platform": {"system": platform.system(), "release": platform.release(),
                      "python": sys.version.split()[0]},
         "samples_dir": samples_dir,
+        "coverage": cov,
         "summary": PHASE_SUMMARY,
         "results": RESULTS,
     }
@@ -2183,12 +2236,20 @@ def write_report(out_path_json, out_path_md, samples_dir):
              f"- 时间：{payload['generated_at']}",
              f"- 目标：{BASE}",
              f"- 平台：{platform.system()} {platform.release()} / Python {sys.version.split()[0]}",
-             f"- 样本目录：{samples_dir}", "", "## 汇总", "",
+             f"- 样本目录：{samples_dir}"]
+    # v0.1.232：把「跑了哪几个阶段、漏了哪几个」直接写在报告第一屏。
+    # 只说「通过 N / 失败 M」会让人以为这是一次完整体检。
+    if cov["complete"]:
+        lines.append(f"- 阶段覆盖：**完整**（{len(cov['ran'])}/{len(ALL_PHASES)}）")
+    else:
+        lines.append(f"- 阶段覆盖：**{len(cov['ran'])}/{len(ALL_PHASES)}，漏测 "
+                     + "、".join(cov["missed_labels"]) + "**")
+        lines.append(f"  - 本次实际跑的：{'、'.join(cov['ran_labels'])}")
+        lines.append("  - 漏测的阶段一条断言都没执行，本轮「通过数」不含它们，"
+                     "**不能当作整体可用性的证据**")
+    lines += ["", "## 汇总", "",
              "| 阶段 | 通过 | 失败 | 跳过 |", "|---|---|---|---|"]
-    names = {1: "① 解析/分类/资料库", 2: "② 资料生成管理",
-             3: "③ 竣工资料生成", 4: "④ 竣工图清稿",
-             5: "⑤ 使用遥测/脱敏自检",
-             6: "⑥ 同一事实交叉比对"}
+    names = PHASE_LABEL
     for ph in sorted(PHASE_SUMMARY):
         s = PHASE_SUMMARY[ph]
         lines.append(f"| {names.get(ph, ph)} | {s['passed']} | {s['failed']} | {s['skipped']} |")
@@ -2206,6 +2267,10 @@ def write_report(out_path_json, out_path_md, samples_dir):
     total_p = sum(s["passed"] for s in PHASE_SUMMARY.values())
     total_f = sum(s["failed"] for s in PHASE_SUMMARY.values())
     print(f"\n===== 汇总：通过 {total_p} / 失败 {total_f} =====")
+    if not cov["complete"]:
+        print(f"[覆盖] 本次只跑了 {len(cov['ran'])}/{len(ALL_PHASES)} 个阶段，"
+              f"漏测：{'、'.join(cov['missed_labels'])}")
+        print("[覆盖] 漏测阶段的断言一条都没执行，上面的通过数不代表整体可用")
     print(f"报告：{out_path_json}\n     {out_path_md}")
     return total_f
 
@@ -2327,9 +2392,24 @@ def main():
     if phases == "all":
         # v0.1.210：加阶段 6（同一事实交叉比对）。它只读、不建样本、
         # 不切项目，放在最后跑，前面各阶段留下的索引/队列状态正好被它验。
-        want = [1, 2, 3, 4, 5, 6]
+        want = list(ALL_PHASES)
     else:
         want = [int(x) for x in phases.split(",") if x.strip().isdigit()]
+        # v0.1.232：只认 1~6 里真实存在的阶段号，拼错的（如 1,2,3,7）
+        # 不能悄悄变成「少跑一个」—— 那和漏测长得一模一样。
+        _bad = [x for x in want if x not in ALL_PHASES]
+        if _bad:
+            print(f"[WARN] --phase 里有不存在的阶段号 {_bad}，已忽略（有效范围 1~6）")
+            want = [x for x in want if x in ALL_PHASES]
+        want = sorted(set(want))
+    # 供 write_report 声明覆盖范围（v0.1.232）
+    global RAN_PHASES
+    RAN_PHASES = list(want)
+    _missed = [p for p in ALL_PHASES if p not in want]
+    if _missed:
+        print(f"[覆盖] 本次只跑 {len(want)}/{len(ALL_PHASES)} 个阶段，"
+              f"漏测：{'、'.join(PHASE_LABEL.get(p, str(p)) for p in _missed)}")
+        print("[覆盖] 漏测阶段的断言一条都不会执行 —— 报告里会写明，别把它当完整体检")
 
     try:
         for ph in want:

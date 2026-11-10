@@ -80,6 +80,79 @@ def _runtime_python():
 LOCK_FILE = os.path.join(REPORTS_DIR, ".wb_loop.lock")
 
 
+_GIT_CACHE = {}
+
+
+def find_git():
+    """自己去找 git 可执行文件，返回 (路径 或 "", 一句人话说明)。（v0.1.232）
+
+    为什么必须自己找：通道是用 **pythonw.exe** 被计划任务拉起来的，那个
+    上下文里继承的是**系统 PATH**，不是 WorkBuddy 终端里那份。
+    实测（老板机器 2026-11-10）：Machine PATH 只有
+    `C:/Program Files/GitHub CLI/`（gh，不是 git），User PATH 为空，
+    `Get-Command git` 找不到 —— 本机唯一能用的 git 是 WorkBuddy 的
+    PortableGit，而它只由 WorkBuddy 终端注入 PATH。
+    结果 wb_loop 每次都在第一句 `git rev-parse` 就失败 → is_repo=False →
+    return 2，**每 5 小时一次的自动回传一次都没真跑过**，而且日志一行没有
+    （那时的代码还是裸 print，pythonw 下 sys.stdout=None 直接抛
+    AttributeError）。外面看到的只是「按时跑了、没报错」。
+
+    查找顺序：环境变量 GIT_EXECUTABLE → 自己 PATH 里 which → 各平台常见
+    安装路径 → PortableGit（取 versions/* 里最新的那个）。
+    找不到就返回一句能直接照着做的说明，而不是让调用方看见一堆 None。
+    """
+    if _GIT_CACHE.get("path"):
+        return _GIT_CACHE["path"], _GIT_CACHE.get("why", "")
+    tried = []
+    cand = []
+    ev = (os.environ.get("GIT_EXECUTABLE") or "").strip()
+    if ev:
+        cand.append(ev)
+        tried.append(f"GIT_EXECUTABLE={ev}")
+    w = shutil.which("git")
+    if w:
+        cand.append(w)
+    tried.append("PATH 里的 git")
+    if sys.platform.startswith("win"):
+        base = [
+            r"C:\Program Files\Git\cmd\git.exe",
+            r"C:\Program Files\Git\bin\git.exe",
+            r"C:\Program Files (x86)\Git\cmd\git.exe",
+        ]
+        cand.extend(base)
+        tried.extend(base)
+        # WorkBuddy / 便携版：<root>\PortableGit\cmd\git.exe，或按 versions/* 取最新
+        for root in (os.environ.get("WORKBUDDY_HOME", ""),
+                     os.environ.get("LOCALAPPDATA", "")):
+            if not root:
+                continue
+            pg = os.path.join(root, "PortableGit")
+            cand.append(os.path.join(pg, "cmd", "git.exe"))
+            cand.append(os.path.join(pg, "bin", "git.exe"))
+            vers = os.path.join(pg, "versions")
+            if os.path.isdir(vers):
+                subs = sorted(os.listdir(vers), reverse=True)
+                for s in subs[:3]:
+                    cand.append(os.path.join(vers, s, "cmd", "git.exe"))
+                    cand.append(os.path.join(vers, s, "bin", "git.exe"))
+        tried.append("PortableGit（WorkBuddy 便携版）")
+    else:
+        cand.extend(["/usr/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"])
+        tried.extend(["/usr/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"])
+    for p in cand:
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            _GIT_CACHE["path"] = p
+            _GIT_CACHE["why"] = f"找到 git：{p}"
+            return p, _GIT_CACHE["why"]
+    why = ("找不到 git。已试过：" + "、".join(tried) +
+           "。请把 git 所在目录加进**系统** PATH（不是用户终端里的临时 PATH），"
+           "因为无人值守任务是用 pythonw 在裸环境里跑起来的；"
+           "或设置环境变量 GIT_EXECUTABLE 指向 git.exe 后重跑。")
+    _GIT_CACHE["path"] = ""
+    _GIT_CACHE["why"] = why
+    return "", why
+
+
 def git_dir_info():
     """判断当前目录是不是 git 仓库，并取到「公共 git 目录」。
 
@@ -88,8 +161,15 @@ def git_dir_info():
     .git 是 55 字节的指针文件 `gitdir: .../worktrees/xxx`），isdir() 恒为假
     → 通道在 worktree 里永远起不来，直接 return 2。改用 git 自己的判定。
 
+    v0.1.232：先 find_git() 找绝对路径再判定；main() 会用 find_git() 返回的
+    说明文字打日志 ——「找不到 git」与「真不是仓库」是两件完全不同的事，
+    以前都变成同一个 return 2 且一行日志都不留。
+
     返回 (is_repo, git_dir, common_dir)。
     """
+    _exe, _why = find_git()
+    if not _exe:
+        return False, "", ""
     rc, out, _ = git("rev-parse", "--git-dir")
     git_dir = out.strip() if rc == 0 else ""
     if not git_dir:
@@ -292,7 +372,17 @@ def run(cmd, cwd=None, timeout=300, check=False, env=None):
 
 
 def git(*args, timeout=120):
-    return run(["git"] + list(args), timeout=timeout)
+    """跑 git 命令——**用 find_git() 找到的那个绝对路径**。（v0.1.232）
+
+    原来硬写 `["git"]`，靠子进程继承 PATH。pythonw + 计划任务下 PATH 是
+    系统那份，找不到 git（实测老板机器上只有 gh 在 PATH 里），于是每一轮
+    都在第一步死掉。现在先解析出绝对路径，找不到就返回 127 并带上人话说明，
+    调用方不再需要猜「是没装 git 还是这里不是仓库」。
+    """
+    exe, why = find_git()
+    if not exe:
+        return 127, "", why
+    return run([exe] + list(args), timeout=timeout)
 
 
 def load_state():
@@ -922,6 +1012,16 @@ def one_round(args):
             f.write(f"- 开始：{rec['started']}　结束：{rec['finished']}\n")
             if summary:
                 f.write(f"- 结果：通过 {summary.get('passed',0)} / 失败 {summary.get('failed',0)} / 跳过 {summary.get('skipped',0)}\n")
+                # v0.1.232：覆盖范围必须写进第一屏，否则「P50/F1」会被读成完整体检。
+                _cv2 = summary.get("coverage") or {}
+                if _cv2:
+                    if _cv2.get("complete"):
+                        f.write(f"- 阶段覆盖：**完整**（{len(_cv2.get('ran') or [])}/6）\n")
+                    else:
+                        f.write(f"- 阶段覆盖：**不全，漏测 "
+                                + "、".join(_cv2.get("missed_labels") or [])
+                                + "**（漏测阶段一条断言都没执行，"
+                                  "本轮结论不代表整体可用）\n")
             if error:
                 f.write(f"\n**错误**：{error}\n")
             f.write("\n## 步骤\n\n")
@@ -953,6 +1053,8 @@ def one_round(args):
         st["runs"].append({"run_id": run_id, "status": status,
                            "commit": rec.get("commit_after", ""), "summary": summary})
         st["runs"] = st["runs"][-30:]
+        # v0.1.232：partial（覆盖不全）**不算这一版已被完整测过** ——
+        # 它只说明「跑到的那些阶段都过了」，没跑到的阶段一无所知。
         if status in ("passed", "failed"):
             st["last_tested_commit"] = rec.get("commit_after", "")
         save_state(st)
@@ -1083,13 +1185,21 @@ def one_round(args):
 
     rc, report, serr = run_selftest(args.phases, out_dir, inproc=inproc)
     summary = {}
+    coverage = {}
     if report:
         s = report.get("summary", {}) or {}
+        # v0.1.232：把「跑了哪几个阶段、漏了哪几个」一路带到回传报告里。
+        # 真机实测 20261110_164517 的 console.log 首行是 --phase 1,2,3,5，
+        # 阶段 4 与阶段 6 从未执行，但 report.md 只写「通过 50 / 失败 1」——
+        # 报告与事实是两回事。selftest 侧已把覆盖写进 report.json 的 coverage，
+        # 这里必须接住并往下传，否则又变成「上游有、下游丢」。
+        coverage = report.get("coverage") or {}
         summary = {
             "passed": sum(v.get("passed", 0) for v in s.values()),
             "failed": sum(v.get("failed", 0) for v in s.values()),
             "skipped": sum(v.get("skipped", 0) for v in s.values()),
             "by_phase": s,
+            "coverage": coverage,
         }
     rec["steps"].append({"step": "selftest", "rc": rc,
                          "out": json.dumps(summary, ensure_ascii=False)[:300] if summary else "",
@@ -1127,10 +1237,19 @@ def one_round(args):
     #      看的人以为系统坏了。
     # 合起来：没拿到报告=error；有失败断言或专项套件失败=failed；否则 passed；
     # 断言全过但 rc≠0 → passed，同时把 rc 与可能原因写进报告，不隐瞒。
+    # v0.1.232：**漏测阶段必须影响判定**。
+    # 真机上连跑若干轮 `--phase 1,2,3,5`，每轮都判 passed/failed，而阶段 4 与
+    # 阶段 6 一条都没跑；「没检查」被当成「检查过」。这里把覆盖不全单独标成
+    # partial —— 不等于 failed（已跑的部分可能真的全过），但绝不能再报 passed，
+    # 否则老板看到的就是「全面通过」。
+    _cov = coverage or {}
+    _missed = _cov.get("missed") or []
     if not report:
         status = "error"
     elif summary.get("failed", 1) != 0 or s_fail:
         status = "failed"
+    elif _missed:
+        status = "partial"
     else:
         status = "passed"
     if status == "passed" and rc != 0:
@@ -1141,9 +1260,71 @@ def one_round(args):
     rec["steps"].append({"step": "判定", "rc": 0,
                          "out": f"status={status} rc={rc} "
                                 f"P{summary.get('passed', 0)}/F{summary.get('failed', 0)}"
-                                f"/S{summary.get('skipped', 0)} suites_fail={s_fail}"})
+                                f"/S{summary.get('skipped', 0)} suites_fail={s_fail}"
+                                + (f" 漏测阶段={_missed}" if _missed else "")})
     finish(status, summary, error=rec.get("error", ""))
     return status
+
+
+def preflight():
+    """不用跑整轮，先把「这环境到底行不行」逐条查清楚并打出来。（v0.1.232）
+
+    为什么单独做：老板那次问「有没有完成反馈」，核对才发现自动回传
+    **一次都没真跑过**。计划任务那边只留一个 LastResult=2，_loop.log 零行，
+    16:04 之后没新增任何报告目录 —— 失败链第一步就断在「看不见原因」上。
+    有了这个自检，以后无论谁问「通道行不行」，一条命令就有答案：
+
+        python workbench\\tools\\wb_loop.py --preflight
+
+    全部 OK 返回 0；任一项红返回 1，并把红在哪一条写清楚。
+    """
+    log("=" * 60)
+    log("预检开始（--preflight）：只看环境，不跑自测、不动业务数据")
+    results = []
+
+    def rec(name, ok, detail=""):
+        results.append((name, bool(ok), detail))
+        log(f"[{'OK  ' if ok else 'RED '}] {name} {detail}")
+
+    rec("Python 可执行", True, sys.executable or "(空)")
+    rec("工作目录", os.path.isdir(REPO_DIR), REPO_DIR)
+
+    exe, why = find_git()
+    rec("git 可执行", bool(exe), why)
+
+    is_repo, git_dir, common = git_dir_info()
+    if exe:
+        rec("是 git 仓库", is_repo,
+            f"git_dir={git_dir} common={common}" if is_repo else
+            f"{REPO_DIR} 下 git rev-parse --git-dir 失败（真不是仓库？）")
+
+    if is_repo:
+        rc, out, _ = git("remote", "get-url", "origin")
+        rec("origin 远端", rc == 0 and bool(out.strip()),
+            out.strip() if rc == 0 else "取不到 origin 地址")
+        rc, out, err = git("ls-remote", "origin", BRANCH, timeout=45)
+        rec("能连远端（ls-remote）", rc == 0,
+            (out.split()[0][:12] if rc == 0 and out.split() else "") or err[:160])
+
+    # 日志能不能写下去，这一点以前从没验过 —— 而它正是「一声不吭」的成因
+    try:
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        probe = os.path.join(REPORTS_DIR, ".wb_loop_probe")
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        rec("能写 reports/ 目录", True, REPORTS_DIR)
+    except Exception as e:  # noqa: BLE001
+        rec("能写 reports/ 目录", False, str(e)[:160])
+
+    rec("stdout 可用（pythonw 下常为 None）", sys.stdout is not None,
+        "None 时所有输出只能走 reports/_loop.log" if sys.stdout is None else "")
+
+    ok_all = all(ok for _n, ok, _d in results)
+    log(f"预检结束：{sum(1 for _n, ok, _d in results if ok)}/{len(results)} 通过"
+        f"{'，全部 OK' if ok_all else '，**有红项，先修环境再跑**'}")
+    log("=" * 60)
+    return 0 if ok_all else 1
 
 
 def main():
@@ -1153,27 +1334,53 @@ def main():
     ap.add_argument("--phases", default="all", help="自测阶段，如 1,2,3 或 all")
     ap.add_argument("--no-restart", action="store_true", help="不重启服务（调试用）")
     ap.add_argument("--no-push", action="store_true", help="不回传报告（调试用）")
+    ap.add_argument("--preflight", action="store_true",
+                    help="只做环境预检（git / 远端 / 日志可写），不跑自测")
     ap.add_argument("--no-pull", action="store_true",
                     help="跳过拉取（仅调试用：沙箱里 git 不通，用于单独验证 TEST→REPORT 两段）")
     a = ap.parse_args()
 
+    # v0.1.232：**每一条退出路径都必须留下日志**。
+    # 原来这三处用的是裸 print：pythonw 下 sys.stdout=None 会抛 AttributeError，
+    # 整轮被带走、_loop.log 一行没写，外面只看到「按时跑了、exit 2」。
+    # 现在统一走 log()（它自己吞掉 stdout 异常并写进 reports/_loop.log），
+    # 并且把「找不到 git」和「真不是仓库」分成两句不同的话。
+    if a.preflight:
+        return preflight()
+
+    try:
+        log(f"启动：pid={os.getpid()} python={sys.executable} "
+            f"cwd={os.getcwd()} repo={REPO_DIR} once={a.once} phases={a.phases}")
+        exe, why = find_git()
+        log(f"git 发现：{why}")
+    except Exception:  # noqa: BLE001
+        pass
+
     is_repo, git_dir, common = git_dir_info()
     if not is_repo:
-        print(f"[错误] {REPO_DIR} 不是 git 仓库，请先确认路径")
-        print("       （worktree 也支持：判定用 git rev-parse --git-dir，不靠 .git 目录）")
+        if not exe:
+            log("[错误] 找不到 git，通道无法回传。原因与修法见上一条「git 发现」。")
+            log("       自检请跑：python workbench\\tools\\wb_loop.py --preflight")
+            return 2
+        log(f"[错误] {REPO_DIR} 不是 git 仓库，请先确认路径")
+        log("       （worktree 也支持：判定用 git rev-parse --git-dir，不靠 .git 目录）")
         return 2
 
     ok, holder = acquire_lock()
     if not ok:
-        print(f"[错误] 已有循环在跑（PID {holder}）。同一个仓库不要同时开两个循环。")
+        log(f"[错误] 已有循环在跑（PID {holder}）。同一个仓库不要同时开两个循环。")
         # v0.1.170：锁已移到共享 git 目录（worktree 与主仓库共用同一把），
         # 提示里的路径跟着实际 LOCK_FILE 走，免得按旧路径删不掉。
-        print(f"       确认上一个已经退出后，删除 {LOCK_FILE} 再试。")
+        log(f"       确认上一个已经退出后，删除 {LOCK_FILE} 再试。")
         return 3
 
     try:
         if a.once:
-            return 0 if one_round(a) in ("passed",) else 1
+            _st = one_round(a)
+            # v0.1.232：partial 单独用 2 表示「跑到的都过了，但有阶段没跑」，
+            # 与 1（真的红了）区分开 —— 混成一个码，调用方就没法分辨
+            # 「坏了」和「没测全」。
+            return {"passed": 0, "partial": 2}.get(_st, 1)
 
         log(f"常驻模式启动：每 {a.interval} 秒检查一次，仓库 {REPO_DIR}")
         log("按 Ctrl+C 退出")

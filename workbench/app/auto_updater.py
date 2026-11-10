@@ -749,69 +749,308 @@ def _kill_process_tree(pid: int) -> bool:
         return False
 
 
+_RESTART_SCRIPT = r"""# -*- coding: utf-8 -*-
+# 由繁工AI auto_updater 生成：等主进程这轮返回 → 杀旧进程 → 等端口释放 → 拉起新服务 → 写结果
+import os, sys, json, time, subprocess, datetime
+
+WS = {ws!r}
+PORT = {port!r}
+PIDS = {pids!r}
+RESULT = os.path.join(WS, "updates", "restart_result.json")
+LOG = os.path.join(WS, "updates", "restart_helper.log")
+
+
+def log(msg):
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write("[%s] %s\n" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg))
+    except Exception:
+        pass
+
+
+def write_result(d):
+    try:
+        os.makedirs(os.path.dirname(RESULT), exist_ok=True)
+        with open(RESULT, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
+def pid_by_port(port):
+    pids = []
+    try:
+        if sys.platform.startswith("win"):
+            out = subprocess.run(["netstat", "-ano"], capture_output=True, timeout=20)
+            txt = (out.stdout or b"").decode("gbk", "replace")
+            for line in txt.splitlines():
+                if (":" + str(port)) in line and "LISTENING" in line.upper():
+                    tok = line.split()
+                    if tok and tok[-1].isdigit() and tok[-1] != "0":
+                        pids.append(int(tok[-1]))
+        else:
+            out = subprocess.run(["lsof", "-ti", ":" + str(port)], capture_output=True, timeout=20)
+            for line in (out.stdout or b"").decode("utf-8", "replace").splitlines():
+                if line.strip().isdigit():
+                    pids.append(int(line.strip()))
+    except Exception:
+        pass
+    return sorted(set(pids))
+
+
+def kill_tree(pid):
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=20)
+        else:
+            try:
+                os.kill(pid, 15)
+            except Exception:
+                pass
+        return True
+    except Exception as e:
+        log("kill %s 失败：%s" % (pid, e))
+        return False
+
+
+def main():
+    log("helper 启动，目标 PID=%s PORT=%s" % (PIDS, PORT))
+    # 先让调用方那轮 HTTP 返回去（否则浏览器收到的是断连而不是"正在重启"）
+    time.sleep(1.5)
+    killed = []
+    for pid in PIDS:
+        if kill_tree(pid):
+            killed.append(pid)
+            log("已结束 PID=%s" % pid)
+    # 等端口真正释放（最多 30 秒）
+    freed = False
+    for _ in range(30):
+        if not pid_by_port(PORT):
+            freed = True
+            break
+        time.sleep(1)
+    log("端口释放=%s，仍占用=%s" % (freed, pid_by_port(PORT)))
+
+    py = sys.executable or "python"
+    start_py = os.path.join(WS, "start.py")
+    cmd = [py, start_py] if os.path.isfile(start_py) else [py, os.path.join(WS, "app", "main.py")]
+    env = dict(os.environ)
+    env["FANGONG_NO_BROWSER"] = "1"
+    logp = os.path.join(WS, "updates", "restart.log")
+    try:
+        os.makedirs(os.path.dirname(logp), exist_ok=True)
+        lf = open(logp, "a", encoding="utf-8")
+        if sys.platform.startswith("win"):
+            subprocess.Popen(cmd, cwd=WS, stdout=lf, stderr=lf, env=env,
+                             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                             close_fds=True)
+        else:
+            subprocess.Popen(cmd, cwd=WS, stdout=lf, stderr=lf, env=env,
+                             start_new_session=True, close_fds=True)
+        log("已拉起新进程：%s" % cmd)
+    except Exception as e:
+        log("拉起失败：%s" % e)
+        write_result({"ok": False, "error": "拉起新进程失败：%s" % e,
+                      "killed": killed, "port_freed": freed,
+                      "at": datetime.datetime.now().isoformat()})
+        return
+
+    # 等新进程占上端口（最多 60 秒）——**这一步以前没有**，所以"重启"
+    # 即使真的崩了，接口也照样回 ok:true。
+    up = False
+    for _ in range(60):
+        newp = [p for p in pid_by_port(PORT) if p not in PIDS]
+        if newp:
+            up = True
+            write_result({"ok": True, "killed": killed, "port_freed": freed,
+                          "new_pids": newp,
+                          "at": datetime.datetime.now().isoformat()})
+            log("重启成功，新 PID=%s" % newp)
+            return
+        time.sleep(1)
+    write_result({"ok": False, "killed": killed, "port_freed": freed, "new_pids": [],
+                  "error": "60 秒内新服务未占上端口 %s（看 updates/restart.log）" % PORT,
+                  "at": datetime.datetime.now().isoformat()})
+    log("重启失败：新服务没起来")
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+def restart_status() -> Dict:
+    """查上一次重启到底成没成。（v0.1.232）
+
+    这一条是「接口不许说谎」的兑现方式：restart 这个接口天生无法在自己
+    返回的那一刻确认结果（它要杀的就是它自己）。于是把结果落到
+    updates/restart_result.json，由独立进程写，这个接口只负责如实回报。
+    """
+    p = os.path.join(WORKSPACE_ROOT, "updates", "restart_result.json")
+    try:
+        if not os.path.isfile(p):
+            return {"ok": False, "known": False,
+                    "message": "还没有重启记录（或刚更新过还没重启）"}
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        d["known"] = True
+        return d
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "known": False, "error": str(e)}
+
+
 def restart_service(port: int = 8756) -> Dict:
     """
     【Bug2】重启工作台服务：结束占用端口的旧进程 → 重新启动新进程。
     返回 {ok, message, error, port_pid}
+
+    v0.1.232 —— 修「返回 ok:true，一个进程都没换」。
+      实测（老板机器 2026-11-10，v0.1.231 更新后）：
+        POST /api/update/restart → {{"ok":true,"killed_pids":[],"port":8756}}
+        随后 5 次探版本全是 0.1.230，PID 前后都是 24808 —— 重启没发生。
+        updates/restart.log 铁证：
+          ERROR [Errno 10048] bind on ('127.0.0.1', 8756) 端口只允许使用一次
+        老进程没死，新起的 start.py 抢不到端口崩了。
+
+      根因：uvicorn 单进程下**监听端口的 pid 就是 os.getpid() 自己**，
+      而原代码 `if pid == os.getpid(): continue` 是唯一目标，于是 killed
+      恒为空；`"别自杀"` 被实现成 `"永远不重启"`。且 Popen 之后不做任何
+      校验，无论新进程活没活都回 ok:true —— 这就是「接口在说谎」。
+
+      为什么这个缺陷优先级最高：自测循环每轮靠它把新代码换上去。它是假的，
+      意味着开发端的修复在老板机器上不一定真生效，会污染后面所有缺陷单。
+
+      改法：① 要杀的就是自己时，把「杀自己 + 拉新进程」交给一个**独立
+      进程**（_RESTART_SCRIPT）在 1.5 秒后执行 —— 否则这一轮 HTTP 还没返回
+      就被自己砍断；② 独立进程杀完等端口释放，拉起新服务后**等它真占上
+      端口**才算成功，结果写进 updates/restart_result.json；③ 本接口诚实
+      区分「已交给独立进程，约 10 秒后生效」与「当场确认已换掉」，并提供
+      restart_status() 供事后核对；④ 不是自己的 pid 时（从 CLI 等外部调用），
+      照旧当场杀，但**照样要等新进程占上端口**才回 ok。
     """
     import time as _time
-    
-    # 1. 查找占用端口的进程
+
     pids = _get_pid_by_port(port)
+    self_pid = os.getpid()
     killed = []
+
+    if self_pid in pids:
+        # 占着端口的就是我自己（uvicorn 单进程）——必须交给独立进程做
+        try:
+            script_path = os.path.join(WORKSPACE_ROOT, "updates", "restart_service.py")
+            os.makedirs(os.path.dirname(script_path), exist_ok=True)
+            try:
+                if os.path.exists(script_path):
+                    os.remove(script_path)
+            except Exception:  # noqa: BLE001
+                pass
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(_RESTART_SCRIPT.replace("{ws!r}", repr(WORKSPACE_ROOT))
+                                        .replace("{port!r}", str(port))
+                                        .replace("{pids!r}", repr(sorted(pids))))
+            log_path = os.path.join(WORKSPACE_ROOT, "updates", "restart_helper.log")
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as lf:
+                lf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 派发重启 helper ===\n")
+                if sys.platform.startswith("win"):
+                    subprocess.Popen(
+                        [sys.executable or "python", script_path], cwd=WORKSPACE_ROOT,
+                        stdout=lf, stderr=lf,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                        close_fds=True)
+                else:
+                    subprocess.Popen(
+                        [sys.executable or "python", script_path], cwd=WORKSPACE_ROOT,
+                        stdout=lf, stderr=lf, start_new_session=True, close_fds=True)
+            return {
+                "ok": True,
+                "verified": False,
+                "mode": "helper",
+                "message": (f"已派发独立进程重启：约占端口的是当前进程本身（PID {self_pid}），"
+                            f"约 10 秒后旧进程会被结束并拉起新服务。"
+                            f"可用 GET /api/update/restart/status 核对是否真换掉了。"),
+                "killed_pids": [],
+                "will_kill": sorted(pids),
+                "port": port,
+            }
+        except Exception as e:  # noqa: BLE001
+            return {
+                "ok": False,
+                "mode": "helper",
+                "error": f"派发重启进程失败：{str(e)}",
+                "killed_pids": killed,
+                "port": port,
+                "suggestion": "请手动关闭旧窗口后，重新运行 run_workbench.bat",
+            }
+
+    # 占端口的不是我自己：当场杀，但必须确认新进程真占上端口才回 ok
     for pid in pids:
-        # 跳过自身（如果检测到自己）
-        if pid == os.getpid():
-            continue
         if _kill_process_tree(pid):
             killed.append(pid)
-    
-    # 2. 等待端口释放
+
     for _ in range(10):
         remaining = _get_pid_by_port(port)
-        remaining = [p for p in remaining if p != os.getpid()]
         if not remaining:
             break
         _time.sleep(0.5)
-    
-    # 3. 重新启动服务（后台）
+
     try:
         python = sys.executable or "python"
         main_py = os.path.join(WORKSPACE_ROOT, "app", "main.py")
         start_py = os.path.join(WORKSPACE_ROOT, "start.py")
-        
-        # 优先用 start.py（如果有），否则直接跑 main.py
-        if os.path.isfile(start_py):
-            cmd = [python, start_py]
-        else:
-            cmd = [python, main_py]
-        
-        # 启动新进程（不阻塞，日志输出到 updates/restart.log）
+        cmd = [python, start_py] if os.path.isfile(start_py) else [python, main_py]
+
         log_path = os.path.join(WORKSPACE_ROOT, "updates", "restart.log")
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        env = dict(os.environ)
+        env["FANGONG_NO_BROWSER"] = "1"
         with open(log_path, "a", encoding="utf-8") as logf:
             logf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 重启服务 ===\n")
             if sys.platform.startswith("win"):
                 subprocess.Popen(
-                    cmd, cwd=WORKSPACE_ROOT,
+                    cmd, cwd=WORKSPACE_ROOT, env=env,
                     stdout=logf, stderr=logf,
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
                     close_fds=True)
             else:
                 subprocess.Popen(
-                    cmd, cwd=WORKSPACE_ROOT,
+                    cmd, cwd=WORKSPACE_ROOT, env=env,
                     stdout=logf, stderr=logf,
                     start_new_session=True, close_fds=True)
-        
+
+        # v0.1.232：等新进程真占上端口（最多 30 秒）。原来这里直接回 ok:true。
+        new_pids = []
+        for _ in range(30):
+            now = [p for p in _get_pid_by_port(port) if p != self_pid]
+            if now:
+                new_pids = now
+                break
+            _time.sleep(1)
+        if not new_pids:
+            return {
+                "ok": False,
+                "verified": True,
+                "mode": "direct",
+                "error": (f"旧进程已结束（killed={killed}），但 30 秒内没有新进程占上端口 {port}。"
+                          f"请看 updates/restart.log 的报错。"),
+                "killed_pids": killed,
+                "port": port,
+                "suggestion": "手动运行 run_workbench.bat；若日志里有 Errno 10048，说明端口还被别的进程占着。",
+            }
         return {
             "ok": True,
-            "message": f"服务已重新启动（端口 {port}），新进程已后台运行",
+            "verified": True,
+            "mode": "direct",
+            "message": f"服务已重新启动（端口 {port}），新进程 PID={new_pids}",
             "killed_pids": killed,
+            "new_pids": new_pids,
             "port": port,
         }
     except Exception as e:
         return {
             "ok": False,
+            "mode": "direct",
             "error": f"重启失败：{str(e)}",
             "killed_pids": killed,
             "suggestion": "请手动关闭旧窗口后，重新运行 run_workbench.bat",
