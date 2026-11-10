@@ -87,6 +87,7 @@ DS = {
     "dir": "",                 # 待扫描目录
     "project": "",             # 真实项目名（real 模式）
     "workshop": "1号车间",
+    "workshop_ledger": "",      # 台账设备最多的车间（组卷/整卷用），见 discover_real_dataset
     "tag": "P-101",
     "name": "离心泵",
     "query": "1号车间 离心泵 P-101",
@@ -733,9 +734,29 @@ def discover_real_dataset():
     _, wsl, _ = call("GET", "/api/workshops")
     ws = (wsl or {}).get("workshops") or []
     named = [w for w in ws if w.get("name") and "未归" not in str(w.get("name"))]
-    both = [w for w in named if w.get("file_count", 0) > 0 and w.get("device_count", 0) > 0]
-    pool = both or sorted(named, key=lambda w: w.get("file_count", 0), reverse=True)
-    workshop = pool[0].get("name") if pool else ""
+    #
+    # v0.1.231：基准车间改成「资料最多的那个」。
+    #
+    # 老板明确（2026-11-10 14:25）：粗碎车间、中矿堆只是零星放了几份，
+    # **熟料粉磨装置才是他专门放全的测试集**，除了项目级文件其余几乎都属于该车间。
+    #
+    # 原逻辑 pool[0] 取的是 /api/workshops 的返回顺序，实测落在「粗碎车间」
+    # （只有 2 个文件），等于用一个几乎空的车间去验组卷/整卷/检索 —— 什么问题都测不出来。
+    #
+    # 另外拆成两个基准，别互相拖累：
+    #   DS["workshop"]        资料最多的车间 → 分类/检索/文档生成用它
+    #   DS["workshop_ledger"] 台账设备最多的车间 → 组卷/整卷必须用它
+    # 现状就是两者不一致：熟料粉磨装置有 46 个文件但台账 0 台设备
+    # （台账只从「选厂设备清单」建，那份表只有粗碎车间/中矿堆），
+    # 组卷拿熟料粉磨去跑必然是「无设备数据」——那是台账缺陷，不是组卷缺陷，
+    # 混在一起报会把真正的问题埋掉。
+    _rank = sorted([w for w in named if w.get("file_count", 0) > 0],
+                   key=lambda w: w.get("file_count", 0), reverse=True)
+    _bydev = sorted([w for w in named if w.get("device_count", 0) > 0],
+                    key=lambda w: w.get("device_count", 0), reverse=True)
+    workshop = _rank[0].get("name") if _rank else ""
+    workshop_ledger = _bydev[0].get("name") if _bydev else workshop
+    DS["workshop_ledger"] = workshop_ledger
     if not workshop:
         docgen = (wsl or {}).get("docgen_workshops") or []
         workshop = docgen[0] if docgen else ""
@@ -1217,9 +1238,14 @@ def phase3(samples_dir):
     # 这与真机遥测里 POST /api/supervision/volume 5625ms 是同一类信号：
     # **把慢当成坏**。单独给这条足够的时间，并区分「超时」与「真失败」。
     _VOLUME_TIMEOUT = 240
+    # v0.1.231：整卷必须用「台账里有设备的那个车间」。
+    # DS["workshop"] 现在是资料最多的车间（熟料粉磨装置，46 个文件），
+    # 但它台账里 0 台设备（台账只从选厂设备清单建，那份表只有粗碎车间/中矿堆）——
+    # 拿它去跑整卷必然「无设备数据」，那是**台账缺陷**，不该记成整卷缺陷。
+    _vol_ws = DS.get("workshop_ledger") or DS["workshop"]
     code, vol, err = call("POST", "/api/supervision/volume",
                           {"project_id": TEST_PROJECT_ID, "book": "第一册",
-                           "workshop": DS["workshop"]},
+                           "workshop": _vol_ws},
                           timeout=_VOLUME_TIMEOUT)
     vr = (vol or {}).get("result") or (vol or {})
     generated = vr.get("generated") or []
@@ -2288,6 +2314,8 @@ def main():
             print(f"         目录 {sdir}")
             print(f"         基准 车间={DS['workshop']} 设备={DS['name']}(位号 {DS['tag'] or '无'}) "
                   f"检索词={DS['query']}")
+            print(f"         组卷基准车间={DS.get('workshop_ledger') or DS['workshop']}"
+                  f"（台账里有设备的那个，与上面可能不同）")
         else:
             print(f"[数据集] 真实资料不可用（{info}）→ 回落到内置样本")
             DS["mode"] = "sample-fallback"

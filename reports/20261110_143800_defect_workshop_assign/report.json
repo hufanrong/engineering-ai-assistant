@@ -1,0 +1,77 @@
+{
+  "run_id": "20261110_143800_defect_workshop_assign",
+  "started": "2026-11-10 14:25:00",
+  "finished": "2026-11-10 14:45:00",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "手工整理的缺陷单（非自动轮次），schema 与自动轮次一致，ai_side.py 可直接读。针对「熟料粉磨装置资料放全了，但归类不理想」。",
+  "steps": [
+    {
+      "step": "确认真实项目与文件量",
+      "rc": 0,
+      "out": "项目 0c9a4b2d 马诺诺：62 个文件，24 台设备；用户口径：除项目级文件外几乎全属「熟料粉磨装置」"
+    },
+    {
+      "step": "统计实际车间分布",
+      "rc": 0,
+      "out": "熟料粉磨装置 46 / 未归类 13 / 粗碎车间 2 / 相对室 1；来源 manual 39 / known 7 / none 9 / content_multi 4 / filename 2 / content 1"
+    },
+    {
+      "step": "量化自动归类能力",
+      "rc": 1,
+      "out": "系统只自动出手 10/62（16%），其中对 9 错 1；39 个（63%）靠人工点；13 个直接放弃 → 按用户口径应有 58/62，实到 46"
+    },
+    {
+      "step": "逐条复现未归类文件",
+      "rc": 1,
+      "out": "13 个未归类：10 个应属熟料粉磨装置、3 个是项目级（系统无该类别）。7 个 DDA0205 文件正文长度 0~349，唯一信号是子项码"
+    },
+    {
+      "step": "发现归错（比漏归严重）",
+      "rc": 1,
+      "out": "7df8d3ccd3dc_0205-熟料粉磨装置-防雷接地.dwg 被归到「相对室」（source=content, conf=0.55）；正文「相对室外地坪高度」切出「相对室」命中 3 次"
+    },
+    {
+      "step": "复现 detect_workshop",
+      "rc": 1,
+      "out": "0205 熟料粉磨装置-结构图…dwg → {'workshop': None, 'source': 'content_multi', 'candidates': ['螺纹间','当中间','螺栓间']}；该正文是化学锚栓参数表，根本不含车间名"
+    },
+    {
+      "step": "复现 _norm_filename",
+      "rc": 1,
+      "out": "三种真实文件名形态（编号 空格 名称-图种-版本 / 编号-名称-图种-日期 / 纯位号）全部返回 None"
+    },
+    {
+      "step": "复现 _known_set 污染",
+      "rc": 1,
+      "out": "_known_set() = {'熟料粉磨装置','粗碎车间','相对室'} —— 废字进了已知集合，之后含「相对室」的文件会被持续吸进去"
+    },
+    {
+      "step": "统计 regex 废字率",
+      "rc": 1,
+      "out": "单份防雷接地正文 _WORKSHOP_RE 命中 18 次，18 个全是废字（金属板间/二者之间/桥架全厂…），废字率 100%"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed 熟料粉磨装置 46/58，归错 1，自动覆盖率 16%，人工占比 63%"
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 7,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 3,
+        "failed": 7,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "文件归类不达标：按用户口径 58/62 应属熟料粉磨装置，实到 46；1 份被归到不存在的「相对室」；自动归类只覆盖 10/62（16%），39 个靠人工指定，13 个直接放弃。根因：①_norm_filename 不认识「编号 名称-图种-版本」形态，文件名这一最强信号被丢；②正文多候选即 return None，短路掉 known 兜底；③无子项码 0205→熟料粉磨装置 映射；④_known_set 被「相对室」污染；⑤_WORKSHOP_RE 单字后缀无右边界（与 D13 同源）。",
+  "commit_before": "e2b85c7",
+  "commit_after": "e2b85c7",
+  "detail_doc": "defects_workshop_assign.md",
+  "evidence": "evidence_workshop_assign.json"
+}

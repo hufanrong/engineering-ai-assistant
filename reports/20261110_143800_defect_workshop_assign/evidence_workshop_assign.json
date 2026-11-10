@@ -1,0 +1,220 @@
+{
+  "project_id": "0c9a4b2d",
+  "project_name": "马诺诺锂矿（真实资料）",
+  "version": "0.1.230",
+  "commit": "e2b85c7",
+  "collected_at": "2026-11-10T14:40:00",
+  "user_statement": "冶炼厂熟料粉磨的是我专门放的最全的一个，用来测试的，除了项目级文件，其余的几乎都属于该车间，但是文件放入后，实际归类并不理想",
+  "total_files": 62,
+  "distribution": {
+    "熟料粉磨装置": 46,
+    "(未归类)": 13,
+    "粗碎车间": 2,
+    "相对室": 1
+  },
+  "by_source": {
+    "manual": 39,
+    "known": 7,
+    "none": 9,
+    "content_multi": 4,
+    "filename": 2,
+    "content": 1
+  },
+  "auto_vs_manual": {
+    "manual": 39,
+    "auto_assigned": 10,
+    "auto_correct": 9,
+    "auto_wrong": 1,
+    "auto_gave_up": 13,
+    "coverage_pct": 16.1,
+    "expected_per_user": 58
+  },
+  "misassigned": [
+    {
+      "key": "7df8d3ccd3dc",
+      "file_name": "7df8d3ccd3dc_0205-熟料粉磨装置-防雷接地-20240116.dwg",
+      "got": "相对室",
+      "expected": "熟料粉磨装置",
+      "source": "content",
+      "confidence": 0.55,
+      "root_cause": "正文「相对室外地坪高度」被 _WORKSHOP_RE 切成「相对室」，命中 3 次成为最强候选，压过文件名",
+      "regex_hits": [
+        "金属板间", "支持卡间", "二者之间", "热镀锌圆钢沿库", "各引下线外墙距室",
+        "电阻测试端子箱库", "引下线平均间", "雷引下线在外墙距室", "接地装置间",
+        "构件之间", "形成全厂", "接地极的间", "外墙距室", "内墙距室", "桥架全厂",
+        "相对室", "相对室", "相对室"
+      ],
+      "regex_hit_count": 18,
+      "regex_hit_garbage_ratio": 1.0
+    }
+  ],
+  "unassigned": [
+    {
+      "key": "7894d5d0517f",
+      "file_name": "7894d5d0517f_选厂设备清单1.xlsx",
+      "source": "none",
+      "candidates": [],
+      "text_len": 2042,
+      "contains_workshop_name": false,
+      "should_be": "项目级/全厂",
+      "why": "项目级文件，系统无该类别"
+    },
+    {
+      "key": "28172857098f",
+      "file_name": "28172857098f_刚果（金）Manono锂盐项目火法部分工艺设备表（0430).xlsx",
+      "source": "none",
+      "candidates": [],
+      "text_len": 20000,
+      "contains_workshop_name": false,
+      "should_be": "项目级/全厂",
+      "why": "项目级文件，系统无该类别；且该表就是 0205→熟料粉磨装置 的现成映射来源"
+    },
+    {
+      "key": "0533876f646f",
+      "file_name": "0533876f646f_刚果（金）Manono锂盐项目火法部分流程图（0430).dwg",
+      "source": "content_multi",
+      "candidates": ["其他车间", "煤粉来自窑头煤粉仓", "煤粉仓"],
+      "text_len": 20000,
+      "contains_workshop_name": true,
+      "should_be": "项目级/全厂",
+      "why": "流程图是全厂的，正文天然含多个车间名 → 必然多候选"
+    },
+    {
+      "key": "143081201680",
+      "file_name": "143081201680_0205-熟料粉磨装置-照明配线平面图-20250718.dwg",
+      "source": "content_multi",
+      "candidates": ["熟料送存仓", "熟料粉磨装置地下室", "熟料粉磨装置室"],
+      "text_len": 12033,
+      "contains_workshop_name": true,
+      "should_be": "熟料粉磨装置",
+      "why": "3 个候选里 2 个是同名加单字后缀（D13 切词病），系统判为多车间直接放弃"
+    },
+    {
+      "key": "2cf7b6dc5372",
+      "file_name": "2cf7b6dc5372_0205 熟料粉磨装置-结构图（2025.07.15）-R0.dwg",
+      "source": "content_multi",
+      "candidates": ["螺纹间", "当中间", "螺栓间"],
+      "text_len": 20000,
+      "contains_workshop_name": false,
+      "text_nature": "化学锚栓参数表（螺纹间距/双螺母/抗拉承载力/锚板尺寸），不含任何车间名",
+      "should_be": "熟料粉磨装置",
+      "why": "正文通道注定认不出；唯一有效信号是文件名，而 _norm_filename 返回 None"
+    },
+    {
+      "key": "2af91ff5e4dc",
+      "file_name": "2af91ff5e4dc_0205 熟料粉磨装置结构图（2025.05.26）-R0.dwg",
+      "source": "content_multi",
+      "candidates": ["螺纹间", "当中间", "螺栓间"],
+      "text_len": 20000,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "同上，与 2cf7b6dc5372 同模板"
+    },
+    {
+      "key": "ab80f9d022a7",
+      "file_name": "ab80f9d022a7_2A24A47DDA0205ME1PW1-02-2#立磨出风口至2#旋风收尘器进风口风管.dwg",
+      "source": "none",
+      "candidates": [],
+      "text_len": 0,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "正文为空，只有子项码 0205，无子项码映射逻辑"
+    },
+    {
+      "key": "25974b6dee8e",
+      "file_name": "25974b6dee8e_2A24A47DDA0205ME1PW1-04;2号旋风收尘器出风口至2号收尘器出风口风管.dwg",
+      "source": "none",
+      "candidates": [],
+      "text_len": 288,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "正文近空，只有子项码 0205"
+    },
+    {
+      "key": "6768a73b6b6b",
+      "file_name": "6768a73b6b6b_2A24A47DDA0205ME1PW1-06 2#袋收尘器出风口至2#风机进风口风管.dwg",
+      "source": "none",
+      "candidates": [],
+      "text_len": 309,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "正文近空，只有子项码 0205"
+    },
+    {
+      "key": "626248badac9",
+      "file_name": "626248badac9_2A24A47DDA0205ME1PW1-07 1#风机排风烟囱.dwg",
+      "source": "none",
+      "candidates": [],
+      "text_len": 349,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "正文近空，只有子项码 0205"
+    },
+    {
+      "key": "090753d75c89",
+      "file_name": "090753d75c89_2A24A47DDA0205ME1PW1-08 2#风机排风烟囱.dwg",
+      "source": "none",
+      "candidates": [],
+      "text_len": 349,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "正文近空，只有子项码 0205"
+    },
+    {
+      "key": "998fa13a30fe",
+      "file_name": "998fa13a30fe_2A24A47DDA0205ME1PW1-09 1#立磨进风管.dwg",
+      "source": "none",
+      "candidates": [],
+      "text_len": 349,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "正文近空，只有子项码 0205"
+    },
+    {
+      "key": "2c8f83833615",
+      "file_name": "2c8f83833615_2A24A47DDA0205ME1PW1-10 2#立磨进风管.dwg",
+      "source": "none",
+      "candidates": [],
+      "text_len": 349,
+      "contains_workshop_name": false,
+      "should_be": "熟料粉磨装置",
+      "why": "正文近空，只有子项码 0205"
+    }
+  ],
+  "repro": {
+    "known_set": ["熟料粉磨装置", "粗碎车间", "相对室"],
+    "known_set_has_garbage": true,
+    "norm_filename": {
+      "0205 熟料粉磨装置-结构图（2025.07.15）-R0.dwg": null,
+      "0205-熟料粉磨装置-照明配线平面图-20250718.dwg": null,
+      "2A24A47DDA0205ME1PW1-08 2#风机排风烟囱.dwg": null
+    },
+    "detect_workshop_content_multi": {
+      "file_name": "2cf7b6dc5372_0205 熟料粉磨装置-结构图（2025.07.15）-R0.dwg",
+      "result": {
+        "workshop": null,
+        "source": "content_multi",
+        "confidence": 0.3,
+        "candidates": ["螺纹间", "当中间", "螺栓间"]
+      }
+    }
+  },
+  "fix_rank": [
+    {"id": "R1", "title": "已知车间兜底提到正文之前 + 多候选降级不放弃", "fixes": ["C1"], "gain_files": 4},
+    {"id": "R2", "title": "子项码映射 0205 -> 熟料粉磨装置", "fixes": ["C2"], "gain_files": 7},
+    {"id": "R3", "title": "_norm_filename 认「编号 名称-图种-版本」", "fixes": ["C1"], "gain_files": 0, "note": "治本，与 R1 互补"},
+    {"id": "R4", "title": "_known_set 只收合法工程后缀名", "fixes": ["C4"], "gain_files": 0, "note": "止血，防污染扩散"},
+    {"id": "R5", "title": "新增「项目级/全厂」类别", "fixes": ["C5"], "gain_files": 3},
+    {"id": "R6", "title": "复用 D13 R1 单字后缀右边界", "fixes": ["C3"], "gain_files": 1, "note": "同时清掉 18 个废字"}
+  ],
+  "acceptance": {
+    "target_workshop_count": 56,
+    "current_workshop_count": 46,
+    "auto_coverage_pct_target": 50,
+    "auto_coverage_pct_current": 16.1,
+    "manual_ratio_target_max": 20,
+    "manual_ratio_current": 62.9,
+    "garbage_regex_hits_target": 0,
+    "garbage_regex_hits_current": 18
+  }
+}
