@@ -1,0 +1,94 @@
+{
+  "generated": "2026-11-10 14:20",
+  "source_file_masked": "****工艺设备表（0430).xlsx",
+  "layout": "抬头行1-5 / 表头行6 / 数据行7+",
+  "sheet_count": 10,
+  "tags_strict_total": 614,
+  "tags_loose_total": 753,
+  "current_ledger_devices": 24,
+  "current_tag_nonempty": 0,
+  "parsed_header_actual": [
+    "列1",
+    "设备表",
+    "列3",
+    "列4",
+    "列5",
+    "列6",
+    "项目代码",
+    "列8",
+    "列9",
+    "2A24A47"
+  ],
+  "sheets": [
+    {
+      "sheet": "0101",
+      "sub_item": "锂辉石库",
+      "rows": 195,
+      "tags_strict": 26,
+      "tags_loose": 27
+    },
+    {
+      "sheet": "0103",
+      "sub_item": "锂辉石烘干",
+      "rows": 551,
+      "tags_strict": 112,
+      "tags_loose": 112
+    },
+    {
+      "sheet": "0104",
+      "sub_item": "锂辉石计量",
+      "rows": 251,
+      "tags_strict": 56,
+      "tags_loose": 56
+    },
+    {
+      "sheet": "0201",
+      "sub_item": "回转窑尾装置",
+      "rows": 580,
+      "tags_strict": 0,
+      "tags_loose": 138
+    },
+    {
+      "sheet": "0201-尘硝一体",
+      "sub_item": "",
+      "rows": 72,
+      "tags_strict": 0,
+      "tags_loose": 0
+    },
+    {
+      "sheet": "0201-脱硫脱氟",
+      "sub_item": "",
+      "rows": 93,
+      "tags_strict": 0,
+      "tags_loose": 0
+    },
+    {
+      "sheet": "0202",
+      "sub_item": "回转窑中装置",
+      "rows": 222,
+      "tags_strict": 36,
+      "tags_loose": 36
+    },
+    {
+      "sheet": "0203",
+      "sub_item": "回转窑头装置",
+      "rows": 949,
+      "tags_strict": 226,
+      "tags_loose": 226
+    },
+    {
+      "sheet": "0204",
+      "sub_item": "熟料送存仓",
+      "rows": 232,
+      "tags_strict": 50,
+      "tags_loose": 50
+    },
+    {
+      "sheet": "0205",
+      "sub_item": "熟料粉磨装置",
+      "rows": 564,
+      "tags_strict": 108,
+      "tags_loose": 108
+    }
+  ]
+}
