@@ -1,0 +1,87 @@
+{
+  "run_id": "20261110_213000_defect_restart_regression",
+  "started": "2026-11-10 21:18:00",
+  "finished": "2026-11-10 21:32:00",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "手工整理的缺陷单，schema 与自动轮次一致。三件事：D18 重启回归（P0，服务被杀不拉）、D19 测试项目删不干净、D20 新扫描车间名 9/10 是废字。",
+  "steps": [
+    {
+      "step": "计划任务自动轮次",
+      "rc": 0,
+      "out": "21:04:12 启动，拉到开发端 v0.1.232（d3cb449，修的正是 D16 重启 + D17 git 解析），21:18:14 结束 status=failed P50/F2/S0"
+    },
+    {
+      "step": "核对本轮失败断言",
+      "rc": 1,
+      "out": "两条红：阶段1·车间名合法（可疑 9/10）、阶段6·阶段覆盖完整（只跑 4/6）"
+    },
+    {
+      "step": "验证 v0.1.232 重启修复（D16 的 R1）",
+      "rc": 1,
+      "out": "POST /api/update/restart -> {ok:true, verified:false, mode:'helper', will_kill:[21604]}；此后 45 秒 /api/status 无响应，60 秒后 8756 无 LISTENING，restart.log 无新条目，服务彻底消失"
+    },
+    {
+      "step": "手工恢复服务",
+      "rc": 0,
+      "out": "start.py 后台拉起，8 秒就绪，v0.1.232 / 62 文件 / 首页 200"
+    },
+    {
+      "step": "清点测试项目残留",
+      "rc": 1,
+      "out": "data/projects 下有 3 个：0c9a4b2d 马诺诺(62) + a80dfc88 自测_164520(60/磁盘147) + c8c39eee 自测_210452(0)；上两轮各遗留一个"
+    },
+    {
+      "step": "删除 a80dfc88",
+      "rc": 0,
+      "out": "经 /api/projects/delete 成功；但自测收尾时被宿主守卫拦下 [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] count=147 threshold=50"
+    },
+    {
+      "step": "删除 c8c39eee",
+      "rc": 1,
+      "out": "{ok:false, error:'PermissionError WinError 32 ... vector_db\\\\...\\\\data_level0.bin；残留 18 项', partial_delete:true} —— 服务曾把它当当前项目加载，句柄未释放"
+    },
+    {
+      "step": "服务重启后重删",
+      "rc": 0,
+      "out": "c8c39eee 删除成功，data/projects 只剩 0c9a4b2d；接口返回仅 1 个项目"
+    },
+    {
+      "step": "定位车间名废字来源",
+      "rc": 1,
+      "out": "自测跑的是全新自动扫描的测试项目 → 9/10 废字；真实项目看着干净是因为 46 个里 39 个是人工指定。同一病根与 D13/D15 一致"
+    },
+    {
+      "step": "恢复阶段6",
+      "rc": 0,
+      "out": "启动器 --phases 由 1,2,3,5 改为 1,2,3,5,6；阶段6 当初被摘是因为审计流水污染，v0.1.230 的 PURGE_SWITCH_ROWS 已修好，旧规避措施过时"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed：D18 P0 回归（重启导致服务宕机）、D19 测试项目残留+半删、D20 车间名废字在新扫描下 9/10"
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 6,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 1,
+        "failed": 3,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 3,
+        "failed": 3,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "v0.1.232 把重启改成 helper 进程后引入 P0 回归：POST /api/update/restart 杀掉旧服务（PID 21604）后新服务未拉起，45 秒内 /api/status 无响应、60 秒后 8756 无监听、restart.log 无任何新记录，工作台整体宕机直到手工 start.py。原 v0.1.231 的行为只是「假成功但服务还在」，现在升级为「真宕机」。另有两项：测试项目每轮遗留一个且删不干净（宿主 bulk-delete 守卫拦 147 文件；vector_db 被自身占用 WinError 32 导致 partial_delete 残留 18 项）；新扫描下车间名 9/10 是废字（真实项目因 39 个人工指定而掩盖）。",
+  "commit_before": "d3cb449",
+  "commit_after": "d3cb449",
+  "detail_doc": "defects_restart_regression.md",
+  "evidence": "evidence_restart_regression.json"
+}

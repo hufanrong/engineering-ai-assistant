@@ -1,0 +1,88 @@
+{
+  "version": "0.1.232",
+  "commit": "d3cb449",
+  "defects": {
+    "D18": {
+      "severity": "P0",
+      "title": "重启接口改成 helper 后：杀了服务，拉不起来",
+      "request": "POST /api/update/restart",
+      "response": {
+        "ok": true,
+        "verified": false,
+        "mode": "helper",
+        "message": "已派发独立进程重启：约占端口的是当前进程本身（PID 21604），约 10 秒后旧进程会被结束并拉起新服务。可用 GET /api/update/restart/status 核对是否真换掉了。",
+        "killed_pids": [],
+        "will_kill": [21604],
+        "port": 8756
+      },
+      "observed": {
+        "within_45s_status_unreachable": true,
+        "after_60s_port_listening": false,
+        "after_80s_port_listening": false,
+        "restart_log_new_entry": false,
+        "remaining_python_processes": ["pythonw 13700 (unrelated)"],
+        "manual_start_recovered_in_sec": 8
+      },
+      "comparison": {
+        "v0.1.231": "返回 ok:true 但什么都不做，服务一直在（假成功）",
+        "v0.1.232": "杀掉服务且起不来（真宕机）",
+        "verdict": "更糟"
+      },
+      "design_issues": [
+        "状态查询 /api/update/restart/status 挂在被杀的进程上，服务死了最需要核对时反而查不到；应落到文件。",
+        "helper 无失败出口：不写 restart.log、不轮询新进程健康、起不来也不重试，更不会保留旧进程。"
+      ]
+    },
+    "D19": {
+      "severity": "P1",
+      "title": "每轮遗留一个测试项目，且删不干净",
+      "leftovers": [
+        {"id": "a80dfc88", "name": "自测_20261110_164520", "api_file_count": 60, "disk_files": 147, "deleted_by": "manual api call", "blocked_by": "host safe-delete guard (count=147 > threshold=50)"},
+        {"id": "c8c39eee", "name": "自测_20261110_210452", "api_file_count": 0, "deleted_by": "manual api call after service restart", "blocked_by": "WinError 32 on vector_db/data_level0.bin"}
+      ],
+      "partial_delete_response": {
+        "ok": false,
+        "error": "项目资料删除失败：PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'D:\\\\fangong-workbench\\\\workbench\\\\data\\\\projects\\\\c8c39eee\\\\vector_db\\\\cdfb936f-5138-4f11-ac21-48f7f62cee03\\\\data_level0.bin'；残留 18 项：[...]",
+        "deleted_id": "c8c39eee",
+        "data_deleted": false,
+        "partial_delete": true
+      },
+      "root_causes": [
+        "该项目曾是当前项目，服务打开了它的 chroma 库；切回真实项目时未 close 客户端，文件句柄一直占着。",
+        "_safe_rmtree 对 WinError 32 只做重试，不尝试释放本进程内句柄 —— 占用者是同进程，重试无意义。",
+        "整批删除 147 个文件触发宿主 bulk-delete 守卫（阈值 50），自测收尾静默失败。",
+        "收尾删除失败没有让本轮报告变红，报告照样 P50。"
+      ]
+    },
+    "D20": {
+      "severity": "P1",
+      "title": "新扫描下车间名 9/10 是废字，人工指定把缺陷盖住了",
+      "phase1_finding": {
+        "suspicious": "9/10",
+        "names": ["中矿堆", "主减速机油站", "件与件之间", "减速机润滑站", "液压站", "相国四站", "相对室", "磨辊加载液压站", "磨辊润滑站"]
+      },
+      "after_round_real_project": [
+        {"name": "中矿堆", "files": 0, "devices": 12},
+        {"name": "未归车间", "files": 13, "devices": 0},
+        {"name": "熟料粉磨装置", "files": 46, "devices": 0},
+        {"name": "相对室", "files": 1, "devices": 0},
+        {"name": "粗碎车间", "files": 2, "devices": 12}
+      ],
+      "explanation": "自测跑的是全新自动扫描的测试项目，得到 9/10 废字；真实项目看着干净，是因为 46 个里 39 个由老板手工指定。新用户拖进资料看到的就是废字那一列。",
+      "same_root_cause_as": ["D13", "D15"]
+    }
+  },
+  "phase6_restored": {
+    "previous_phases": "1,2,3,5",
+    "new_phases": "1,2,3,5,6",
+    "reason": "阶段6 当初被摘掉是因为切项目会写审计流水导致收尾断言恒红；v0.1.230 的 PURGE_SWITCH_ROWS 已精确清理自测自己写的切换行，旧规避措施过时。开发端 v0.1.232 新增的『阶段覆盖完整』断言正是在逼这件事。",
+    "phase4_still_skipped": "竣工图清稿需 Windows+AutoCAD，按老板 2026-10-31 决定暂缓"
+  },
+  "final_state": {
+    "service_version": "0.1.232",
+    "service_alive": true,
+    "indexed_files": 62,
+    "projects": [{"id": "0c9a4b2d", "name": "马诺诺"}],
+    "next_scheduled_run": "2026-11-11 02:04:10"
+  }
+}
