@@ -46,6 +46,24 @@
       "step": "判定",
       "rc": 0,
       "out": "status=passed rc=0"
+    },
+    {
+      "step": "git add reports",
+      "rc": 0,
+      "out": "",
+      "err": ""
+    },
+    {
+      "step": "git commit",
+      "rc": 0,
+      "out": "[main 44b978f] test(workbuddy): 20261110_040841 status=passed P68/F0/S2\n 10 files changed, 1370 insertions(+), 42 deletions(-)\n create mode 100644 reports/20261110_040841/console.log\n create mode 100644 reports/20261110_040841/env.json\n create mode 100644 reports/20261110_040841/report.json\n create ",
+      "err": ""
+    },
+    {
+      "step": "git push",
+      "rc": 0,
+      "out": "",
+      "err": "To https://github.com/hufanrong/engineering-ai-assistant\n   4ff8a3c..44b978f  HEAD -> main"
     }
   ],
   "summary": {
@@ -84,7 +102,8 @@
   "remote_head": "4ff8a3c245d122d52a2bb4cf19be04e835cb391d",
   "behind": 0,
   "ahead": 0,
-  "finished": "2026-11-10 04:09:30",
+  "finished": "2026-11-10 04:09:34",
   "commit_before": "4ff8a3c245d122d52a2bb4cf19be04e835cb391d",
-  "commit_after": "4ff8a3c245d122d52a2bb4cf19be04e835cb391d"
+  "commit_after": "44b978fc032b2ea2aa95d20f8d434ba43e1dbc3c",
+  "pushed": true
 }
