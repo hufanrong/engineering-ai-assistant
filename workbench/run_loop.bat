@@ -32,7 +32,7 @@ cd /d "%~dp0"
 
 echo ============================================================
 echo   Fangong AI - WORKbuddy auto loop
-echo   Checks GitHub every 5 minutes, pulls, self-tests, reports back
+echo   Checks GitHub every 5 HOURS, pulls, runs ALL phases, reports back
 echo ============================================================
 echo.
 
@@ -120,10 +120,19 @@ echo [INFO] repo   : %~dp0..
 echo.
 
 rem ---------- 3. start the loop ----------
+rem 18000s = 5 hours. Owner decision 2026-11-10: a full pass every 5 hours,
+rem and it must cover EVERY phase (1-6, including the AutoCAD drawing
+rem cleanup one) so the report answers "is this actually usable on a real
+rem project", not just "did the API return 200".
+rem Override by passing your own args, e.g.
+rem   run_loop.bat --once --phases 1,2,3,6
 set "ARGS=%*"
-if "%ARGS%"=="" set "ARGS=--interval 300"
+if "%ARGS%"=="" set "ARGS=--interval 18000 --phases all"
 
-echo First run builds the index and may take a few minutes.
+echo Schedule : every 5 hours, ALL phases (1-6)
+echo NOTE     : each round restarts the workbench service, so the web page
+echo            may be unreachable for about 1 minute at that moment.
+echo            If you are uploading a large batch, just wait and retry.
 echo Close this window to stop the loop.
 echo ============================================================
 echo.
