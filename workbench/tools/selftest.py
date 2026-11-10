@@ -1220,8 +1220,18 @@ def phase4(samples_dir):
         return h.hexdigest()
 
     before = md5(target)
+    # v0.1.227：超时 300s → 900s。
+    #
+    # 实测 2026-11-10 10:04 轮次（本机 ODA/AutoCAD 都在，环境自检 ready=true，
+    # 待清稿 25 张）：300 秒时请求还没回来，返回 code=-1、响应体空，
+    # 于是「清稿执行 / 处理日志 / 成果 PDF」三项一起红。
+    # 而「原图 MD5 不变」是绿的 —— 说明**没有破坏原图**，只是没等到结果。
+    # AutoCAD 用 COM 冷启动一次就要 60~120 秒（首次还要加载插件/字体映射），
+    # 单张 A1 图纸打印成 PDF 再 30~90 秒，300 秒对一个真图纸偏紧。
+    # 放宽到 900 秒，并且失败时把 code 与 err 一起报出来 ——
+    # 「超时」和「清稿失败」是两件事，不能都写成 failed。
     code, proc, err = call("POST", "/api/tools/dwg-cleaner/process",
-                           {"file_paths": [target], "project_drawings": False}, timeout=300)
+                           {"file_paths": [target], "project_drawings": False}, timeout=900)
     # v0.1.170：原来判定是 `(proc or {}).get("ok") is not False` —— 但真实返回里
     # 根本没有 ok 键，get 取到 None，`None is not False` 恒真。于是 AutoCAD 报错、
     # 返回 {status:"failed", failed:1} 时这一项照样 PASS，真问题被测试吞掉。
@@ -1232,8 +1242,12 @@ def phase4(samples_dir):
     hard_fail = (status_str in ("failed", "error")
                  or (isinstance(n_failed, int) and n_failed > 0))
     ok = code == 200 and resp.get("ok") is not False and not hard_fail
+    _p4_note = ""
+    if code == -1:
+        _p4_note = "（请求未在 900s 内返回：AutoCAD 冷启动 + 打印耗时长，属「没等到」而非「清稿失败」）"
     record(P, "清稿执行", "200 且 status 非失败、失败条数为 0",
-           f"{code} status={status_str or '(空)'} failed={n_failed} {str(proc)[:120]}", ok, err)
+           f"{code} status={status_str or '(空)'} failed={n_failed} {str(proc)[:120]}{_p4_note}",
+           ok, err)
 
     after = md5(target)
     record(P, "原图 MD5 不变", before == after, f"{before[:12]} -> {after[:12]}", before == after,

@@ -119,7 +119,7 @@ def _pid_alive(pid: int) -> bool:
       说明判活确实走空了；只要那一刻真有一个循环在跑，就会双开写同一个仓库。
 
       （更正一条我自己误判过的结论：我最初看到「两个 wb_loop」就认为已经双开，
-      其实是 venv\Scripts\python.exe 这个 241KB 启动器又拉起了真身解释器，
+      其实是 `venv/Scripts/python.exe` 这个 241KB 启动器又拉起了真身解释器，
       「启动器 + 真身」天然成对。机制成立、后果未实测到，按潜在缺陷处理。）
 
     OpenProcess 是 Win32 原生调用，零解析、零编码问题；Linux/macOS 用 os.kill(pid,0)。
