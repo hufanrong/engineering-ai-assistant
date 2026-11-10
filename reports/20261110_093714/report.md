@@ -1,8 +1,8 @@
 # WORKbuddy 自测报告 20261110_093714
 
 - 状态：**failed**
-- 代码版本：`c72333976345`
-- 开始：2026-11-10 09:37:14　结束：2026-11-10 09:52:02
+- 代码版本：`e653a5815c7f`
+- 开始：2026-11-10 09:37:14　结束：2026-11-10 09:52:10
 - 结果：通过 50 / 失败 0 / 跳过 0
 
 ## 步骤
@@ -14,6 +14,12 @@
 - [OK] 导出使用遥测　rc=0
 - [FAIL] 专项回归套件　rc=1
 - [OK] 判定　rc=0
+- [OK] git add reports　rc=0
+  - warning: in the working copy of 'reports/20261110_092937/INVALID.md', LF will be replaced by CRLF the next time Git touches it
+- [OK] git commit　rc=0
+- [OK] git push　rc=0
+  - To https://github.com/hufanrong/engineering-ai-assistant
+   c723339..e653a58  HEAD -> main
 
 ## 专项回归套件（18 通过 / 2 失败 / 共 20）
 

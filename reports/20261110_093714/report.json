@@ -39,6 +39,24 @@
       "step": "判定",
       "rc": 0,
       "out": "status=failed rc=0 P50/F0/S0 suites_fail=2"
+    },
+    {
+      "step": "git add reports",
+      "rc": 0,
+      "out": "",
+      "err": "warning: in the working copy of 'reports/20261110_092937/INVALID.md', LF will be replaced by CRLF the next time Git touches it"
+    },
+    {
+      "step": "git commit",
+      "rc": 0,
+      "out": "[main e653a58] test(workbuddy): 20261110_093714 status=failed P50/F0/S0\n 17 files changed, 3014 insertions(+), 39 deletions(-)\n create mode 100644 reports/20261110_091650/console.log\n create mode 100644 reports/20261110_091650/selftest_detail.md\n create mode 100644 reports/20261110_091650/selftest_r",
+      "err": ""
+    },
+    {
+      "step": "git push",
+      "rc": 0,
+      "out": "",
+      "err": "To https://github.com/hufanrong/engineering-ai-assistant\n   c723339..e653a58  HEAD -> main"
     }
   ],
   "summary": {
@@ -70,7 +88,8 @@
   },
   "error": "",
   "remote_head": "2a7a67813f78e288f3132446c580dd42a393d297",
-  "finished": "2026-11-10 09:52:02",
+  "finished": "2026-11-10 09:52:10",
   "commit_before": "2a7a67813f78e288f3132446c580dd42a393d297",
-  "commit_after": "c723339763456bdab95295feb82c3869f73f107b"
+  "commit_after": "e653a5815c7fee3827566bf0a98be05811d8987c",
+  "pushed": true
 }
