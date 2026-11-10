@@ -106,9 +106,22 @@ def acquire_lock():
             alive = False
             try:
                 if platform.system() == "Windows":
-                    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
-                                         capture_output=True, text=True, timeout=30).stdout
-                    alive = str(pid) in out
+                    # v0.1.221：原来用 text=True 靠 locale 解码 tasklist 输出。
+                    # 本机实测会抛 UnicodeDecodeError（'utf-8' 解不了 GBK 的
+                    # "没有运行的任务..." 那条消息），异常被下面 except 吞掉后
+                    # alive 恒为 False —— 如果那个 PID **真的还活着**，就会被
+                    # 误判成死锁，于是启动第二个循环，两个进程同时往 main 推。
+                    # 改为：显式按 GBK 解码（失败就 replace）+ 按 CSV 第二列精确比对，
+                    # 不再用 "pid 字符串出现在输出里" 这种子串判断。
+                    raw = subprocess.run(
+                        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                        capture_output=True, timeout=30).stdout
+                    txt = raw.decode("gbk", "replace")
+                    for line in txt.splitlines():
+                        parts = [p.strip().strip('"') for p in line.split('","')]
+                        if len(parts) >= 2 and parts[1] == str(pid):
+                            alive = True
+                            break
                 else:
                     os.kill(pid, 0)
                     alive = True

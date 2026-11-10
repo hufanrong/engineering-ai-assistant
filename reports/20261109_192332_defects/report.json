@@ -165,11 +165,25 @@
       "out": "severity=major status=open",
       "err": "待上游处理",
       "fix": "按 open_or_start.bat 的做法统一处理：去 BOM、注释改 ASCII、中文只放 echo 内、末尾 pause。本次已修 run_loop.bat 与 open_or_start.bat，其余 4 个未动。"
+    },
+    {
+      "step": "[CH-10][通道] stale 锁检测用 text=True 解码 tasklist 的 GBK 输出会抛 UnicodeDecodeError，异常被吞后 alive 恒为 False —— 真实存活的进程会被误判成死锁，进而启动第二个循环",
+      "rc": 0,
+      "out": "severity=major status=fixed",
+      "err": "",
+      "fix": "改为显式 GBK 解码 + 按 tasklist CSV 第二列精确比对 PID（不再用子串判断）。实测两个用例通过：活进程被正确拒绝、死进程被正确接管，且不再抛解码异常。"
+    },
+    {
+      "step": "[OP-07][待决策] 自测收尾的清理动作失败会把整轮判成 failed（即使 P74/F0/S2 零失败），结论会被误读",
+      "rc": 1,
+      "out": "severity=major status=open",
+      "err": "待上游处理",
+      "fix": "实测 20261110_071929：六个阶段全过、失败 0，但清理测试项目失败 + 样本目录删除被本机安全删除策略拦截，selftest 退出码变 1，wb_loop 据此判 status=failed。建议：清理失败只记 warning，不参与 status 判定；并把 status 判定改成只看 failed 数。"
     }
   ],
   "summary": {
-    "passed": 17,
-    "failed": 6,
+    "passed": 18,
+    "failed": 7,
     "skipped": 0,
     "by_phase": {}
   },

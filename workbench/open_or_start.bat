@@ -77,8 +77,11 @@ start "Fangong Workbench" /min cmd /c ""%PY%" start.py >> "%HERE%updates\start.l
 
 echo [信息] 等待服务就绪（最多 60 秒）...
 set WAIT=0
+rem  Delay one second without relying on stdin. `timeout /t` refuses to run
+rem when stdin is redirected ("Input redirection is not supported"), and in a
+rem headless/service context that turns this wait loop into a busy spin.
 :waitloop
-timeout /t 1 /nobreak >nul
+ping -n 2 127.0.0.1 >nul 2>&1
 set /a WAIT+=1
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT%" ^| findstr "LISTENING"') do goto ready
 if !WAIT! LSS 60 goto waitloop

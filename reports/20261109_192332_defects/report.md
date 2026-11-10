@@ -3,7 +3,7 @@
 - 性质：**缺陷清单**，不是一次自测轮次（不触发 selftest）
 - 代码版本：`783cd87b72e0`
 - 生成时间：2026-11-09 19:23:32
-- 汇总：已修 17 项 / 待上游决策 6 项 / 合计 23 项
+- 汇总：已修 18 项 / 待上游决策 7 项 / 合计 25 项
 
 ## 一、这次全部失败的项
 
@@ -29,6 +29,7 @@
 | CH-07 | 通道 | selftest_report.json/md 已被 .gitignore 声明忽略却仍被跟踪，每轮必脏 | minor | 已修 |
 | CH-08 | 通道 | workbench/updates/ 未忽略，每轮进 stash | minor | 已修 |
 | CH-09 | 通道 | git stash 的 rc=0 被误判成「已暂存」，随后 stash pop 可能弹出别人的旧 stash | major | 已修 |
+| CH-10 | 通道 | stale 锁检测用 text=True 解码 tasklist 的 GBK 输出会抛 UnicodeDecodeError，异常被吞后 alive 恒为 False —— 真实存活的进程会被误判成死锁，进而启动第二个循环 | major | 已修 |
 | ST-01 | 自测 | 阶段② 打印 docx 二进制内容触发 UnicodeEncodeError，阶段从 9 项截断到 4 项 | blocker | 已修 |
 | ST-02 | 自测 | 阶段⑥「设备数自身一致」必挂：真实项目 relations.json 无 stats 键，接口返回 stats=None | major | 已修 |
 | ST-03 | 自测 | worktree 下 .git 是 55 字节指针文件，isdir 判断导致「不是 git 仓库」 | major | 已修 |
@@ -39,6 +40,7 @@
 | OP-04 | 待决策 | 历史 4 轮报告不完整：20261030_1610 / 20261031_073500 / 20261031_103857 / 20261101_095058 | info | 待决策 |
 | OP-05 | 待决策 | 仓库外仍存在临时启动器 D:\fangong-launcher\run_loop_local.bat，与仓库脚本重复 | info | 待决策 |
 | OP-06 | 待决策 | install.bat / install-full.bat / install_optional.bat / run_workbench.bat 仍是 UTF-8 BOM + 大量中文，双击存在同样的失效风险 | major | 待决策 |
+| OP-07 | 待决策 | 自测收尾的清理动作失败会把整轮判成 failed（即使 P74/F0/S2 零失败），结论会被误读 | major | 待决策 |
 | ME-01 | 我方失误 | 11-06 用 cmd //c 验证 PATH，继承了 Bash 注入的环境，误报「python/git 正常，不是机器缺陷」 | major | 已修 |
 | ME-02 | 我方失误 | 统计未推送文件时报 123 个，实为 134 个 | minor | 已修 |
 | ME-03 | 我方失误 | 改启动器时引入回归：for /d 带引号 + 正斜杠解析错，找不到 python | major | 已修 |
