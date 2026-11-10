@@ -1,0 +1,76 @@
+{
+  "run_id": "20261110_093714",
+  "started": "2026-11-10 09:37:14",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "2a7a67813f78e288f3132446c580dd42a393d297",
+      "err": ""
+    },
+    {
+      "step": "跳过拉取",
+      "rc": 0,
+      "out": "--no-pull"
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪"
+    },
+    {
+      "step": "selftest",
+      "rc": 0,
+      "out": "{\"passed\": 50, \"failed\": 0, \"skipped\": 0, \"by_phase\": {\"1\": {\"passed\": 18, \"failed\": 0, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}}}",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=480 parse_failed=25 -> telemetry_bundle.json"
+    },
+    {
+      "step": "专项回归套件",
+      "rc": 1,
+      "out": "P18/F2/T20 -> suites.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=0 P50/F0/S0 suites_fail=2"
+    }
+  ],
+  "summary": {
+    "passed": 50,
+    "failed": 0,
+    "skipped": 0,
+    "by_phase": {
+      "1": {
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "error": "",
+  "remote_head": "2a7a67813f78e288f3132446c580dd42a393d297",
+  "finished": "2026-11-10 09:52:02",
+  "commit_before": "2a7a67813f78e288f3132446c580dd42a393d297",
+  "commit_after": "c723339763456bdab95295feb82c3869f73f107b"
+}
