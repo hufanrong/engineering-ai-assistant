@@ -722,63 +722,123 @@ def _get_pid_by_port(port: int) -> List[int]:
     return list(set(pids))
 
 
-def _kill_process_tree(pid: int) -> bool:
-    """【Bug2】结束进程及其子进程树（Windows taskkill /T /F，Linux kill 进程组）。"""
+# v0.1.233：**删掉了 _kill_process_tree()**。它用 taskkill /PID x /T（连整个
+# 进程树一起杀），而重启 helper 就是服务进程拉起的子进程 —— helper 调它等于
+# 自杀，这就是 D18「点了重启，工作台整台消失」的根因。现在杀进程统一用 helper
+# 里的 kill_one()（不带 /T，只结束目标进程）。留着一个「看起来能用、实际会杀
+# 死调用方」的公共函数，下一个人迟早会再踩一次。
+
+
+_RESTART_SCRIPT = r'''# -*- coding: utf-8 -*-
+# 繁工AI 重启 helper（v0.1.233）—— 由 auto_updater.restart_service() 生成并派发
+#
+# 这一版是按 WORKbuddy 真机缺陷 D18 重写的。v0.1.232 的 helper 有两个硬伤：
+#   ① 杀旧进程用 taskkill /PID x /T（**连进程树**），而 helper 本身就是服务进程
+#      拉起的子进程 —— 于是 helper 把自己也杀了，新服务永远起不来；
+#   ② 杀完才拉新进程，且「新进程能不能起来」没人检查，服务死了也没人知道。
+# 今天的顺序改成「先起后死」，而且这个「起」是真的起：
+#   探活阶段：用**临时端口 + 临时数据目录**把新代码完整跑一遍（真启动、真绑定、
+#             真响应 /api/status）。跑不通 → 直接退出，**旧服务一个字节都不动**。
+#             单端口不可能两个进程同时 listen，所以这是同端口下能做到的最强保证：
+#             宁可不重启，也不能宕机。
+#   切换阶段：探活通过才结束旧进程，**taskkill 不带 /T**（只杀这一个进程）。
+#   验收阶段：轮询 /api/status，要求 PID 真的换了、接口真的应答，才写成功。
+#   全程写 updates/restart.log；结果写 updates/restart_result.json ——
+#   服务死了也能读到，不依赖 HTTP。
+import os, sys, json, time, shutil, socket, subprocess, datetime
+
+for _s in (sys.stdout, sys.stderr):
     try:
-        if sys.platform.startswith("win"):
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"], **_subproc_kwargs(15))
-        else:
-            try:
-                os.killpg(os.getpgid(pid), 15)  # SIGTERM
-            except Exception:
-                os.kill(pid, 15)
-            # 等待退出
-            for _ in range(10):
-                try:
-                    os.kill(pid, 0)
-                    time.sleep(0.3)
-                except OSError:
-                    return True
-            try:
-                os.kill(pid, 9)  # SIGKILL
-            except Exception:
-                pass
-        return True
+        _s.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
-        return False
-
-
-_RESTART_SCRIPT = r"""# -*- coding: utf-8 -*-
-# 由繁工AI auto_updater 生成：等主进程这轮返回 → 杀旧进程 → 等端口释放 → 拉起新服务 → 写结果
-import os, sys, json, time, subprocess, datetime
+        pass
 
 WS = {ws!r}
+HOST = {host!r}
 PORT = {port!r}
-PIDS = {pids!r}
+OLD_PIDS = {pids!r}
+TAG = {tag!r}
 RESULT = os.path.join(WS, "updates", "restart_result.json")
-LOG = os.path.join(WS, "updates", "restart_helper.log")
+LOG = os.path.join(WS, "updates", "restart.log")
+
+CANARY_TIMEOUT = 45      # 探活实例要多快应答（Windows 冷启动实测手动 start.py 约 8 秒）
+FREE_TIMEOUT = 25        # 旧进程退出后端口要多久释放
+UP_TIMEOUT = 60          # 正式实例要多久应答
+RETRIES = 1              # 正式启动失败重试次数
 
 
 def log(msg):
     try:
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
         with open(LOG, "a", encoding="utf-8") as f:
-            f.write("[%s] %s\n" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg))
+            f.write("[%s] [helper %s] %s\n" % (
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), TAG, msg))
     except Exception:
         pass
 
 
 def write_result(d):
+    d = dict(d)
+    d.setdefault("tag", TAG)
+    d.setdefault("ts", time.time())
+    d.setdefault("at", datetime.datetime.now().isoformat())
+    d.setdefault("port", PORT)
     try:
         os.makedirs(os.path.dirname(RESULT), exist_ok=True)
-        with open(RESULT, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False, indent=1)
-    except Exception:
-        pass
+        # v0.1.233：临时文件必须**唯一**。原来是固定的 restart_result.json.tmp，
+        # 两个 helper 同时收尾（用户连点两次重启、或探活与正式实例先后写）会往
+        # 同一个临时文件里各写一份 → os.replace 之后 result.json 成了两段 JSON
+        # 拼接 → json.load 抛 Extra data。用 mkstemp 让「同进程多线程」和
+        # 「多进程」两种并发都不会撞（只按 pid 命名挡不住线程）。
+        import tempfile as _tf
+        fd, tmp = _tf.mkstemp(prefix="restart_result.", suffix=".tmp",
+                              dir=os.path.dirname(RESULT))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, RESULT)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            raise
+    except Exception as e:
+        log("写结果失败：%s" % e)
+    return d
 
 
-def pid_by_port(port):
+def free_port_taken(port):
+    """端口是否仍被监听：能 bind 上就是空的。"""
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind((HOST, port))
+        return False
+    except OSError:
+        return True
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def pick_free_port():
+    s = socket.socket()
+    try:
+        s.bind((HOST, 0))
+        return s.getsockname()[1]
+    except OSError:
+        return 0
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def pids_on_port(port):
     pids = []
     try:
         if sys.platform.startswith("win"):
@@ -799,262 +859,394 @@ def pid_by_port(port):
     return sorted(set(pids))
 
 
-def kill_tree(pid):
+def pid_alive(pid):
     try:
         if sys.platform.startswith("win"):
-            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=20)
-        else:
-            try:
-                os.kill(pid, 15)
-            except Exception:
-                pass
+            out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid],
+                                 capture_output=True, timeout=15)
+            return str(pid) in (out.stdout or b"").decode("gbk", "replace")
+        os.kill(pid, 0)
         return True
-    except Exception as e:
-        log("kill %s 失败：%s" % (pid, e))
+    except Exception:
         return False
 
 
+def kill_one(pid):
+    """只杀这一个进程。**绝不带 /T**：helper 是旧服务的子进程，/T 会把自己杀掉。"""
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, timeout=20)
+            return True
+        try:
+            os.kill(pid, 15)
+        except Exception:
+            return True
+        for _ in range(10):
+            if not pid_alive(pid):
+                return True
+            time.sleep(0.3)
+        try:
+            os.kill(pid, 9)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log("结束 PID=%s 失败：%s" % (pid, e))
+        return False
+
+
+def http_status(port, timeout=2.0):
+    """不带代理地取 /api/status。返回 (状态码, 字典)。"""
+    import urllib.request
+    try:
+        op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with op.open("http://127.0.0.1:%d/api/status" % port, timeout=timeout) as r:
+            body = r.read().decode("utf-8", "replace")
+            try:
+                d = json.loads(body)
+            except Exception:
+                d = {"_raw": body[:200]}
+            return r.status, d
+    except Exception as e:
+        return 0, {"_err": str(e)[:160]}
+
+
+def spawn(cmd, env, logpath):
+    os.makedirs(os.path.dirname(logpath), exist_ok=True)
+    lf = open(logpath, "a", encoding="utf-8")
+    lf.write("\n--- spawn %s (%s) ---\n" % (
+        " ".join(cmd), datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    lf.flush()
+    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS} \
+        if sys.platform.startswith("win") else {"start_new_session": True}
+    return subprocess.Popen(cmd, cwd=WS, stdout=lf, stderr=lf, stdin=subprocess.DEVNULL,
+                            env=env, close_fds=True, **kw)
+
+
+def wait_http(port, timeout):
+    """等到 /api/status 真的应答，返回 (ok, 耗时, 字典)。"""
+    t0 = time.time()
+    last = {}
+    while time.time() - t0 < timeout:
+        code, d = http_status(port)
+        last = d
+        if code == 200 and d.get("app") == "fangong-workbench":
+            return True, round(time.time() - t0, 1), d
+        time.sleep(0.5)
+    return False, round(time.time() - t0, 1), last
+
+
+def base_env(port, data_dir):
+    env = dict(os.environ)
+    env["FANGONG_NO_BROWSER"] = "1"
+    env["FANGONG_PORT"] = str(port)
+    env["FANGONG_DATA_DIR"] = data_dir
+    env.pop("PYTHONPATH", None)
+    return env
+
+
 def main():
-    log("helper 启动，目标 PID=%s PORT=%s" % (PIDS, PORT))
-    # 先让调用方那轮 HTTP 返回去（否则浏览器收到的是断连而不是"正在重启"）
-    time.sleep(1.5)
-    killed = []
-    for pid in PIDS:
-        if kill_tree(pid):
-            killed.append(pid)
-            log("已结束 PID=%s" % pid)
-    # 等端口真正释放（最多 30 秒）
-    freed = False
-    for _ in range(30):
-        if not pid_by_port(PORT):
-            freed = True
-            break
-        time.sleep(1)
-    log("端口释放=%s，仍占用=%s" % (freed, pid_by_port(PORT)))
+    t_start = time.time()
+    log("helper 启动 argv=%s cwd=%s pid=%s" % (" ".join(sys.argv), os.getcwd(), os.getpid()))
+    log("目标旧进程=%s 端口=%s tag=%s" % (OLD_PIDS, PORT, TAG))
 
     py = sys.executable or "python"
     start_py = os.path.join(WS, "start.py")
     cmd = [py, start_py] if os.path.isfile(start_py) else [py, os.path.join(WS, "app", "main.py")]
-    env = dict(os.environ)
-    env["FANGONG_NO_BROWSER"] = "1"
-    logp = os.path.join(WS, "updates", "restart.log")
-    try:
-        os.makedirs(os.path.dirname(logp), exist_ok=True)
-        lf = open(logp, "a", encoding="utf-8")
-        if sys.platform.startswith("win"):
-            subprocess.Popen(cmd, cwd=WS, stdout=lf, stderr=lf, env=env,
-                             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
-                             close_fds=True)
-        else:
-            subprocess.Popen(cmd, cwd=WS, stdout=lf, stderr=lf, env=env,
-                             start_new_session=True, close_fds=True)
-        log("已拉起新进程：%s" % cmd)
-    except Exception as e:
-        log("拉起失败：%s" % e)
-        write_result({"ok": False, "error": "拉起新进程失败：%s" % e,
-                      "killed": killed, "port_freed": freed,
-                      "at": datetime.datetime.now().isoformat()})
+    if not os.path.isfile(start_py) and not os.path.isfile(os.path.join(WS, "app", "main.py")):
+        log("找不到启动入口，放弃")
+        write_result({"ok": False, "phase": "precheck",
+                      "error": "缺少 start.py / app/main.py，无法重启"})
         return
 
-    # 等新进程占上端口（最多 60 秒）——**这一步以前没有**，所以"重启"
-    # 即使真的崩了，接口也照样回 ok:true。
-    up = False
-    for _ in range(60):
-        newp = [p for p in pid_by_port(PORT) if p not in PIDS]
-        if newp:
-            up = True
-            write_result({"ok": True, "killed": killed, "port_freed": freed,
-                          "new_pids": newp,
-                          "at": datetime.datetime.now().isoformat()})
-            log("重启成功，新 PID=%s" % newp)
+    # ---------- 阶段 1：探活（**先起**，动了生产进程就回不去了） ----------
+    probe = pick_free_port()
+    if not probe:
+        log("找不到空闲端口做探活，放弃（不动旧服务）")
+        write_result({"ok": False, "phase": "canary",
+                      "error": "找不到空闲端口做探活", "old_alive": [p for p in OLD_PIDS if pid_alive(p)]})
+        return
+    canary_data = os.path.join(WS, "updates", "_probe_data_%s" % TAG)
+    try:
+        shutil.rmtree(canary_data, ignore_errors=True)
+        os.makedirs(canary_data, exist_ok=True)
+    except Exception as e:
+        log("建探活数据目录失败（不影响探活）：%s" % e)
+    log("探活：端口=%s 数据目录=%s" % (probe, canary_data))
+    canary = None
+    try:
+        canary = spawn(cmd, base_env(probe, canary_data),
+                       os.path.join(WS, "updates", "restart_canary.log"))
+        ok, sec, d = wait_http(probe, CANARY_TIMEOUT)
+        log("探活结果=%s 耗时=%ss version=%s" % (ok, sec, d.get("version")))
+        if not ok:
+            log("探活失败：新代码起不来。**旧服务保持原样，本次不重启**")
+            write_result({"ok": False, "phase": "canary",
+                          "error": "新代码在探活端口 %d 上 %ds 内没能应答 /api/status，"
+                                   "旧服务未被动过（工作台仍可用）。请查看 updates/restart_canary.log" % (probe, CANARY_TIMEOUT),
+                          "canary_port": probe, "canary_log": os.path.join(WS, "updates", "restart_canary.log"),
+                          "canary_last": d, "old_alive": [p for p in OLD_PIDS if pid_alive(p)],
+                          "guarantee": "canary_verified_before_kill", "elapsed": round(time.time() - t_start, 1)})
             return
+        canary_version = d.get("version")
+    finally:
+        if canary is not None:
+            try:
+                kill_one(canary.pid)
+            except Exception:
+                pass
+        for p in pids_on_port(probe):
+            kill_one(p)
+        time.sleep(0.5)
+        shutil.rmtree(canary_data, ignore_errors=True)
+
+    # ---------- 阶段 2：结束旧进程（不带 /T） ----------
+    killed = []
+    for pid in OLD_PIDS:
+        if kill_one(pid):
+            killed.append(pid)
+            log("已结束旧进程 PID=%s（未使用 /T，helper 自身不受影响）" % pid)
+    freed = False
+    for _ in range(FREE_TIMEOUT * 2):
+        if not free_port_taken(PORT):
+            freed = True
+            break
+        time.sleep(0.5)
+    log("端口 %s 释放=%s 仍占用=%s" % (PORT, freed, pids_on_port(PORT)))
+    if not freed:
+        write_result({"ok": False, "phase": "kill",
+                      "error": "旧进程已结束但 %ds 内端口 %d 仍未释放" % (FREE_TIMEOUT, PORT),
+                      "killed": killed, "still_on_port": pids_on_port(PORT),
+                      "canary_version": canary_version, "old_alive": [],
+                      "guarantee": "canary_verified_before_kill",
+                      "elapsed": round(time.time() - t_start, 1)})
+        return
+
+    # ---------- 阶段 3：正式拉起 + 验收 ----------
+    real_log = os.path.join(WS, "updates", "restart.log")
+    last = {}
+    for attempt in range(RETRIES + 1):
+        log("第 %d 次拉起正式实例（端口 %s）" % (attempt + 1, PORT))
+        proc = spawn(cmd, base_env(PORT, ""), real_log)
+        # FANGONG_DATA_DIR 置空 = 用真实 data 目录（config 里空串视为未设置）
+        ok, sec, d = wait_http(PORT, UP_TIMEOUT)
+        newp = [p for p in pids_on_port(PORT)]
+        log("第 %d 次结果 ok=%s 耗时=%ss pid=%s version=%s" % (attempt + 1, ok, sec, newp, d.get("version")))
+        if ok:
+            write_result({"ok": True, "phase": "done", "killed": killed,
+                          "old_pids": OLD_PIDS, "new_pids": newp,
+                          "version": d.get("version"), "canary_version": canary_version,
+                          "http_seconds": sec, "elapsed": round(time.time() - t_start, 1),
+                          "guarantee": "canary_verified_before_kill"})
+            log("重启成功：旧=%s 新=%s 版本=%s 总耗时=%ss"
+                % (OLD_PIDS, newp, d.get("version"), round(time.time() - t_start, 1)))
+            return
+        last = d
+        # 失败的那次先收尸，避免占着端口影响下一次
+        for p in pids_on_port(PORT):
+            kill_one(p)
         time.sleep(1)
-    write_result({"ok": False, "killed": killed, "port_freed": freed, "new_pids": [],
-                  "error": "60 秒内新服务未占上端口 %s（看 updates/restart.log）" % PORT,
-                  "at": datetime.datetime.now().isoformat()})
-    log("重启失败：新服务没起来")
+
+    write_result({"ok": False, "phase": "start",
+                  "error": "探活通过，但正式实例 %d 次都没能在 %ds 内应答 /api/status"
+                           % (RETRIES + 1, UP_TIMEOUT),
+                  "killed": killed, "old_pids": OLD_PIDS, "last_response": last,
+                  "canary_version": canary_version,
+                  "suggestion": "手动运行 run_workbench.bat；若 restart.log 里有 Errno 10048，"
+                                "说明端口仍被别的程序占用",
+                  "elapsed": round(time.time() - t_start, 1)})
+    log("重启失败：正式实例没起来（旧进程已被结束，看 updates/restart.log）")
 
 
 if __name__ == "__main__":
-    main()
-"""
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        log("helper 异常：%s" % e)
+        try:
+            log(traceback.format_exc())
+        except Exception:
+            pass
+        write_result({"ok": False, "phase": "helper_crash", "error": "helper 异常：%s" % e})
+'''
+
+
+def _restart_result_path() -> str:
+    return os.path.join(WORKSPACE_ROOT, "updates", "restart_result.json")
 
 
 def restart_status() -> Dict:
-    """查上一次重启到底成没成。（v0.1.232）
+    """查上一次重启到底成没成。（v0.1.232 / v0.1.233 增 tag、耗时、阶段）
 
     这一条是「接口不许说谎」的兑现方式：restart 这个接口天生无法在自己
     返回的那一刻确认结果（它要杀的就是它自己）。于是把结果落到
     updates/restart_result.json，由独立进程写，这个接口只负责如实回报。
+
+    D18 的另一半：**结果必须落在文件里**。v0.1.232 的提示让用户「用
+    GET /api/update/restart/status 核对」，可那个接口活在被杀的进程里 ——
+    服务死了就查不到，恰恰是最需要查的时候。现在这个接口只是**读文件**，
+    而且真有路由（v0.1.232 只写了函数没挂路由，等于对外承诺了一个 404）。
     """
-    p = os.path.join(WORKSPACE_ROOT, "updates", "restart_result.json")
+    p = _restart_result_path()
     try:
         if not os.path.isfile(p):
             return {"ok": False, "known": False,
                     "message": "还没有重启记录（或刚更新过还没重启）"}
         with open(p, encoding="utf-8") as f:
-            d = json.load(f)
+            raw = f.read()
+        try:
+            d = json.loads(raw)
+        except Exception:
+            # v0.1.233：文件被写坏时**如实说文件坏了**，不要抛异常让调用方
+            # 整个 500，也不要猜一个「大概成功」的结论。
+            return {"ok": False, "known": False, "corrupt": True,
+                    "error": "restart_result.json 内容不合法（可能两次重启同时收尾）",
+                    "raw_head": raw[:200]}
+        if not isinstance(d, dict):
+            return {"ok": False, "known": False, "corrupt": True,
+                    "error": "restart_result.json 不是对象", "raw_head": str(d)[:200]}
         d["known"] = True
+        # 服务在跑说明「当前这一代」是活着的，供前端区分「重启失败但旧服务还在」与「彻底没了」
+        d["service_alive_now"] = True
+        try:
+            d["result_age_seconds"] = round(time.time() - float(d.get("ts") or 0), 1)
+        except Exception:
+            pass
         return d
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "known": False, "error": str(e)}
 
 
-def restart_service(port: int = 8756) -> Dict:
+def _render_restart_script(port: int, pids: List[int], tag: str) -> str:
+    """把 helper 模板渲染成可执行脚本源码（不落盘、不派生）。
+
+    v0.1.233 拆出这一层是为了让测试能**只跑一个** helper：以前测试走
+    _dispatch_restart_helper（它已经真派生了 helper），又自己再 run 一次脚本，
+    于是两个 helper 并发收尾 —— 这正是本轮顺带抓到的那条真实缺陷
+    （result.json 被两个进程拼成两段 JSON）。测试应当派生「自己那一份」。
     """
-    【Bug2】重启工作台服务：结束占用端口的旧进程 → 重新启动新进程。
-    返回 {ok, message, error, port_pid}
+    host = "127.0.0.1"
+    try:
+        from . import config as _cfg  # noqa: F401
+        host = getattr(_cfg, "HOST", host) or host
+    except Exception:  # noqa: BLE001
+        pass
+    return (_RESTART_SCRIPT.replace("{ws!r}", repr(WORKSPACE_ROOT))
+                          .replace("{host!r}", repr(host))
+                          .replace("{port!r}", str(port))
+                          .replace("{pids!r}", repr(sorted(pids)))
+                          .replace("{tag!r}", repr(tag)))
 
-    v0.1.232 —— 修「返回 ok:true，一个进程都没换」。
-      实测（老板机器 2026-11-10，v0.1.231 更新后）：
-        POST /api/update/restart → {{"ok":true,"killed_pids":[],"port":8756}}
-        随后 5 次探版本全是 0.1.230，PID 前后都是 24808 —— 重启没发生。
-        updates/restart.log 铁证：
-          ERROR [Errno 10048] bind on ('127.0.0.1', 8756) 端口只允许使用一次
-        老进程没死，新起的 start.py 抢不到端口崩了。
 
-      根因：uvicorn 单进程下**监听端口的 pid 就是 os.getpid() 自己**，
-      而原代码 `if pid == os.getpid(): continue` 是唯一目标，于是 killed
-      恒为空；`"别自杀"` 被实现成 `"永远不重启"`。且 Popen 之后不做任何
-      校验，无论新进程活没活都回 ok:true —— 这就是「接口在说谎」。
+def _helper_script_path() -> str:
+    return os.path.join(WORKSPACE_ROOT, "updates", "restart_service.py")
 
-      为什么这个缺陷优先级最高：自测循环每轮靠它把新代码换上去。它是假的，
-      意味着开发端的修复在老板机器上不一定真生效，会污染后面所有缺陷单。
 
-      改法：① 要杀的就是自己时，把「杀自己 + 拉新进程」交给一个**独立
-      进程**（_RESTART_SCRIPT）在 1.5 秒后执行 —— 否则这一轮 HTTP 还没返回
-      就被自己砍断；② 独立进程杀完等端口释放，拉起新服务后**等它真占上
-      端口**才算成功，结果写进 updates/restart_result.json；③ 本接口诚实
-      区分「已交给独立进程，约 10 秒后生效」与「当场确认已换掉」，并提供
-      restart_status() 供事后核对；④ 不是自己的 pid 时（从 CLI 等外部调用），
-      照旧当场杀，但**照样要等新进程占上端口**才回 ok。
-    """
-    import time as _time
-
-    pids = _get_pid_by_port(port)
-    self_pid = os.getpid()
-    killed = []
-
-    if self_pid in pids:
-        # 占着端口的就是我自己（uvicorn 单进程）——必须交给独立进程做
-        try:
-            script_path = os.path.join(WORKSPACE_ROOT, "updates", "restart_service.py")
-            os.makedirs(os.path.dirname(script_path), exist_ok=True)
+def _dispatch_restart_helper(port: int, pids: List[int], tag: str) -> Dict:
+    """把重启交给独立进程。返回 {ok, script} 或 {ok:False, error}。"""
+    try:
+        script_path = _helper_script_path()
+        os.makedirs(os.path.dirname(script_path), exist_ok=True)
+        if os.path.exists(script_path):
             try:
-                if os.path.exists(script_path):
-                    os.remove(script_path)
+                os.remove(script_path)
             except Exception:  # noqa: BLE001
                 pass
-            with open(script_path, "w", encoding="utf-8") as f:
-                f.write(_RESTART_SCRIPT.replace("{ws!r}", repr(WORKSPACE_ROOT))
-                                        .replace("{port!r}", str(port))
-                                        .replace("{pids!r}", repr(sorted(pids))))
-            log_path = os.path.join(WORKSPACE_ROOT, "updates", "restart_helper.log")
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "a", encoding="utf-8") as lf:
-                lf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 派发重启 helper ===\n")
-                if sys.platform.startswith("win"):
-                    subprocess.Popen(
-                        [sys.executable or "python", script_path], cwd=WORKSPACE_ROOT,
-                        stdout=lf, stderr=lf,
-                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
-                        close_fds=True)
-                else:
-                    subprocess.Popen(
-                        [sys.executable or "python", script_path], cwd=WORKSPACE_ROOT,
-                        stdout=lf, stderr=lf, start_new_session=True, close_fds=True)
-            return {
-                "ok": True,
-                "verified": False,
-                "mode": "helper",
-                "message": (f"已派发独立进程重启：约占端口的是当前进程本身（PID {self_pid}），"
-                            f"约 10 秒后旧进程会被结束并拉起新服务。"
-                            f"可用 GET /api/update/restart/status 核对是否真换掉了。"),
-                "killed_pids": [],
-                "will_kill": sorted(pids),
-                "port": port,
-            }
-        except Exception as e:  # noqa: BLE001
-            return {
-                "ok": False,
-                "mode": "helper",
-                "error": f"派发重启进程失败：{str(e)}",
-                "killed_pids": killed,
-                "port": port,
-                "suggestion": "请手动关闭旧窗口后，重新运行 run_workbench.bat",
-            }
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(_render_restart_script(port, pids, tag))
+        helper_log = os.path.join(WORKSPACE_ROOT, "updates", "restart_helper.log")
+        os.makedirs(os.path.dirname(helper_log), exist_ok=True)
+        with open(helper_log, "a", encoding="utf-8") as lf:
+            lf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+                     f"派发重启 helper tag={tag} 目标={sorted(pids)} 端口={port} ===\n")
+            kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
+                  if sys.platform.startswith("win") else {"start_new_session": True})
+            subprocess.Popen([sys.executable or "python", script_path], cwd=WORKSPACE_ROOT,
+                             stdout=lf, stderr=lf, stdin=subprocess.DEVNULL,
+                             close_fds=True, **kw)
+        return {"ok": True, "script": script_path}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"派发重启进程失败：{str(e)}"}
 
-    # 占端口的不是我自己：当场杀，但必须确认新进程真占上端口才回 ok
-    for pid in pids:
-        if _kill_process_tree(pid):
-            killed.append(pid)
 
-    for _ in range(10):
-        remaining = _get_pid_by_port(port)
-        if not remaining:
-            break
-        _time.sleep(0.5)
+def restart_service(port: int = 8756) -> Dict:
+    """
+    【Bug2】重启工作台服务。v0.1.233 重写（D18）。
 
+    历史：v0.1.231 谎报成功（只跳过自己，一个进程都没换）；v0.1.232 改成
+    「分离 helper 先杀后起」，结果 helper 被自己的 taskkill /T 杀掉，**服务
+    整台消失**。WORKbuddy 的结论是「做不到『先起后死』，就不要杀」。
+
+    这一版的顺序：
+
+      1. 探活（先起）：用临时端口 + 临时数据目录把新代码真正跑一遍，
+         要求 /api/status 真应答。跑不通 → 直接回 ok:false，**旧服务不动**。
+      2. 切换（后死）：taskkill 不带 /T，只结束服务这一个进程。
+      3. 验收：轮询 /api/status，要求接口应答且端口上换了 PID，才回 ok:true。
+      4. 落盘：结果写 updates/restart_result.json，服务死了也读得到；
+         GET /api/update/restart/status 只是读这个文件。
+
+    返回体里 `verified` 是关键词：true=当场确认过；false=已受理、结果待查。
+    """
+    tag = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
+    pids = _get_pid_by_port(port)
+    self_pid = os.getpid()
+    self_owned = self_pid in pids
+
+    # 清掉上一次的结果，避免「新的这次还没跑完，前端读到旧的 ok:true」
     try:
-        python = sys.executable or "python"
-        main_py = os.path.join(WORKSPACE_ROOT, "app", "main.py")
-        start_py = os.path.join(WORKSPACE_ROOT, "start.py")
-        cmd = [python, start_py] if os.path.isfile(start_py) else [python, main_py]
+        rp = _restart_result_path()
+        if os.path.isfile(rp):
+            os.remove(rp)
+    except Exception:  # noqa: BLE001
+        pass
 
-        log_path = os.path.join(WORKSPACE_ROOT, "updates", "restart.log")
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        env = dict(os.environ)
-        env["FANGONG_NO_BROWSER"] = "1"
-        with open(log_path, "a", encoding="utf-8") as logf:
-            logf.write(f"\n=== {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 重启服务 ===\n")
-            if sys.platform.startswith("win"):
-                subprocess.Popen(
-                    cmd, cwd=WORKSPACE_ROOT, env=env,
-                    stdout=logf, stderr=logf,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
-                    close_fds=True)
-            else:
-                subprocess.Popen(
-                    cmd, cwd=WORKSPACE_ROOT, env=env,
-                    stdout=logf, stderr=logf,
-                    start_new_session=True, close_fds=True)
+    disp = _dispatch_restart_helper(port, pids, tag)
+    if not disp.get("ok"):
+        return {
+            "ok": False, "verified": False, "state": "failed", "mode": "helper",
+            "error": disp.get("error"),
+            "killed_pids": [], "will_kill": sorted(pids), "port": port,
+            "suggestion": "手动关闭旧窗口后，重新运行 run_workbench.bat",
+        }
 
-        # v0.1.232：等新进程真占上端口（最多 30 秒）。原来这里直接回 ok:true。
-        new_pids = []
-        for _ in range(30):
-            now = [p for p in _get_pid_by_port(port) if p != self_pid]
-            if now:
-                new_pids = now
-                break
-            _time.sleep(1)
-        if not new_pids:
-            return {
-                "ok": False,
-                "verified": True,
-                "mode": "direct",
-                "error": (f"旧进程已结束（killed={killed}），但 30 秒内没有新进程占上端口 {port}。"
-                          f"请看 updates/restart.log 的报错。"),
-                "killed_pids": killed,
-                "port": port,
-                "suggestion": "手动运行 run_workbench.bat；若日志里有 Errno 10048，说明端口还被别的进程占着。",
-            }
+    if self_owned:
+        # 占着端口的就是我自己：这一轮 HTTP 必须立刻返回，后面交给 helper
         return {
-            "ok": True,
-            "verified": True,
-            "mode": "direct",
-            "message": f"服务已重新启动（端口 {port}），新进程 PID={new_pids}",
-            "killed_pids": killed,
-            "new_pids": new_pids,
-            "port": port,
+            "ok": True, "accepted": True, "verified": False, "state": "dispatched",
+            "mode": "helper",
+            "message": (f"已受理：约占端口的是当前进程本身（PID {self_pid}）。"
+                        f"helper 先在旁路端口探活新代码，探活通过才会切换；"
+                        f"探活失败则保持旧服务不变。"),
+            "killed_pids": [], "will_kill": sorted(pids), "port": port,
+            "check": "GET /api/update/restart/status（读文件，服务重启期间/之后都能查）",
+            "tag": tag,
         }
-    except Exception as e:
-        return {
-            "ok": False,
-            "mode": "direct",
-            "error": f"重启失败：{str(e)}",
-            "killed_pids": killed,
-            "suggestion": "请手动关闭旧窗口后，重新运行 run_workbench.bat",
-        }
+
+    # 不是自己的 pid（从命令行/其它进程调用）：同样交给 helper，但本进程可以等结果，
+    # 于是能当场给出 verified 的结论。**逻辑只有 helper 一份**，不另写一套。
+    deadline = time.time() + 200
+    while time.time() < deadline:
+        d = restart_status()
+        if d.get("known") and str(d.get("tag")) == tag and d.get("phase") in (
+                "done", "failed", "canary", "start", "kill", "precheck", "helper_crash"):
+            # canary/start/kill 是终态失败；done 是成功
+            d = dict(d)
+            d["verified"] = True
+            d["mode"] = "helper"
+            d.setdefault("state", "done" if d.get("ok") else "failed")
+            return d
+        time.sleep(0.5)
+
+    return {
+        "ok": False, "verified": False, "state": "timeout", "mode": "helper",
+        "error": "等待重启结果超时（200 秒）", "port": port,
+        "check": "GET /api/update/restart/status",
+        "suggestion": "看 updates/restart.log 与 updates/restart_canary.log",
+    }
+
+
 
 
 # ============ v0.1.134：staging 自动替换（P2 修复）============
@@ -1122,9 +1314,12 @@ def pid_by_port(port):
 
 
 def kill_tree(pid):
+    # v0.1.233：这个 apply 脚本本身是服务进程派生的子进程，原来用 /T（连进程树）
+    # 杀服务 = 连自己一起杀，主进程一死脚本就断在替换文件之前，更新只做一半。
+    # 与 restart helper 的 kill_one 保持同一策略：只结束目标进程。
     try:
         if sys.platform.startswith("win"):
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=15)
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=15)
         else:
             subprocess.run(["kill", "-9", str(pid)], capture_output=True, timeout=10)
         return True

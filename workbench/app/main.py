@@ -3936,7 +3936,15 @@ def mobile_web():
 @app.post("/api/update/restart")
 def restart_workbench():
     """【v0.1.127】重启工作台服务：结束旧进程 → 启动新进程。
-    返回重启结果；重启失败时给出端口占用提示与手动处理指引。"""
+    返回重启结果；重启失败时给出端口占用提示与手动处理指引。
+
+    v0.1.233：返回体的 `ok` 不再等于「新旧进程都换好了」，而是分三态：
+      accepted/verified=false —— 已受理（占端口的是本进程，只能交给 helper）；
+      verified=true            —— 当场确认过（从命令行等外部调用时）；
+      ok=false                 —— 真失败（含「探活没过，旧服务原样保留」）。
+    最终结果一律以 GET /api/update/restart/status 或
+    updates/restart_result.json 为准 —— 那个文件服务死了也读得到。
+    """
     from . import auto_updater as _au
     port = 8756
     try:
@@ -3945,6 +3953,39 @@ def restart_workbench():
     except Exception:
         pass
     return _au.restart_service(port=port)
+
+
+@app.get("/api/update/restart/status")
+def restart_workbench_status():
+    """上一次重启到底成没成 —— 只读 updates/restart_result.json。
+
+    v0.1.233：**这个路由以前根本不存在**。v0.1.232 的 restart 返回体里写着
+    「可用 GET /api/update/restart/status 核对」，auto_updater 里也写了
+    restart_status()，但没人把它挂到 app 上 —— 用户照着提示去查，拿到的是
+    404。又是一次「对外承诺了，实际没有」。现在补上，且它只是读文件：
+    重启期间/重启之后、甚至服务已经死了（用别的办法读文件）都拿得到结果。
+    """
+    from . import auto_updater as _au
+    return _au.restart_status()
+
+
+@app.get("/api/update/restart/log")
+def restart_workbench_log(lines: int = 60):
+    """重启过程日志（helper / 探活 / 正式拉起），用于排查「点了重启没反应」。"""
+    from . import auto_updater as _au
+    out = {}
+    for name in ("restart.log", "restart_canary.log", "restart_helper.log"):
+        p = os.path.join(_au.WORKSPACE_ROOT, "updates", name)
+        try:
+            if os.path.isfile(p):
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    txt = f.readlines()
+                out[name] = "".join(txt[-max(1, min(int(lines or 60), 500)):])
+            else:
+                out[name] = "(尚无此日志)"
+        except Exception as e:  # noqa: BLE001
+            out[name] = f"(读取失败：{e})"
+    return {"ok": True, "logs": out}
 
 
 # ========== v0.1.118：手机端语音+文字+图片组合上传 ==========

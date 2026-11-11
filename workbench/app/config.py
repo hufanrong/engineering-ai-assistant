@@ -5,7 +5,14 @@ import os
 
 # ============ 基本 ============
 HOST = "127.0.0.1"          # 只在本机访问；如需局域网访问改为 0.0.0.0
-PORT = 8756                 # 端口，冲突可改
+# v0.1.233：允许**仅本次进程**临时覆盖端口与数据目录。
+# 用途只有一个：重启 helper 在切换之前，用旁路端口 + 临时数据目录把新代码
+# 真正跑起来验一遍（探活）。不设这两个变量时行为与以前完全一致。
+# 为什么必须走环境变量：config 的值由 __file__ 推导，同一份代码只能有一个
+# 端口；而单端口又不可能同时监听两个进程 —— 想「先起后死」，就必须让探活
+# 实例换一个端口、换一份数据目录，否则探活本身会和生产进程抢 8756。
+_PORT_ENV = (os.environ.get("FANGONG_PORT") or "").strip()
+PORT = int(_PORT_ENV) if _PORT_ENV.isdigit() else 8756   # 端口，冲突可改
 def _load_storage_config():
     """读取存储位置配置（storage_manager 写入的自定义路径）。"""
     try:
@@ -20,7 +27,13 @@ def _load_storage_config():
     return {}
 
 _STORAGE_CFG = _load_storage_config()
-DATA_DIR = _STORAGE_CFG.get("data_root") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+# v0.1.233：FANGONG_DATA_DIR 只给探活实例用（见上面 PORT 处说明）。
+# 空串视为「没设」，所以正常启动（env 里没有这个变量）走的还是原来那条路径。
+# **探活必须换数据目录**：探活实例会真启动、真跑 run() 里的启动自愈与临时文件
+# 清理，拿真实 data 目录去探活等于让一个「还不想用它」的实例去动老板的数据。
+_DATA_DIR_ENV = (os.environ.get("FANGONG_DATA_DIR") or "").strip()
+DATA_DIR = (_DATA_DIR_ENV or _STORAGE_CFG.get("data_root")
+            or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"))
 
 # ============ 文件夹扫描 ============
 SCAN_INTERVAL_SEC = 30      # 文件夹自动扫描间隔（秒），0 = 关闭自动扫描
@@ -935,7 +948,28 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #       实测老板机器上找不到），找不到返回 127 + 人话修法；新增 --preflight 一键体检。
 #       tools/test_wb_loop_git.py 21 条断言。
 
-APP_VERSION = "0.1.232"
+# v0.1.233（2026-11-11）D18「点重启，工作台整台消失」的根因修复：
+#
+#   根因：`taskkill /PID x /T` 杀的是**整个进程树**，而重启 helper 正是服务
+#   进程拉起的子进程 —— helper 调它等于自杀，于是旧服务被带走、新服务没起来。
+#   验收口径（老板原话）：先起后死。
+#
+#   单端口上做不到「先起后死」（uvicorn 单进程，一个端口不能被监听两次），
+#   所以改成：**先在空闲侧端口 + 临时数据目录起一个探活实例**（真启动、真绑定、
+#   真应答 /api/status），探活通过才杀旧进程，然后起正式实例；探活失败直接返回，
+#   旧服务一个字节都不动（宁可不重启，也不能宕机）。
+#
+#   - 删掉 _kill_process_tree()；helper 的 kill_one 只用 `taskkill /PID x /F`（不带 /T）
+#   - 结果落盘到 updates/restart_result.json，服务死了也能读上次重启结果
+#   - 临时文件名改用 mkstemp：两个 helper 同时收尾时，固定 .tmp 会被写成两段 JSON
+#     → json.load 抛 Extra data（本轮实测踩到，顺带当缺陷修掉）；读到坏文件如实报 corrupt
+#   - 补齐 v0.1.232 承诺却从未挂上的两个路由：
+#     GET /api/update/restart/status、GET /api/update/restart/log
+#   - config.py 新增 FANGONG_PORT / FANGONG_DATA_DIR（仅供探活实例临时覆盖）
+#
+#   tools/test_restart_really.py 43 条断言（含 8 个真进程并发写盘、旧服务全程在线采样
+#   96/96）；反向验证：改回固定临时名 → 41 次写盘失败、RC=1。
+APP_VERSION = "0.1.233"
 
 # 解析能力版本号（与 APP_VERSION 独立：界面/接口小改动不必重解析全库）。
 # **只要改了「同一份文件能抽出多少内容」，就把这个号加一** ——
