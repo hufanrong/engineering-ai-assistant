@@ -1,0 +1,105 @@
+{
+  "version_tested": "0.1.232",
+  "commit": "d3cb449",
+  "remote_head": "41e5a59",
+  "d18_fix_present": false,
+  "criteria": [
+    {
+      "id": 1,
+      "requirement": "点一次重启，30 秒内 /api/status 可用且 PID 已变",
+      "pass": false,
+      "baseline_pid": [16876],
+      "api_response": {
+        "ok": true,
+        "verified": false,
+        "mode": "helper",
+        "message": "已派发独立进程重启：约占端口的是当前进程本身（PID 16876），约 10 秒后旧进程会被结束并拉起新服务。可用 GET /api/update/restart/status 核对是否真换掉了。",
+        "killed_pids": [],
+        "will_kill": [16876],
+        "port": 8756
+      },
+      "timeline": [
+        {"t": 1.0, "pids": [16876], "status": "ok"},
+        {"t": 2.1, "pids": [16876], "status": "ok"},
+        {"t": 5.2, "pids": [], "status": "unreachable"}
+      ],
+      "alive_samples": 2,
+      "dead_samples": 15,
+      "final_pids": [],
+      "recovered_within_sec": null
+    },
+    {
+      "id": 2,
+      "requirement": "故意制造起不来的情况后重启，旧进程仍活着、工作台照常可用",
+      "pass": false,
+      "fault_injection": "app/main.py -> app/main.py.bak（新进程 from app.main import run 必 ImportError）",
+      "old_pid": 11276,
+      "after_fault_injection_old_service_alive": true,
+      "after_restart": {
+        "old_pid_still_listening": false,
+        "port_pids": [],
+        "status_reachable": false,
+        "alive_samples": 1,
+        "dead_samples": 15
+      },
+      "expected": "旧进程存活、工作台照常可用",
+      "actual": "旧进程被杀，工作台消失",
+      "cleanup": "app/main.py 已从 .bak 还原，git status --porcelain -uno 为空"
+    },
+    {
+      "id": 3,
+      "requirement": "updates/restart.log 有本次 restart 的完整记录，失败要写清原因",
+      "pass": false,
+      "restart_log_last_entry": "2026-11-10 14:39:21（manual restart，早于本次检验 17 小时）",
+      "restart_log_new_entries": 0,
+      "restart_helper_log_entries": [
+        "=== 2026-11-10 21:19:36 派发重启 helper === / [21:19:36] helper 启动，目标 PID=[21604] PORT=8756",
+        "=== 2026-11-11 07:16:54 派发重启 helper === / [07:16:55] helper 启动，目标 PID=[16876] PORT=8756",
+        "=== 2026-11-11 07:18:42 派发重启 helper === / [07:18:43] helper 启动，目标 PID=[11276] PORT=8756"
+      ],
+      "missing_log_steps": ["已结束 PID=…", "端口释放=…", "已拉起新进程：…", "重启成功，新 PID=…"],
+      "restart_canary_log_exists": false,
+      "restart_result_json_exists": false
+    },
+    {
+      "id": 4,
+      "requirement": "服务停掉时 GET /api/update/restart/status 能读到上次重启结果（不依赖服务自身应答）",
+      "pass": false,
+      "service_down": {"http_code": 0, "elapsed_sec": 0.000604, "meaning": "连接被拒，读不到任何东西"},
+      "service_up": {"http_code": 404, "body": "{\"detail\":\"Not Found\"}", "meaning": "该 GET 路由在 main.py 中未注册，只注册了 POST /api/update/restart"},
+      "route_inventory": ["GET /api/update/check", "POST /api/update/perform", "GET /api/update/log", "GET /api/update/backups", "POST /api/update/restore", "POST /api/update/restart"],
+      "restart_result_json_exists": false
+    }
+  ],
+  "root_cause": {
+    "file": "workbench/app/auto_updater.py",
+    "helper_script_constant": "_RESTART_SCRIPT (line 752)",
+    "spawn_code": "subprocess.Popen([sys.executable, helper_path], creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)",
+    "kill_code": "subprocess.run([\"taskkill\", \"/PID\", str(pid), \"/T\", \"/F\"])",
+    "explanation": "Popen 创建的子进程属于服务进程树；DETACHED_PROCESS 只脱离控制台，不脱离树。helper 执行 taskkill /T 时连带杀掉自己，死在 kill_tree() 一句。",
+    "consequence": "既不写『已结束 PID=』，也不等端口释放、不拉起新服务、不写 restart_result.json —— 用户看到的是服务被杀死后再也没起来。",
+    "evidence": "三次 helper 调用日志均只有『helper 启动』一行，无后续任何步骤"
+  },
+  "fix_proposals": [
+    {"id": "R1", "title": "先起后死：新进程先在别的端口起、健康检查通过后再杀旧；不通就放弃、旧进程毫发无损", "fixes": [1, 2], "core": true},
+    {"id": "R2", "title": "helper 离开被杀进程树：A 去掉 taskkill 的 /T（最小改动）；B 用 WMI Win32_Process.Create（父进程为 WmiPrvSE）；C CREATE_BREAKAWAY_FROM_JOB", "fixes": [1, 2, 3], "core": true},
+    {"id": "R3", "title": "完整日志：helper 首行写自身pid/父pid/目标pid/端口占用者，每步一写，异常先 log(traceback)；补 restart_canary.log（新进程启动即写 pid+version）", "fixes": [3]},
+    {"id": "R4", "title": "状态可脱离 HTTP 读取：main.py 补 GET /api/update/restart/status；restart_result.json 原子写；提供 restart_status.py 命令行直读文件", "fixes": [4]}
+  ],
+  "side_findings": [
+    {
+      "id": "S1",
+      "title": "02:04 自动轮次被跳过",
+      "evidence": {"last_run": "2026-11-10 21:04:11", "next_run": "2026-11-11 12:04:10", "missed_runs": 2, "wake_to_run": false},
+      "impact": "5 小时节奏断档，夜里那轮永远为空",
+      "fix": "WakeToRun=True，保留 StartWhenAvailable=True"
+    }
+  ],
+  "final_state": {
+    "service_version": "0.1.232",
+    "service_alive": true,
+    "indexed_files": 62,
+    "git_clean": true,
+    "logs_archived_to": "reports/20261111_072500_d18_verify/logs/"
+  }
+}

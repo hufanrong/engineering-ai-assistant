@@ -1,0 +1,74 @@
+{
+  "run_id": "20261111_072500_d18_verify",
+  "started": "2026-11-11 07:15:00",
+  "finished": "2026-11-11 07:26:00",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "D18 四条验收口径的实机检验报告。检验版本 v0.1.232（d3cb449），开发端尚未推 D18 修复。四条全部不达标，其中第 2 条（失败时旧服务必须存活）确认整台消失。",
+  "steps": [
+    {"step": "前置：确认版本", "rc": 0, "out": "APP_VERSION=0.1.232，远端 HEAD=41e5a59，无 D18 修复提交"},
+    {"step": "前置：启动服务", "rc": 0, "out": "v0.1.232 就绪，62 文件 / 1669 向量，PID 16876"},
+    {
+      "step": "第1条：正常重启，30 秒内可用且 PID 已变",
+      "rc": 1,
+      "out": "POST /api/update/restart -> {ok:true, verified:false, mode:'helper', will_kill:[16876]}；t=5.2s 起不可达；45 秒内 15 次采样全不可达；PID 16876 -> []"
+    },
+    {
+      "step": "恢复服务",
+      "rc": 0,
+      "out": "start.py 后台拉起，v0.1.232 / 62 文件，PID 11276"
+    },
+    {
+      "step": "第2条：注入『新进程起不来』后重启，旧进程须存活",
+      "rc": 1,
+      "out": "app/main.py -> main.py.bak 后旧服务仍可用(True/PID 11276)；点重启后旧 PID 11276 被杀，端口空，/api/status 不可达；45 秒内可用 1 次 / 不可达 15 次；旧进程存活=False，工作台照常可用=False"
+    },
+    {
+      "step": "故障还原",
+      "rc": 0,
+      "out": "finally 块内 main.py.bak -> main.py 还原成功，git status --porcelain -uno 为空"
+    },
+    {
+      "step": "第3条：restart.log 有本次记录且失败写清原因",
+      "rc": 1,
+      "out": "restart.log 无任何本次记录（最后一条仍是 2026-10-25 与 2026-11-10 14:39 的历史条目）；restart_helper.log 三次调用各只有一行『helper 启动，目标 PID=…』，无『已结束 PID=』，无失败原因；restart_canary.log 从未生成；restart_result.json 从未生成"
+    },
+    {
+      "step": "第4条：服务停掉时 GET /api/update/restart/status 能读到结果",
+      "rc": 1,
+      "out": "服务停着：HTTP=000（连接被拒，0.0006s）；服务起着：HTTP=404 {\"detail\":\"Not Found\"} —— main.py 只有 POST /api/update/restart，未注册该 GET 路由；restart_result.json 不存在"
+    },
+    {
+      "step": "根因定位",
+      "rc": 1,
+      "out": "helper 由服务用 subprocess.Popen 创建（CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS），是服务进程的子进程；helper 执行 taskkill /PID <服务> /T /F，/T 连子进程一起杀 → helper 杀死自己，死在 kill_tree() 一句，后续『端口释放/拉起新进程/写结果』全部未执行"
+    },
+    {
+      "step": "恢复最终状态",
+      "rc": 0,
+      "out": "服务 v0.1.232 在线 62 文件；git 工作区干净；restart*.log 已归档到 reports/20261111_072500_d18_verify/logs/"
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 4,
+    "skipped": 0,
+    "by_phase": {
+      "D18-1": {"passed": 0, "failed": 1, "skipped": 0},
+      "D18-2": {"passed": 0, "failed": 1, "skipped": 0},
+      "D18-3": {"passed": 0, "failed": 1, "skipped": 0},
+      "D18-4": {"passed": 0, "failed": 1, "skipped": 0}
+    }
+  },
+  "error": "D18 四条验收口径全部不达标。根因：helper 进程由服务 subprocess.Popen 创建，属于服务进程树；helper 用 `taskkill /PID <服务pid> /T /F` 杀旧进程时，/T 连带杀掉自己，于是死在 kill_tree() 一句，既没杀成（实际杀了）也没拉起新服务，更没写结果文件。表现：正常重启 5.2 秒后服务消失且不恢复；注入『新进程起不来』后旧进程仍被杀死，工作台整台消失；restart.log 无本次记录；restart_canary.log / restart_result.json 从未生成；/api/update/restart/status 的 GET 路由未注册（404），服务停着时 HTTP=000。",
+  "commit_before": "d3cb449",
+  "commit_after": "d3cb449",
+  "detail_doc": "defects_d18_verify.md",
+  "evidence": "evidence_d18_verify.json",
+  "attachments": [
+    "logs/restart.log",
+    "logs/restart_helper.log",
+    "logs/restart_canary.log.MISSING.txt",
+    "logs/restart_result.json.MISSING.txt"
+  ]
+}

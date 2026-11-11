@@ -1,0 +1,25 @@
+
+=== 2026-10-25 09:48:12 重启服务 ===
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+Traceback (most recent call last):
+  File "D:\fangong-workbench\workbench\start.py", line 33, in <module>
+    from app.main import run
+  File "D:\fangong-workbench\workbench\app\main.py", line 915, in <module>
+    from . import supervision_integration as si
+ImportError: cannot import name 'supervision_integration' from 'app' (D:\fangong-workbench\workbench\app\__init__.py)
+
+=== 2026-11-10 14:38:34 重启服务 ===
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8756): [winerror 10048] 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+========================================================
+  繁工AI 本地解析工作台 (MVP)
+  访问地址: http://127.0.0.1:8756
+  数据目录: D:\fangong-workbench\workbench\data
+  解析节点: 我的电脑
+========================================================
+
+=== manual restart 2026-11-10 14:39:21 ===
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(

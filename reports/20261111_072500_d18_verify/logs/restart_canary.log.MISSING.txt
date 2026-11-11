@@ -1,0 +1,8 @@
+本文件在老板机器上不存在。
+
+检验时间：2026-11-11 07:15-07:25
+检验版本：v0.1.232 (d3cb449)
+
+共执行 3 次重启（21:19 / 07:16 / 07:18），workbench/updates/ 目录下
+从未生成 restart_canary.log。同一时期 restart_helper.log 有记录、
+restart_result.json 从未生成。
