@@ -89,11 +89,31 @@
       "title": "自测项目未删除，D19 复现（本轮连删都没试）",
       "residue_project": {"id": "a6443da1", "name": "自测_20261111_073328", "file_count": 0},
       "disk_contents": [".node_id", "doc_relations.json", "exports", "generated_docs", "index.json"],
+      "this_round_deleted": false,
       "operation_log_has_delete_entry": false,
       "operation_log_note": "data/operation_log.jsonl 中无 delete / delete_failed 记录，本轮根本没发起删除，不是删了失败",
       "contrast": "2026-11-10 14:34 那轮曾一次性删除 3 个自测项目；c8c39eee 那轮为 delete_failed（WinError 32 data_level0.bin）后由人工删",
       "two_failure_modes": ["没删", "删不掉"],
-      "fix_suggestion": "清理放进 finally 无条件执行；delete_failed 必须留痕"
+      "root_cause_confirmed": true,
+      "root_cause": "chroma PersistentClient 打开后不释放 vector_db\\data_level0.bin，服务进程自持句柄，删除必然 WinError 32",
+      "experiment_a_service_running": {
+        "request": "POST /api/projects/delete {project_id:a6443da1, backup:false, delete_data:true}",
+        "response_ok": false,
+        "error": "PermissionError: [WinError 32] 另一个程序正在使用此文件…data_level0.bin",
+        "residual_items": 16,
+        "partial_delete": true,
+        "data_deleted": false
+      },
+      "experiment_b_after_restart": {
+        "restart": "POST /api/update/restart -> 15668 -> 6092, 10s",
+        "request": "同一请求原样重发",
+        "response_ok": true,
+        "message": "项目「自测_20261111_073328」已删除（含项目资料）",
+        "data_deleted": true,
+        "log_written": true,
+        "disk_dir_exists_after": false
+      },
+      "fix_suggestion": "清理放进 finally 无条件执行；删前关闭该项目 chroma client 并清出客户端缓存（reset + pop + gc.collect()），再删目录；不要靠重启服务绕过；partial_delete 时把记录置为待清理态并给重试入口"
     },
     "D26": {
       "severity": "P3",

@@ -17,8 +17,10 @@
     {"step": "复核 D19", "rc": 1, "out": "本轮自测项目 自测_20261111_073328（a6443da1）在轮次结束后仍存在，file_count=0，磁盘目录完整；data/operation_log.jsonl 中**无任何 delete / delete_failed 记录**，即本轮根本没尝试删除。对照 2026-11-10 14:34 那轮曾批量删除 3 个自测项目"},
     {"step": "代码级核对（只读）", "rc": 0, "out": "app/main.py:229 `if SCAN_STATUS.get(\"running\"): raise 409`，随后 :231 `SCAN_STATUS.update({\"running\": False, ...})`，而 running=True 由 app/scanner.py:762 在后台线程里才置位 —— 存在竞态窗口，期间第二个 POST /api/scan 不会被 409 拦住，可并发起两个扫描线程共写同一全局 SCAN_STATUS"},
     {"step": "代码级核对：心跳机制", "rc": 0, "out": "app/scanner.py:764 cb(done,total,msg) 仅在文件解析完成回调时触发；扫描启动到首个文件解析完成之间**没有任何心跳**。main.py:243 的 progress_cb 只是把 status[\"heartbeat\"] 刷成当前时间，依赖同一个 cb。故初始化阶段与首个大文件的耗时全部落在心跳盲区"},
+    {"step": "复核 D19 并定性根因（实验 A）", "rc": 1, "out": "服务在跑时直接 POST /api/projects/delete(a6443da1) -> ok:false，PermissionError [WinError 32] …vector_db\\4e187094-…\\data_level0.bin，partial_delete=true，残留 16 项，项目记录仍在。确证：chroma PersistentClient 打开后不释放 data_level0.bin，服务进程自持句柄"},
+    {"step": "实验 B：重启服务释放句柄后同一请求重发", "rc": 0, "out": "先 POST /api/update/restart -> 15668 -> 6092，10 秒完成（D18 再次真机验证通过）；再发同一删除请求 -> ok:true，『项目「自测_20261111_073328」已删除（含项目资料）』，data_deleted=true，log_written=true；磁盘 projects/a6443da1 目录已彻底不存在。删除逻辑本身没错，根因是句柄未释放"},
     {"step": "环境层修复（本轮顺手）", "rc": 0, "out": "①计划任务 WakeToRun False->True（此前 02:04、07:04 两轮被跳过，MissedRuns=2）；②撤掉 run_loop.cmd 的 --no-restart（D18 已验证修复），否则新版本永不生效；③手动触发本轮以补测 v0.1.233"},
-    {"step": "恢复最终状态", "rc": 0, "out": "服务 v0.1.233 在线 PID 15668；扫描已完成 63/63 未再运行；git 工作区干净"}
+    {"step": "恢复最终状态", "rc": 0, "out": "服务 v0.1.233 在线 PID 6092；扫描已完成未再运行；自测残留项目已清空，仅剩马诺诺；git 工作区干净"}
   ],
   "summary": {
     "passed": 6,
@@ -32,7 +34,7 @@
       "D26": {"passed": 0, "failed": 1, "skipped": 0}
     }
   },
-  "error": "本轮 11 项失败归并为 5 个新缺陷。D22（P1）：8 进程 480 次并发写 restart_result.json 有 28 次失败（5.8%），失败被静默写进 restart.log，污染 D18 验收第 3 条要读的那份日志，且失败即结果未落盘，威胁第 4 条。D23（P0）：扫描前 301 秒 done=0/0、心跳一次未刷新，被 selftest 判卡死；实测并未死，07:53 完成 63/63，全程约 19.5 分钟 —— 即「慢到触发卡死判定」叠加「心跳只覆盖文件解析完成时刻，初始化与单文件耗时全在盲区」。D24（P1）：阶段6 的「覆盖 6/6 阶段」断言与老板 2026-10-31「不测阶段4（竣工图清稿）」的决策直接冲突，导致每轮必红，真回归会被噪声淹没。D25（P1）：本轮自测项目未删除且无任何删除尝试记录，D19 复现。D26（P3）：POST /api/scan 的 409 守卫与 running=True 置位之间存在竞态窗口，可并发起两个扫描线程。",
+  "error": "本轮 11 项失败归并为 5 个新缺陷。D22（P1）：8 进程 480 次并发写 restart_result.json 有 28 次失败（5.8%），失败被静默写进 restart.log，污染 D18 验收第 3 条要读的那份日志，且失败即结果未落盘，威胁第 4 条。D23（P0）：扫描前 301 秒 done=0/0、心跳一次未刷新，被 selftest 判卡死；实测并未死，07:53 完成 63/63，全程约 19.5 分钟 —— 即「慢到触发卡死判定」叠加「心跳只覆盖文件解析完成时刻，初始化与单文件耗时全在盲区」。D24（P1）：阶段6 的「覆盖 6/6 阶段」断言与老板 2026-10-31「不测阶段4（竣工图清稿）」的决策直接冲突，导致每轮必红，真回归会被噪声淹没。D25（P1）：本轮自测项目未删除且无任何删除尝试记录，D19 复现；并经对照实验定性根因——chroma PersistentClient 不释放 data_level0.bin，服务进程自持句柄导致删除必然 WinError 32，重启服务后同一请求 100% 成功。D26（P3）：POST /api/scan 的 409 守卫与 running=True 置位之间存在竞态窗口，可并发起两个扫描线程。",
   "commit_before": "5e0a3f6",
   "commit_after": "ffd1ac03da90662f7d5c037ffa316b86552c4473",
   "detail_doc": "defects_scan_heartbeat.md",

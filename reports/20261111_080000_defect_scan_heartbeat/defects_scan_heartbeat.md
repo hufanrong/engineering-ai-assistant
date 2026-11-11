@@ -118,6 +118,8 @@
 
 → 两种失败模式并存：**要么没删，要么删不掉**。请把清理放进 `finally`，无条件执行；并保证 `delete_failed` 一定留痕。
 
+> **根因已在下一节定性**：删不掉是因为 chroma 句柄没释放；重启服务后同一个请求即成功。修法见下。
+
 ---
 
 ## D26（P3）· `POST /api/scan` 的 409 守卫存在竞态窗口
@@ -138,6 +140,36 @@ status["running"] = True
 代码已经 `import threading` 了，加个 `threading.Lock` 或用 `Event` 做「启动中」状态即可。
 
 ---
+
+### D19 根因已定性（本轮实测Confirmed，请按这个改）
+
+报告写完后我做了一次对照实验，**把 D19 从「原因不明」变成「根因确定」**：
+
+**实验 A（服务在跑，直接删）**
+
+```
+POST /api/projects/delete {"project_id":"a6443da1","backup":false,"delete_data":true}
+→ {"ok":false,
+   "error":"PermissionError: [WinError 32] 另一个程序正在使用此文件…:
+            data\projects\a6443da1\vector_db\4e187094-…\data_level0.bin；
+            残留 16 项：[…,'index.json','parsed_cache']",
+   "partial_delete":true, "data_deleted":false}
+```
+
+**实验 B（重启服务释放句柄后，同一个请求原样再发一次）**
+
+```
+POST /api/update/restart   → 15668 → 6092，10 秒完成
+POST /api/projects/delete  → {"ok":true,"message":"项目「自测_20261111_073328」已删除（含项目资料）",
+                              "data_deleted":true,"log_written":true}
+磁盘检查 → projects/a6443da1 目录已彻底不存在
+```
+
+**结论：删除逻辑本身没错，是 chroma 的 `PersistentClient` 打开后不释放 `data_level0.bin`，服务进程自己攥着句柄。**
+
+→ 修法很明确：删除项目前，先把该项目对应的 chroma client 关掉/清出客户端缓存（`client.reset()` + `del`，或删前 `chroma_client_cache.pop(project_id)` 并 `gc.collect()`），再删目录。**不要靠重启服务来绕过** —— 那只是我这边的临时手段。
+
+另外提醒：实验 A 那 16 项残留**不会自动清理**，`partial_delete=true` 后项目记录还在列表里，用户会以为没删成功又点一次，越点越乱。建议 `partial_delete` 时也把记录改成「待清理」态并给出重试入口。
 
 ## 顺带说清楚：阶段3 那 6 条不用改
 
