@@ -1002,7 +1002,23 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #       根本不经过 detect，所以只堵 detect 出口对它无效。用户眼里仍然是"乱七八糟的车间名"。
 #       → 候选清单与待审批分组同样按台账裁剪（list_candidates / list_pending_by_workshop），
 #         台账权威时台账外名字连"待审批"都不显示；归属记录与文件本身照旧保留（文件不丢）。
-APP_VERSION = "0.1.237"
+#   D23 v0.1.238 补上关系图谱那一层的**设备级**闸门，并修掉三处「参数有、但没接力」。
+#       实测 2026-11-12：写 relations 专项回归时用「台账只有 粗碎站/磨浮车间」的夹具跑
+#       build_relations，同一台 P-301 在 devices 里叫「1号车间」、在 layout 里叫「3号车间」，
+#       两个名字台账里都没有 —— 既造了用户明令禁止的假车间名，又是「同一件事两个答案」。
+#       三处根因（都是同一母题：参数传了，但内部没接着传）：
+#         ① `_equipment_from_cache` 有四条通道（cad_block/cad_text/正文/OCR/excel_row），
+#            设备级 workshop_hint 完全不经过任何白名单 —— 闸门只加了文件级；
+#            → 在**唯一出口** return 处加 `_veto_device_hints()`，一处判定覆盖四条通道。
+#         ② `build_relations(data_dir=d1)` 里的 workshop_assign.get_workshop(sha)、
+#            device_workshop.get_workshop(tag) 都没带 ddir → 闸门读的是另一个目录的台账，
+#            读不到就当"台账为空"而静默放行（EE/FF 同病第三次）。
+#         ③ `project_manager.get_project_data_dir()` 在「无当前项目」分支**硬编码安装目录**，
+#            于是 config.DATA_DIR 切到 /tmp 做隔离后，device_workshop.json 仍写进真实 data/
+#            —— 所有「切走 DATA_DIR 做隔离」的测试对这条路径全部静默失效。
+#       顺带修：`workshop_assign._dir_for` 与同模块 `_assign_file` 的优先级相反
+#       （一个隔离优先、一个显式 data_dir 优先）—— 同一模块里"该用哪个目录"有两个答案。
+APP_VERSION = "0.1.238"
 
 # 解析能力版本号（与 APP_VERSION 独立：界面/接口小改动不必重解析全库）。
 # **只要改了「同一份文件能抽出多少内容」，就把这个号加一** ——

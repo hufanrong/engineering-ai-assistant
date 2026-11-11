@@ -701,11 +701,20 @@ def _candidates_file(data_dir=None) -> str:
 
 
 def _dir_for(data_dir=None):
-    """统一落点解析：隔离目录 > 显式 data_dir > 当前项目 > 全局。"""
-    if _ISOLATED_DIR:
-        return _ISOLATED_DIR
+    """统一落点解析：显式 data_dir > 隔离目录 > 当前项目 > 全局。
+
+    v0.1.238：顺序反过来了（原来是「隔离目录 > 显式 data_dir」）。这不是口味问题：
+    `_assign_file` 一直是 `data_dir or _ISOLATED_DIR`（显式优先），而 `_dir_for`
+    却是隔离优先 —— 同一个模块里「该用哪个目录」有两个答案。实测后果：调用方
+    `build_relations(data_dir=d1)` 传了目录，闸门却去 d1 之外的隔离根读 index.json，
+    读不到 → `ledger_workshop_names()` 返回空集 → 台账白名单静默失效，
+    设备级「1号车间 / 3号车间」照样漏出去（而 probe 直接用隔离根当台账目录时是好的，
+    因为那时两个答案恰好重合）。两个函数现在同一顺序。
+    """
     if data_dir:
         return data_dir
+    if _ISOLATED_DIR:
+        return _ISOLATED_DIR
     af = _assign_file()
     return os.path.dirname(af) if af else None
 
