@@ -1,0 +1,48 @@
+{
+  "run_id": "20261111_080000_defect_scan_heartbeat",
+  "started": "2026-11-11 07:33:23",
+  "finished": "2026-11-11 08:00:00",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "对 v0.1.233 手动触发一轮全量自测（07:33:24 起，报告 reports/20261111_073324/），11 项失败。逐条溯源后归并为 5 个新缺陷（D22~D26），另有 D19 本轮复现。其中 9 项失败是同一个根因的级联，另有 1 项是「每轮必红」的断言设计冲突。",
+  "steps": [
+    {"step": "触发一轮全量自测", "rc": 0, "out": "计划任务 FangongAI-AutoFeedback 手动触发，07:33:23 起，commit ffd1ac0，phases=1,2,3,5,6；git 由 run_loop.cmd 注入 PortableGit 后正常发现"},
+    {"step": "自测结果", "rc": 1, "out": "status=failed，passed 58 / failed 11 / skipped 2；by_phase: 1={P10,F4}, 2={P9,F0}, 3={P7,F6,S1}, 5={P9,F0}, 6={P23,F1,S1}"},
+    {"step": "专项回归套件", "rc": 1, "out": "P23/F1/T24；唯一失败在 test_restart_really.py（42 通过 / 1 失败）"},
+    {"step": "逐条溯源：阶段1", "rc": 1, "out": "根因单一 —— 扫描请求 200 成功，但前 301 秒 done=0/0、heartbeat 一次未刷新，被判卡死；下游「条目数 0 / 车间 [] / 归类 0」三条为级联"},
+    {"step": "实测扫描真实耗时", "rc": 0, "out": "同一扫描并未死：07:40 后开始推进，07:48 done=46/63，07:53:02 完成 done=63/63；自 07:33:28 起共约 19.5 分钟。自测项目 a6443da1 的 index.json 于 07:53:02 写入，确认写的正是本次扫描目标"},
+    {"step": "逐条溯源：阶段3", "rc": 1, "out": "6 条全部为 total_devices=0 的级联（竣工资料统计/组卷清单/按车间组卷/整卷生成/一键竣工/缺件清单），因阶段1 无数据入库，阶段3 无设备可查，非独立缺陷"},
+    {"step": "逐条溯源：阶段6", "rc": 1, "out": "唯一失败为「阶段覆盖完整：只跑了 5/6，漏测 ④ 竣工图清稿」。但阶段4 是老板 2026-10-31 明确决定不测（需 AutoCAD），launcher 固定 --phases 1,2,3,5,6 → 该断言每轮必然红，与既定决策冲突"},
+    {"step": "逐条溯源：重启套件", "rc": 1, "out": "单跑 tools/test_restart_really.py 复现：42 通过 / 1 失败。失败项为「并发写盘零失败」—— 8 进程 × 60 次共 480 次并发写 restart_result.json，rc 失败 0 个，但 restart.log 里记了 28 条「写结果失败」（5.8%）。结果文件本身仍是合法单对象"},
+    {"step": "复核 D19", "rc": 1, "out": "本轮自测项目 自测_20261111_073328（a6443da1）在轮次结束后仍存在，file_count=0，磁盘目录完整；data/operation_log.jsonl 中**无任何 delete / delete_failed 记录**，即本轮根本没尝试删除。对照 2026-11-10 14:34 那轮曾批量删除 3 个自测项目"},
+    {"step": "代码级核对（只读）", "rc": 0, "out": "app/main.py:229 `if SCAN_STATUS.get(\"running\"): raise 409`，随后 :231 `SCAN_STATUS.update({\"running\": False, ...})`，而 running=True 由 app/scanner.py:762 在后台线程里才置位 —— 存在竞态窗口，期间第二个 POST /api/scan 不会被 409 拦住，可并发起两个扫描线程共写同一全局 SCAN_STATUS"},
+    {"step": "代码级核对：心跳机制", "rc": 0, "out": "app/scanner.py:764 cb(done,total,msg) 仅在文件解析完成回调时触发；扫描启动到首个文件解析完成之间**没有任何心跳**。main.py:243 的 progress_cb 只是把 status[\"heartbeat\"] 刷成当前时间，依赖同一个 cb。故初始化阶段与首个大文件的耗时全部落在心跳盲区"},
+    {"step": "环境层修复（本轮顺手）", "rc": 0, "out": "①计划任务 WakeToRun False->True（此前 02:04、07:04 两轮被跳过，MissedRuns=2）；②撤掉 run_loop.cmd 的 --no-restart（D18 已验证修复），否则新版本永不生效；③手动触发本轮以补测 v0.1.233"},
+    {"step": "恢复最终状态", "rc": 0, "out": "服务 v0.1.233 在线 PID 15668；扫描已完成 63/63 未再运行；git 工作区干净"}
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 5,
+    "skipped": 0,
+    "by_phase": {
+      "D22": {"passed": 0, "failed": 1, "skipped": 0},
+      "D23": {"passed": 0, "failed": 1, "skipped": 0},
+      "D24": {"passed": 0, "failed": 1, "skipped": 0},
+      "D25": {"passed": 0, "failed": 1, "skipped": 0},
+      "D26": {"passed": 0, "failed": 1, "skipped": 0}
+    }
+  },
+  "error": "本轮 11 项失败归并为 5 个新缺陷。D22（P1）：8 进程 480 次并发写 restart_result.json 有 28 次失败（5.8%），失败被静默写进 restart.log，污染 D18 验收第 3 条要读的那份日志，且失败即结果未落盘，威胁第 4 条。D23（P0）：扫描前 301 秒 done=0/0、心跳一次未刷新，被 selftest 判卡死；实测并未死，07:53 完成 63/63，全程约 19.5 分钟 —— 即「慢到触发卡死判定」叠加「心跳只覆盖文件解析完成时刻，初始化与单文件耗时全在盲区」。D24（P1）：阶段6 的「覆盖 6/6 阶段」断言与老板 2026-10-31「不测阶段4（竣工图清稿）」的决策直接冲突，导致每轮必红，真回归会被噪声淹没。D25（P1）：本轮自测项目未删除且无任何删除尝试记录，D19 复现。D26（P3）：POST /api/scan 的 409 守卫与 running=True 置位之间存在竞态窗口，可并发起两个扫描线程。",
+  "commit_before": "5e0a3f6",
+  "commit_after": "ffd1ac03da90662f7d5c037ffa316b86552c4473",
+  "detail_doc": "defects_scan_heartbeat.md",
+  "evidence": "evidence_scan_heartbeat.json",
+  "attachments": [
+    "logs/_loop.log.tail.txt",
+    "logs/suites.json",
+    "logs/selftest_report.json",
+    "logs/report_self.json",
+    "logs/console.log",
+    "logs/test_restart_really.out.txt"
+  ]
+}

@@ -1,0 +1,68 @@
+======================================================================
+场景 A：真起真服务 —— 探活 + 切换 + 验收（D18 验收 1）
+======================================================================
+  [PASS] 旧服务已占住端口（前置条件）: port=21442 pid=21148
+  [PASS] 旧服务真能应答 /api/status: {'app': 'fangong-workbench', 'version': 'oldA'}
+  [PASS] helper 脚本已落盘且语法正确: C:\Users\HUFANR~1\AppData\Local\Temp\fgA_68y4y0b4\updates\restart_service.py
+  [PASS] helper 脚本 AST 可解析: C:\Users\HUFANR~1\AppData\Local\Temp\fgA_68y4y0b4\updates\restart_service.py
+  [PASS] helper 正常退出: rc=0 
+  [PASS] 结果文件写成功（ok=true）: {"ok": true, "phase": "done", "killed": [21148], "old_pids": [21148], "new_pids": [11932], "version": "newA", "canary_version": "newA", "http_seconds"
+  [PASS] **端口上换了 PID**（D18 验收 1）: old=21148 now=[11932]
+  [PASS] /api/status 可用（D18 验收 1）: 200
+  [PASS] **应答的是新那一份**（version=newA）: {'app': 'fangong-workbench', 'version': 'newA'}
+  [PASS] 重启总耗时在 30 秒量级内（D18 验收 1 的时间要求）: 2.1s
+  [PASS] 结果里记了保证级别（探活先过才杀）: canary_verified_before_kill
+  [PASS] restart.log 有本次记录（D18 验收 3）: A
+[2026-11-11 07:56:45] [helper tagA] 重启成功：旧=[21148] 新=[11932] 版本=newA 总耗时=1.9s
+
+  [PASS] 日志里写了探活结果
+
+======================================================================
+场景 B：新代码起不来 → 旧服务必须一直活着（D18 验收 2）
+======================================================================
+  [PASS] 旧服务已占住端口: pid=20660
+  [PASS] **新代码起不来时 ok=false**（不许谎报）: {"ok": false, "phase": "canary", "error": "新代码在探活端口 21459 上 45s 内没能应答 /api/status，旧服务未被动过（工作台仍可用）。请查看 updates/restart_canary.log", "canary_port": 2145
+  [PASS] 失败发生在探活阶段（还没动旧服务）: canary
+  [PASS] **旧 PID 仍然在端口上（宁可不重启也不宕机）**: old=20660 now=[20660]
+  [PASS] 旧服务全程没被中断（采样点全部在线）: samples=90 true=90
+  [PASS] 旧服务仍能应答 /api/status: {'app': 'fangong-workbench', 'version': 'oldB'}
+  [PASS] 结果里明确说了「旧服务未被动过」: 新代码在探活端口 21459 上 45s 内没能应答 /api/status，旧服务未被动过（工作台仍可用）。请查看 updates/restart_canary.log
+  [PASS] restart.log 记了失败原因（D18 验收 3）:  探活结果=False 耗时=45.7s version=None
+[2026-11-11 07:57:32] [helper tagB] 探活失败：新代码起不来。**旧服务保持原样，本次不重启**
+
+
+======================================================================
+场景 C：状态查询不依赖 HTTP（D18 验收 4）
+======================================================================
+  [PASS] 没有结果文件时如实说「还没有记录」，不编成功: {'ok': False, 'known': False, 'message': '还没有重启记录（或刚更新过还没重启）'}
+  [PASS] **服务已死也能读到上次结果**（纯读文件）: {'ok': False, 'phase': 'canary', 'tag': 't', 'error': '探活失败', 'ts': 1794376653.1717904, 'k
+  [PASS] 读出来的失败原因和写进去的一致: 探活失败
+  [PASS] **GET /api/update/restart/status 路由真的存在**（v0.1.232 承诺过却没有）: main.py
+  [PASS] 路由只是读文件，不依赖服务自身能应答
+  [PASS] 结果文件的临时名唯一（mkstemp，线程/进程并发都不撞）: 去注释后判定
+  [PASS] 读到坏文件时如实报 corrupt，不抛异常
+  [PASS] 能从 helper 模板里提取 write_result
+  [PASS] 能从 helper 模板里提取 log
+  [PASS] **8 个真进程并发收尾，结果文件仍是合法单对象**（本轮抓到的缺陷）: {'ok': True, 'phase': 'done', 'tag': 'p6-59', 'pad': 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  [FAIL] **并发写盘零失败**（固定临时名会让后写的把先写的 .tmp 删掉）: rc失败 0 个 / LOG 记失败 38 次
+
+======================================================================
+场景 D：不许再用「连进程树一起杀」来杀服务（v0.1.232 的自杀根因）
+======================================================================
+  [PASS] 全库没有对服务进程使用 taskkill /T 的写法: 0 处
+  [PASS] helper 的杀进程函数 kill_one 存在
+  [PASS] helper 里明确不带 /T（只结束目标进程）: kill_one
+  [PASS] helper 里有探活阶段（先起）
+  [PASS] helper 里探活失败就直接返回、不杀旧进程
+  [PASS] helper 里有正式实例的验收轮询（UP_TIMEOUT）
+  [PASS] helper 里失败会重试一次（RETRIES）
+  [PASS] _kill_process_tree（会自杀的那个）已被删除
+
+======================================================================
+场景 E（反向验证）：把「先探活」去掉，场景 B 的断言必须判错
+======================================================================
+  [PASS] 旧的「先杀后起」在失败时，旧进程已不在（正是宕机成因）: old_alive=[]
+  [PASS] 因此「旧 PID 仍在端口上」这条断言能抓到它: start
+  [PASS] 新版把它变成 phase=canary + 旧服务在线，两条判据同时成立: 见场景 B
+
+===== 通过 42 / 失败 1 =====

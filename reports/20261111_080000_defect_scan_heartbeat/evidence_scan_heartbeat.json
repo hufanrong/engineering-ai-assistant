@@ -1,0 +1,123 @@
+{
+  "round": {
+    "run_id": "20261111_073324",
+    "triggered_by": "manual (Start-ScheduledTask FangongAI-AutoFeedback)",
+    "started": "2026-11-11 07:33:24",
+    "finished": "2026-11-11 07:47:26",
+    "commit": "ffd1ac03da90662f7d5c037ffa316b86552c4473",
+    "app_version": "0.1.233",
+    "phases": "1,2,3,5,6",
+    "status": "failed",
+    "summary": {
+      "passed": 58,
+      "failed": 11,
+      "skipped": 2,
+      "by_phase": {
+        "1": {"passed": 10, "failed": 4, "skipped": 0},
+        "2": {"passed": 9, "failed": 0, "skipped": 0},
+        "3": {"passed": 7, "failed": 6, "skipped": 1},
+        "5": {"passed": 9, "failed": 0, "skipped": 0},
+        "6": {"passed": 23, "failed": 1, "skipped": 1}
+      }
+    },
+    "suites": {"passed": 23, "failed": 1, "total": 24, "failing_suite": "test_restart_really.py", "suite_detail": "42 passed / 1 failed"}
+  },
+  "defects": {
+    "D23": {
+      "severity": "P0",
+      "title": "扫描心跳盲区 + 慢到触发卡死判定",
+      "cascades": "阶段1 4 条 + 阶段3 6 条 = 10 条失败",
+      "scan_request": {"endpoint": "POST /api/scan", "http": 200, "ok": true, "folders": ["D:\\fangong-workbench\\workbench\\data\\uploads"]},
+      "timeline": [
+        {"t": "07:33:28", "event": "扫描请求返回 200 ok:true"},
+        {"t": "07:33:28-07:38:29", "event": "done=0/0, heartbeat 未刷新，持续 301s，判卡死"},
+        {"t": "07:40:54", "event": "自测判失败，项目切回马诺诺"},
+        {"t": "07:48:28", "event": "/api/scan/status -> done=46/63 running=true"},
+        {"t": "07:53:02", "event": "done=63/63 running=false；a6443da1/index.json 落盘 27382 字节"}
+      ],
+      "total_scan_seconds": 1174,
+      "total_scan_minutes": 19.5,
+      "scan_completed_despite_being_judged_dead": true,
+      "root_cause_1": "app/scanner.py:764 cb(done,total,msg) 仅在单个文件解析完成后回调；main.py:243 的 progress_cb 挂在同一个 cb 上 -> 初始化与首个大文件全程无心跳",
+      "root_cause_2": "SCAN_STATUS 的 total 初始为 0，要等第一次 cb 才有值 -> 界面只能显示 0/0",
+      "root_cause_3": "单文件解析无超时上限，一个慢文件拖死整轮",
+      "product_docstring_admits": "main.py:277 docstring 写明「25 张 DWG 每张约 6 秒 + 十几份扫描件 PDF Tesseract 单页数秒，第一个文件就可能跑上百秒」",
+      "fix_suggestions": [
+        "background_scan 入口先枚举并把 total 设出来，再进解析循环",
+        "每个文件开始解析前打一次心跳，而非解析完成后",
+        "单文件解析加 120s 超时，超时记 error 并跳过",
+        "前端显示 heartbeat 距今秒数，不要只显示 0/0"
+      ],
+      "acceptance": "65 个真实样本整轮 <= 8 分钟；任意 30 秒窗口内 heartbeat 至少刷新 1 次；阶段3 那 6 条红须同时转绿"
+    },
+    "D22": {
+      "severity": "P1",
+      "title": "并发写 restart_result.json 静默失败，并污染 restart.log",
+      "suite": "tools/test_restart_really.py 场景 C",
+      "scenario": "8 个真进程 x 60 次 = 480 次并发写同一 restart_result.json，payload 60KB",
+      "runs": [
+        {"run": "本轮自测", "result_file_valid": true, "log_fail_count": 28, "fail_rate": "5.8%"},
+        {"run": "单独复现", "result_file_valid": true, "log_fail_count": 38, "fail_rate": "7.9%"}
+      ],
+      "why_it_matters": [
+        "restart.log 是 D18 验收第 3 条要读的那份日志，现在混进几十行「写结果失败」，运维读日志被误导",
+        "失败即结果未落盘，GET /api/update/restart/status 可能读到旧结果或不完整结果",
+        "真实重启时 helper + 探活实例 + 正式实例三方几乎同时收尾，正撞这个窗口",
+        "进程退出码恒 0，外部完全看不出失败（异常被吞进 LOG）"
+      ],
+      "hint": "断言名指向「固定临时名会让后写的把先写的 .tmp 删掉」，但静态断言「临时名唯一(mkstemp)」是 PASS 的，故大概率是 os.replace 在 Windows 撞 WinError 32",
+      "fix_suggestions": [
+        "唯一临时名 + os.replace 指数退避重试 3~5 次",
+        "失败噪音改写 restart_error.log，主日志只留业务结论",
+        "加断言：480 次并发后 restart_result.json 必须是最后一次写入的 tag"
+      ]
+    },
+    "D24": {
+      "severity": "P1",
+      "title": "阶段6「覆盖 6/6 阶段」与老板决策冲突，每轮必红",
+      "assertion": "[阶段6] 阶段覆盖完整（漏测要计数，不能只写进报告头）",
+      "expected": "本次自测覆盖全部 6 个阶段",
+      "actual": "只跑了 5/6，漏测 ④ 竣工图清稿",
+      "conflict": "阶段4（竣工图清稿）需 Windows+AutoCAD，老板 2026-10-31 明确决定不测；run_loop.cmd 固定 --phases 1,2,3,5,6",
+      "always_red": true,
+      "previous_round_same": "20261110_210412 阶段6 passed=0 failed=1，同一原因",
+      "harm": "每轮必有一条红，真实回归信号被噪声淹没",
+      "fix_suggestion": "阶段4 由 launcher 列入 skipped_by_decision，判 skipped 并计入 summary.skipped，不判红；只有「launcher 说要跑实际没跑」才算漏测"
+    },
+    "D25": {
+      "severity": "P1",
+      "title": "自测项目未删除，D19 复现（本轮连删都没试）",
+      "residue_project": {"id": "a6443da1", "name": "自测_20261111_073328", "file_count": 0},
+      "disk_contents": [".node_id", "doc_relations.json", "exports", "generated_docs", "index.json"],
+      "operation_log_has_delete_entry": false,
+      "operation_log_note": "data/operation_log.jsonl 中无 delete / delete_failed 记录，本轮根本没发起删除，不是删了失败",
+      "contrast": "2026-11-10 14:34 那轮曾一次性删除 3 个自测项目；c8c39eee 那轮为 delete_failed（WinError 32 data_level0.bin）后由人工删",
+      "two_failure_modes": ["没删", "删不掉"],
+      "fix_suggestion": "清理放进 finally 无条件执行；delete_failed 必须留痕"
+    },
+    "D26": {
+      "severity": "P3",
+      "title": "POST /api/scan 的 409 守卫存在竞态窗口",
+      "code": {
+        "app/main.py:229": "if SCAN_STATUS.get('running'): raise HTTPException(409, '已有扫描任务在运行')",
+        "app/main.py:231": "SCAN_STATUS.update({'running': False, 'done': 0, 'total': 0, ...})",
+        "app/scanner.py:762": "status['running'] = True  # 后台线程里才置真"
+      },
+      "consequence": "窗口期内第二个 POST /api/scan 不会被 409 拦住，可起两个扫描线程共写同一全局 SCAN_STATUS",
+      "fix_suggestion": "threading.Lock 或 Event 表示「启动中」状态"
+    }
+  },
+  "cascade_note": "阶段3 六条失败（竣工资料统计/组卷清单/按车间组卷/整卷生成/一键竣工/缺件清单）全部为 total_devices=0 的级联，非阶段3 自身缺陷；D23 修复后应自动转绿",
+  "environment_changes": [
+    {"item": "FangongAI-AutoFeedback", "change": "WakeToRun False -> True", "reason": "02:04、07:04 两轮被跳过，MissedRuns=2"},
+    {"item": "run_loop.cmd", "change": "去掉 --no-restart", "reason": "D18 已验证修复，不撤则新版本永不生效"},
+    {"item": "manual trigger", "change": "07:33 手动触发一轮", "reason": "last_tested_commit 停在 d3cb449，v0.1.233 从未被自动循环测过"}
+  ],
+  "final_state": {
+    "service_alive": true,
+    "pid": 15668,
+    "version": "0.1.233",
+    "scan_running": false,
+    "git_worktree_clean": true
+  }
+}
