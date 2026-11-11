@@ -1469,9 +1469,81 @@ def workshop_batch_assign(req: WorkshopBatchReq):
 @app.post("/api/workshop/re-auto")
 def workshop_re_auto():
     """v0.1.143：重新自动识别未归车间 + 低置信度文件（人工登记跳过）。
-    修复：v0.1.141 此接口调用不存在的 scanner._load_cache 恒空转返回 0。"""
+    修复：v0.1.141 此接口调用不存在的 scanner._load_cache 恒空转返回 0。
+
+    v0.1.235：重新识别**不再直接建立车间**。识别出的名字只进「待审批」队列，
+    正式车间清单要等人工确认 —— 用户 2026-11-11 的指令。"""
     n = workshop_assign.re_auto_unassigned()
-    return {"ok": True, "newly_assigned": n}
+    return {"ok": True, "newly_assigned": n,
+            "note": "自动识别结果进入待审批车间，人工确认后才成为正式车间"}
+
+
+# ---------- 车间人工审批（v0.1.235） ----------
+# 背景（用户 2026-11-11 原话）：
+#   「优化车间划分逻辑，在建立新车间时可以先将文件暂时归类进去，但是所有新建立的
+#     车间必须交由人工审批，人工确认该车间存在时，再正式建立该车间，否则就不要建立
+#     车间，哪有什么车间叫建宇建主减速机油站呢」
+# 所以：自动推导（标题栏 / 目录名 / 文件名 / 正文）只产出**候选车间**，
+# 文件按候选名临时归类；只有 approval / reject 这两个人工动作能改变车间清单。
+
+
+class WorkshopApproveReq(BaseModel):
+    name: str
+    note: str = ""
+
+
+@app.get("/api/workshop/candidates")
+def workshop_candidates():
+    """待审批车间（自动推导、尚未人工确认）。
+
+    返回两份：
+      candidates —— 队列里的名字（带命中次数与样本文件名，供人工判断）
+      groups     —— 这些名字下**临时归类**的文件（用户要求"可以先暂时归类进去"）
+    """
+    return {"ok": True,
+            "candidates": workshop_assign.list_candidates(),
+            "groups": {k: [{"sha256": r.get("sha256", ""),
+                            "file_name": r.get("file_name", ""),
+                            "source": r.get("source", ""),
+                            "confidence": r.get("confidence", 0),
+                            "ts": r.get("ts", "")} for r in v]
+                       for k, v in workshop_assign.list_pending_by_workshop().items()}}
+
+
+@app.post("/api/workshop/approve")
+def workshop_approve(req: WorkshopApproveReq):
+    """人工确认某车间存在 → 正式建立，并把临时归入它的文件转正。"""
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(400, "需要车间名")
+    r = workshop_assign.approve_workshop(name, approved_by="user", note=req.note)
+    _refresh_project_stats()
+    return {"ok": bool(r.get("registry_saved")), **r}
+
+
+@app.post("/api/workshop/reject")
+def workshop_reject(req: WorkshopApproveReq):
+    """人工否决某车间不存在 → 不建立，文件退回未归车间，名字进黑名单。"""
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(400, "需要车间名")
+    r = workshop_assign.reject_workshop(name, rejected_by="user", note=req.note)
+    _refresh_project_stats()
+    return {"ok": True, **r}
+
+
+@app.post("/api/workshop/approve-all")
+def workshop_approve_all():
+    """批量确认当前待审批队列（仍是人触发，不是自动确认）。"""
+    r = workshop_assign.approve_all_candidates(approved_by="user", note="批量确认")
+    _refresh_project_stats()
+    return {"ok": True, **r}
+
+
+@app.get("/api/workshop/registry")
+def workshop_registry():
+    """已人工确认的正式车间清单。"""
+    return {"ok": True, "workshops": workshop_assign.list_registry()}
 
 
 class DeviceWorkshopReq(BaseModel):
@@ -4153,7 +4225,7 @@ def workshop_devices(workshop: str = ""):
 
 @app.get("/api/workshops")
 def get_workshops():
-    """获取当前项目已识别的车间列表（项目资料 + 设备台账，不返回通用参考数据）。
+    """当前项目的**正式车间**清单（人工确认过的资料车间 + 设备台账车间）。
 
     v0.1.193：**合并设备台账的车间的**。原来只取 workshop_assign.list_by_workshop()，
     那是「文件级」归属：一份横跨全厂的设备台账被按**文件名**整份归到「选矿厂」，
@@ -4162,15 +4234,26 @@ def get_workshops():
     后果在「资料生成」上实测得到：车间下拉只填得出「选矿厂」，用户选它之后
     /api/docgen/prefill 返回 devices=0、missing=5；而留空（全部车间）时 devices=60。
     —— 下拉里唯一的选项是错的，用户没有任何办法知道。
+
+    v0.1.235（用户 2026-11-11 指令「所有新建立的车间必须交由人工审批」）：
+    **自动推导出来的名字不再进这个清单**。以前这里直接读 list_by_workshop()，
+    而那个函数把所有已落盘的车间名都算车间 —— 于是一张流程图正文里抠出来的
+    「建宇建主减速机油站」「件与件之间」都会成为车间，出现在下拉、卡片、组卷里。
+    现在：
+      · 正式清单 = 人工确认过的（workshop_registry.json）
+                   + 设备台账行里的（台账是人工填的结构化列，可信）
+      · 自动推导的名字进 pending_workshops（界面单独一区，带确认/否决按钮）
+    文件仍然按候选名临时归类，不丢（用户要求"可以先将文件暂时归类进去"）。
     """
     from . import workshop_assign as _wa
     from . import project_manager as _pm
 
     current = _pm.get_current_project()
     if not current:
-        return {"ok": True, "workshops": [], "message": "未选择项目，上传资料后自动识别车间"}
+        return {"ok": True, "workshops": [], "pending_workshops": [],
+                "message": "未选择项目，上传资料后自动识别车间"}
 
-    # v0.1.137：修复车间列表恒空——原代码调用不存在的 list_workshops() 导致恒返回 []
+    # 正式车间：list_by_workshop 默认只返回已人工确认的（v0.1.235）
     workshops_map = _wa.list_by_workshop()
     file_cnt = {}
     unique = []
@@ -4181,13 +4264,46 @@ def get_workshops():
         file_cnt[name] = len(recs) if isinstance(recs, list) else 0
         unique.append(name)
 
+    # v0.1.236：**人工确认过的车间必须在清单里**，哪怕它名下还没有文件。
+    # 用户点「确认建立」= 宣布这个车间存在；此时若清单里查不到它，等于点了没反应
+    # （同一件事两个答案）。原实现只从 list_by_workshop() 取名字，而那个函数按
+    # 文件记录分组 —— 确认一个尚无文件的车间，它永远不会出现在清单里。
+    for _r in _wa.list_registry():
+        _rn = str(_r.get("name") or "").strip()
+        if _rn and _rn not in unique:
+            unique.append(_rn)
+            file_cnt.setdefault(_rn, 0)
+
     # v0.1.193：设备台账里的车间并入（去重，保持原有顺序在前）
     dev_cnt = _device_count_by_workshop(current["id"])
+    _ledger_names = _ledger_workshops(current["id"])
     _ledger_only = []
-    for _w in _ledger_workshops(current["id"]):
+    for _w in _ledger_names:
         if _w not in unique:
             unique.append(_w)
             _ledger_only.append(_w)
+
+    # v0.1.236（用户 2026-11-11 追加指令）：
+    #   「在设备清单中已经给出多个车间了,里面已经包含实际的车间名称了,
+    #     不要在生成其他乱七八糟的车间名字」
+    # 台账已经有真实车间清单时，它就是**权威清单**：不在这份清单里的名字一律不作
+    # 正式车间出现（人工确认过的保留，因为那是人显式点过头的）。
+    # 这一步不能省 —— 台账车间是"并入"，而 unique 里原本还有文件级车间；
+    # 只并入不裁剪，等于旧脏名字照样留在清单里。
+    if _ledger_names:
+        _allowed = set(_ledger_names) | {n for n in unique
+                                          if _wa.is_workshop_confirmed(n)}
+        _dropped = [n for n in unique if n not in _allowed]
+        unique = [n for n in unique if n in _allowed]
+        for _n in _dropped:
+            file_cnt.pop(_n, None)
+        if _dropped:
+            _drop_note = ("；已按设备台账的车间清单排除 %d 个非台账名：%s"
+                          % (len(_dropped), _dropped[:6]))
+        else:
+            _drop_note = ""
+    else:
+        _drop_note = ""
 
     rows = [{"name": n,
              "file_count": file_cnt.get(n, 0),
@@ -4197,6 +4313,18 @@ def get_workshops():
             for n in unique]
     rows.sort(key=lambda x: x["name"])
 
+    # v0.1.235：待审批车间（自动推导、未人工确认）—— 单独一份，绝不混进 workshops
+    _pend_groups = _wa.list_pending_by_workshop()
+    _pend_meta = {c["name"]: c for c in _wa.list_candidates()}
+    pending_ws = []
+    for _n, _recs in _pend_groups.items():
+        _m = _pend_meta.get(_n, {})
+        pending_ws.append({"name": _n,
+                           "file_count": len(_recs),
+                           "count": _m.get("count", len(_recs)),
+                           "samples": _m.get("samples", []),
+                           "sources": _m.get("sources", [])})
+    pending_ws.sort(key=lambda x: (-x["count"], x["name"]))
     # v0.1.193：**资料生成**的车间下拉要用另一份清单。
     # 这个下拉是拿去查设备预填的（/api/docgen/prefill 按 workshop 过滤 relations 设备），
     # 所以只能列「台账里真有设备」的车间。实测反例：真实项目里唯一的选项是文件名
@@ -4209,11 +4337,18 @@ def get_workshops():
     if _ledger_only:
         msg += f"，设备台账补充 {len(_ledger_only)} 个"
     msg += "）"
+    if pending_ws:
+        msg += f"；另有 {len(pending_ws)} 个自动识别出的候选车间待人工审批"
+    msg += _drop_note
 
     return {
         "ok": True,
         "workshops": rows,
         "docgen_workshops": docgen_ws,
+        # v0.1.235：自动推导、未人工确认的车间 —— 界面必须单独一区展示并提供
+        # 确认/否决按钮，绝不能当正式车间用（不进下拉、不进组卷）
+        "pending_workshops": pending_ws,
+        "pending_count": len(pending_ws),
         "project": current["name"],
         "ledger_only": _ledger_only,
         "message": msg
@@ -5503,17 +5638,31 @@ def frontend_files(workshop: str = "", status: str = "", q: str = "", limit: int
 @app.get("/api/files/tree")
 def files_tree():
     """v0.1.157：三级归属树（L1 项目级 / L2 车间级 / L3 设备级 / 待确认 + L0 平台规范）。
-    未归级文件会即时自动判定并落盘；返回供前端折叠树渲染。"""
+    未归级文件会即时自动判定并落盘；返回供前端折叠树渲染。
+
+    v0.1.235（用户 2026-11-11「所有新建立的车间必须交由人工审批」）：
+    L2 只放**人工确认过**的车间。自动推导出的名字单独进 `pending_workshops`，
+    界面在「待审批车间」一区展示，每条带「确认建立 / 否决」两个按钮。
+    这是真正拦得住脏名字的地方 —— 实测用户看到「建宇建主减速机油站」就是在
+    这棵树里（/api/workshops 的卡片网格自 v0.1.157 起是隐藏的）。
+    """
     from . import file_level as _fl, workshop_assign as _wa, device_workshop as _dw
     from . import project_manager as _pm
     raw = _frontend_index_items()
     wa_map = {}
+    wa_pending = {}
     try:
         for sha, rec in (_wa._load() or {}).items():
-            if rec.get("workshop"):
-                wa_map[sha] = rec["workshop"]
+            w = (rec.get("workshop") or "").strip()
+            if not w:
+                continue
+            if _wa.is_workshop_confirmed(w):
+                wa_map[sha] = w
+            elif not _wa.is_workshop_rejected(w):
+                wa_pending[sha] = w
     except Exception:  # noqa: BLE001
         wa_map = {}
+        wa_pending = {}
     device_tags = []
     try:
         device_tags = [d.get("tag") for d in _dw.list_devices() if d.get("tag")]
@@ -5559,6 +5708,37 @@ def files_tree():
     except Exception:  # noqa: BLE001
         pass
     tree["L0"] = l0
+
+    # v0.1.235：待审批车间（自动推导、未人工确认）。
+    # 文件仍然按候选名暂时归类（用户要求"可以先将文件暂时归类进去"），但分组显示在
+    # 独立的一区，带「确认建立 / 否决」按钮 —— 这是用户 2026-11-11 指令的落点：
+    # 「所有新建立的车间必须交由人工审批，人工确认该车间存在时，再正式建立该车间，
+    #   否则就不要建立车间」。
+    _pg = {}
+    try:
+        _pg = _wa.list_pending_by_workshop()
+    except Exception:  # noqa: BLE001
+        _pg = {}
+    _meta = {}
+    try:
+        _meta = {c["name"]: c for c in _wa.list_candidates()}
+    except Exception:  # noqa: BLE001
+        _meta = {}
+    pw = []
+    for _n, _recs in _pg.items():
+        _m = _meta.get(_n, {})
+        pw.append({"name": _n,
+                   "file_count": len(_recs),
+                   "count": _m.get("count", len(_recs)),
+                   "samples": _m.get("samples", []) or [r.get("file_name", "") for r in _recs[:5]],
+                   "sources": _m.get("sources", []),
+                   "files": [{"sha256": r.get("sha256", ""),
+                              "file_name": r.get("file_name", ""),
+                              "source": r.get("source", ""),
+                              "confidence": r.get("confidence", 0)} for r in _recs[:200]]})
+    pw.sort(key=lambda x: (-x["count"], x["name"]))
+    tree["pending_workshops"] = pw
+    tree.setdefault("counts", {})["PENDING_WORKSHOPS"] = len(pw)
     return {"ok": True, "tree": tree}
 
 

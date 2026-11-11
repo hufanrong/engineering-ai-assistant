@@ -984,14 +984,27 @@ def phase1(samples_dir):
         else:
             record(P, "DWG 图签栏抽取", "本批无 DWG，跳过", "无 .dwg 样本", None)
 
-    # 车间自动分类：以 /api/workshops + /api/workshop/list 为准（列表接口无 workshop 字段）
+    # 车间自动分类（v0.1.235 起按「候选/确认二段式」判定）。
+    # 背景（用户 2026-11-11 原话）：「所有新建立的车间必须交由人工审批，人工确认
+    #   该车间存在时，再正式建立该车间，否则就不要建立车间」。
+    # 所以「自动识别出车间并已归类」在新规则下**不该直接成立** —— 自动推导的结果
+    #   只能进 pending_workshops（文件可临时归类），正式 workshops 必须人工确认过。
+    # 这条改成验两件事，任一不成立即红：
+    #   ① 自动识别出的候选确实存在（说明识别链路没哑火）；
+    #   ② 未审批的候选**没有**混进正式车间清单（说明闸门生效）。
     code, wsl, err = call("GET", "/api/workshops")
     recog = (wsl or {}).get("workshops") or []
     named = [w for w in recog if w.get("name") and "未归" not in str(w.get("name"))]
+    pend = (wsl or {}).get("pending_workshops") or []
+    pend_names = [w.get("name") for w in pend if w.get("name")]
     assigned = sum(w.get("file_count", 0) for w in named)
-    record(P, "车间自动分类", "识别出车间且文件已归入车间",
-           f"识别车间 {[w.get('name') for w in named]}；已归类文件 {assigned}",
-           len(named) >= 1 and assigned >= 1, err)
+    pend_files = sum(int(w.get("file_count") or 0) for w in pend)
+    _leak = [n for n in pend_names if n in [w.get("name") for w in named]]
+    record(P, "车间自动分类", "自动识别只产出待审批候选；未审批名字不混入正式车间清单",
+           f"正式车间 {[w.get('name') for w in named]}(已归类 {assigned} 文件)；"
+           f"待审批候选 {pend_names}(临时归类 {pend_files} 文件)；混入={_leak or '无'}",
+           (len(pend_names) >= 1 or len(named) >= 1) and not _leak,
+           "识别链路哑火（候选和正式清单都空）或闸门失效（候选混进了正式清单）")
 
     # v0.1.229：上面那条只验「有没有归进车间」，不验**名字对不对** —— 于是
     # 实测 2026-11-10 111426 轮它亮了绿灯，可识别出来的 10 个「车间」里只有
@@ -1000,15 +1013,21 @@ def phase1(samples_dir):
     #   source=filename → 液压站（直接取自「…液压站外形图.pdf」这个文件名）
     # 这些名字会一路带进设备台账、组卷清单和竣工封面，等于把废字刻进交付文件。
     # 「分类正常」的绿灯比红灯更危险：没人会去查一个显示正常的页面。
-    # 判定口径：工程上的车间/工段/装置名都以这几类后缀结尾；不以它们结尾的，
-    # 一律要求先在「待确认」里由人拍板，不许直接当车间用（AI 不替用户猜）。
+    #
+    # v0.1.235 调整检查对象：**只查待审批候选**，不查正式清单。
+    #   理由：正式清单现在有两类正常来源 —— ① 人工确认过的（人已经拍过板，名字
+    #   就是用户给的名字）；② 设备台账行里带的（台账是用户自己的权威数据，
+    #   「配电室」这种不以「车间」结尾的单元是真实存在的房间，不该判脏）。
+    #   而候选正是**AI 自己猜的**名字，后缀启发式本来就是为这一类设计的；
+    #   候选区在界面上必须人工确认才会转正，所以这里该抓的是「猜出来的名字
+    #   长得就不像车间」。抓到了也不是删掉，而是提示用户逐个确认/否决。
     _WS_SUFFIX = ("车间", "工段", "装置", "系统", "厂房", "片区", "区域", "工序")
-    _bad = [w.get("name") for w in named
-            if not str(w.get("name") or "").endswith(_WS_SUFFIX)]
-    record(P, "车间名合法", "每个识别出的车间名都以 车间/工段/装置/系统 等结尾",
-           f"可疑 {len(_bad)}/{len(named)}：{_bad[:8]}",
+    _bad = [n for n in pend_names if not str(n or "").endswith(_WS_SUFFIX)]
+    record(P, "车间名合法", "自动推导出的候选名都以 车间/工段/装置/系统 等结尾（否则需人工逐条确认）",
+           f"可疑 {len(_bad)}/{len(pend_names)}：{_bad[:8]}；正式清单 {[w.get('name') for w in named]}",
            len(_bad) == 0,
-           "不以工程后缀结尾的名字多半是设备名（液压站/油站）或正文碎片（件与件之间）")
+           "不以工程后缀结尾的候选多半是设备名（液压站/油站）或正文碎片（件与件之间），"
+           "它们不会自动转正，但出现在待审批区就说明识别规则还在猜")
 
     # 检索（v0.1.224：检索词从真实资料发现，不再写死「1号车间 离心泵 P-101」）
     code, sr, err = call("POST", "/api/search", {"query": DS["query"], "top_k": 5})

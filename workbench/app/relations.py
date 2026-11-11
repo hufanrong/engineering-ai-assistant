@@ -487,11 +487,30 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
                 ws = _assigned
         except Exception:  # noqa: BLE001
             pass
+        # v0.1.235（用户 2026-11-11「所有新建立的车间必须交由人工审批」）：
+        # 上面 ws 的兜底来自**文件名/图名/正文**推导，那是"同一件事两个答案"的
+        # 第二个入口 —— 即使 workshop_assign 那边已经改成只认人工确认，这里仍会
+        # 把「建宇建主减速机油站」这类句子碎片写成 graph["workshops"] 的正式车间，
+        # 下游竣工组卷/空间模型照着它建目录。所以在关系图谱这一层再卡一次：
+        #   人工确认过（registry）→ 正式车间
+        #   未确认 → 只留名字作提示，**不进** workshops（文件仍由 workshop_assign
+        #            暂存归类，用户要的"可以先将文件暂时归类进去"由那边负责）
+        _prov = ""
+        if ws:
+            try:
+                from . import workshop_assign as _wa2
+                # v0.1.236：台账车间也是权威 —— is_workshop_allowed = 人工确认过的
+                # 或设备台账里真有的；两者都不满足才降级为 provisional。
+                if not _wa2.is_workshop_allowed(ws):
+                    _prov = ws
+                    ws = None
+            except Exception:  # noqa: BLE001
+                _prov = ""
         eqs = _equipment_from_cache(cache)
         sp = (cache.get("structure") or {}).get("spatial") or {}
         docs[sha] = {
             "file_name": fname, "parser": cache.get("parser"),
-            "workshop": ws, "doc_type": doc_type,
+            "workshop": ws, "provisional_workshop": _prov, "doc_type": doc_type,
             "tags": list(dict.fromkeys(e["tag"] for e in eqs)),
             "equipments": eqs,
             "title_block": tb,

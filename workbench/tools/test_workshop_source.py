@@ -154,14 +154,22 @@ def run():
         check("T1 车间清单含台账真实车间", not t1_missing,
               f"应有 {len(real_ws)} 个，缺 {t1_missing or '无'}；实得 {names}")
 
-        # T2：文件级车间必须保留 —— 修下拉不能靠「把文件名来的车间删掉」蒙过去，
+        # T2：文件级归属必须保留 —— 修下拉不能靠「把文件名来的车间删掉」蒙过去，
         #     那会把已上传的台账文件从「资料管理」里藏起来（它在文件级归属上是对的：
         #     一份台账本来就是一整厂的文件）。
+        #     v0.1.235 起「选矿厂」是**自动推导、未经人工确认**的名字，所以它不进正式
+        #     车间清单（用户要求「否则就不要建立车间」），但文件级临时归类必须还在 ——
+        #     落在 pending_workshops 里、file_count>0。断言意图不变（不靠删条目过检），
+        #     只是换了落点。
         keep = [r for r in rows.get("workshops", []) if r["name"] == "选矿厂"]
-        check("T2 文件级车间仍保留（不靠删条目过检）",
-              bool(keep) and keep[0].get("file_count", 0) > 0,
-              f"选矿厂 file_count={keep[0].get('file_count') if keep else '缺失'}；"
-              f"清单={names}")
+        pend = [r for r in (rows.get("pending_workshops") or []) if r["name"] == "选矿厂"]
+        check("T2 文件级归属仍保留（候选在待审批区，不靠删条目过检）",
+              bool(pend) and pend[0].get("file_count", 0) > 0,
+              f"选矿厂 待审批 file_count={pend[0].get('file_count') if pend else '缺失'}；"
+              f"正式清单={names}")
+        check("T2c 未审批的「选矿厂」不进正式车间清单",
+              not keep,
+              f"正式清单={names}；若它在这里说明自动推导名字被直接当成车间了")
 
         # T2b/T3：**资料生成下拉**只能列台账里真有设备的车间（那是拿去查设备预填的）
         dg = rows.get("docgen_workshops") or []

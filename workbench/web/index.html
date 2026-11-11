@@ -1471,6 +1471,35 @@ function renderTree(kw) {
     html += _groupHTML('lt-l2', 'g:L2', '🏭', '车间级（L2 车间 / L3 设备）', l2total + l3total,
         l2body || '<div class="lt-empty">暂无车间文件（上传后自动识别车间）</div>', true, kw);
 
+    // ---- 待审批车间（v0.1.235） ----
+    // 自动识别出的车间名在人工确认前**不是车间**：文件暂时归在它下面（用户要求
+    // 「可以先将文件暂时归类进去」），但这块单独一区，必须人工点「确认建立」才转正。
+    // 这是用户 2026-11-11 指令「所有新建立的车间必须交由人工审批…否则就不要建立车间」
+    // 在界面上的落点 —— 以前这些名字直接混进「车间级」，用户看到「建宇建主减速机油站」。
+    var pw = T.pending_workshops || [];
+    var pwAll = pw.filter(function(g) {
+        return !kw || g.name.toLowerCase().indexOf(kw.toLowerCase()) >= 0 ||
+            (g.samples || []).some(function(s) { return (s || '').toLowerCase().indexOf(kw.toLowerCase()) >= 0; });
+    });
+    var pwBody = '';
+    pwAll.forEach(function(g) {
+        var nm = String(g.name || '').replace(/'/g, '');
+        var samp = (g.samples || []).slice(0, 3).map(function(s) { return escapeHtml(s); }).join('、');
+        pwBody += '<div class="lt-file" style="align-items:flex-start">' +
+            '<span style="flex:1"><b>' + _hl(g.name, kw) + '</b>' +
+            '<span style="color:#888;font-size:11px;margin-left:6px">临时归类 ' + (g.file_count || 0) + ' 个文件 · 命中 ' + (g.count || 0) + ' 次</span>' +
+            (samp ? '<div style="font-size:11px;color:#999;margin-top:2px">样本：' + samp + '</div>' : '') +
+            '</span>' +
+            '<span class="lt-act" style="color:#1E7B3C;font-weight:600" onclick="event.stopPropagation();approveWorkshop(\'' + nm + '\')">✅ 确认建立</span>' +
+            '<span class="lt-act" style="color:#A14E50;font-weight:600" onclick="event.stopPropagation();rejectWorkshop(\'' + nm + '\')">✕ 否决</span>' +
+            '</div>';
+    });
+    if (pwAll.length) {
+        pwBody += '<div class="lt-empty">这些都是系统自动推导出的名字，<b>尚未建立为车间</b>。确认后才进入「车间级」，否决后不再出现。</div>';
+    }
+    html += _groupHTML('lt-pwsug', 'g:PENDING_WS', '🕓', '待审批车间（自动识别 · 需人工确认）', pwAll.length, 
+        pwBody || '<div class="lt-empty">暂无待审批车间</div>', pw.length > 0, kw);
+
     // ---- 待确认 ----
     var pend = T.PENDING || [];
     var pRows = pend.filter(function(f) { return _fileMatches(f, kw); });
@@ -1522,7 +1551,7 @@ function reAutoAssign() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var msg = (data && data.newly_assigned > 0)
-                ? '已重新识别，' + data.newly_assigned + ' 个文件成功归入车间'
+                ? '已重新识别，' + data.newly_assigned + ' 个文件暂时归入候选车间（需人工确认才成为正式车间）'
                 : '重新识别完成，没有新增可归车间的文件（无法确认的仍留在待确认）';
             showToast(msg);
             if (typeof currentWorkshop !== 'undefined' && currentWorkshop) {
@@ -1536,6 +1565,49 @@ function reAutoAssign() {
         .finally(function() {
             if (btn) { btn.disabled = false; btn.textContent = '🔁 重新识别车间'; }
         });
+}
+
+// ---- 车间人工审批（v0.1.235）----
+// 用户 2026-11-11：所有新建立的车间必须人工审批，确认存在才建立，否则不建立。
+// 这两个函数就是审批动作本身：点在「待审批车间」区里，改的是 workshop_registry.json。
+function approveWorkshop(name) {
+    if (!name) return;
+    if (!confirm('确认「' + name + '」是真实存在的车间？\n\n确认后它会正式建立，当前临时归在它下面的文件一并转正。')) return;
+    fetch('/api/workshop/approve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, note: '界面人工确认' })
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d && d.ok) {
+                showToast('已建立车间「' + name + '」，' + (d.files_promoted || 0) + ' 个文件转正');
+            } else {
+                showToast('确认失败：' + ((d && d.detail) || (d && d.error) || '未知原因'), true);
+            }
+            loadLevelTree();
+            loadResourceData();
+        })
+        .catch(function() { showToast('确认失败，请检查服务', true); });
+}
+
+function rejectWorkshop(name) {
+    if (!name) return;
+    if (!confirm('否决「' + name + '」不是车间？\n\n否决后它不会建立，文件退回未归车间，且以后自动识别不再采用这个名字。')) return;
+    fetch('/api/workshop/reject', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, note: '界面人工否决' })
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d && d.ok) {
+                showToast('已否决「' + name + '」，' + (d.files_released || 0) + ' 个文件退回未归车间');
+            } else {
+                showToast('否决失败：' + ((d && d.detail) || (d && d.error) || '未知原因'), true);
+            }
+            loadLevelTree();
+            loadResourceData();
+        })
+        .catch(function() { showToast('否决失败，请检查服务', true); });
 }
 
 function showWorkshopFiles(workshopName) {
