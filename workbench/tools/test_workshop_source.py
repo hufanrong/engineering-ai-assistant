@@ -73,6 +73,7 @@ config.DATA_DIR = _TMP_DATA            # 必须在 import app.main 之前
 
 import app.main as M  # noqa: E402
 from app import project_manager as pm  # noqa: E402
+from app import workshop_assign as _wa  # noqa: E402
 
 RESULTS = []
 
@@ -91,12 +92,16 @@ def _make_project(devices, file_name, workshop_hint="", pid="ws_src_test"):
     """
     ddir = os.path.join(pm.PROJECTS_ROOT, pid)
     os.makedirs(ddir, exist_ok=True)
-    idx = {"files": {}, "devices": devices, "workshops": {}, "updated_at": "2026-01-01"}
+    sha = "sha_" + pid
+    # v0.1.237：索引里也要有这条文件（真实项目就是如此）。否则「文件还在不在树上看得到」
+    # 这条断言探查的是一个连索引都没有的 sha，恒 False —— 那不是产品缺陷，是造的数据不真。
+    idx = {"files": {}, "devices": devices, "workshops": {}, "updated_at": "2026-01-01",
+           sha: {"id": sha, "sha256": sha, "file_name": file_name,
+                 "file_type": "xlsx", "status": "parsed", "ts": "2026-01-01T00:00:00"}}
     with open(os.path.join(ddir, "index.json"), "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False)
     with open(os.path.join(ddir, "project_meta.json"), "w", encoding="utf-8") as f:
         json.dump({"id": pid, "name": "车间来源测试项目"}, f, ensure_ascii=False)
-    sha = "sha_" + pid
     with open(os.path.join(ddir, "workshop_assign.json"), "w", encoding="utf-8") as f:
         json.dump({sha: {"sha256": sha, "file_name": file_name, "workshop": workshop_hint,
                          "source": "filename", "confidence": 0.75,
@@ -161,15 +166,31 @@ def run():
         #     车间清单（用户要求「否则就不要建立车间」），但文件级临时归类必须还在 ——
         #     落在 pending_workshops 里、file_count>0。断言意图不变（不靠删条目过检），
         #     只是换了落点。
+        # v0.1.237：台账权威后「选矿厂」连待审批区都不显示（它不在台账 19 个车间里）。
+        # 但**归属记录本身必须还在**、文件也必须在树上看得见 —— 否则就变成
+        # 「为了让名字干净，把用户的文件藏起来」，那是另一种病。
         keep = [r for r in rows.get("workshops", []) if r["name"] == "选矿厂"]
         pend = [r for r in (rows.get("pending_workshops") or []) if r["name"] == "选矿厂"]
-        check("T2 文件级归属仍保留（候选在待审批区，不靠删条目过检）",
-              bool(pend) and pend[0].get("file_count", 0) > 0,
-              f"选矿厂 待审批 file_count={pend[0].get('file_count') if pend else '缺失'}；"
-              f"正式清单={names}")
+        _rec = (_wa._load() or {}).get("sha_" + pid) or {}
+        _t = M.files_tree().get("tree") or {}
+        _visible = (any(any(f.get("file_name") == "设备台账_真实_选矿厂.xlsx"
+                            for f in (n.get("files") or []))
+                        for n in (_t.get("L2") or {}).values())
+                    or any(f.get("file_name") == "设备台账_真实_选矿厂.xlsx"
+                           for f in (_t.get("PENDING") or []))
+                    or any(any(f.get("file_name") == "设备台账_真实_选矿厂.xlsx"
+                               for f in v)
+                           for v in (_t.get("L1") or {}).values()))
+        check("T2 文件级归属仍保留（记录在、文件可见，不靠删条目过检）",
+              bool(_rec) and _visible,
+              f"记录 workshop={(_rec.get('workshop') if _rec else '缺失')}；"
+              f"文件在树上可见={_visible}")
         check("T2c 未审批的「选矿厂」不进正式车间清单",
               not keep,
               f"正式清单={names}；若它在这里说明自动推导名字被直接当成车间了")
+        check("T2d 台账外的「选矿厂」也不出现在待审批区",
+              not pend,
+              f"待审批={[r['name'] for r in (rows.get('pending_workshops') or [])]}")
 
         # T2b/T3：**资料生成下拉**只能列台账里真有设备的车间（那是拿去查设备预填的）
         dg = rows.get("docgen_workshops") or []

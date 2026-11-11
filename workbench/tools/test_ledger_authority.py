@@ -177,6 +177,53 @@ def run():
           DIRTY not in pend and DIRTY2 not in pend,
           "pending=%s" % pend)
 
+    # ---- L8：**历史遗留的脏记录**（v0.1.237 实测缺口）----
+    # L2/L3 走的是 detect 出口，被闸② 拦住是必然的；但升级前的数据是**直接写进
+    # workshop_assign.json / workshop_candidates.json** 的（真实项目里 322fef90
+    # 那条 2026-11-07 的「选矿厂」就是这样），根本不经过 detect。
+    # 只堵 detect 出口 = 历史项目照样显示脏名字。这里直接伪造遗留数据。
+    LEGACY = "选矿厂"
+    _mfile = os.path.join(d, "workshop_assign.json")
+    _m = {}
+    if os.path.isfile(_mfile):
+        with open(_mfile, encoding="utf-8") as f:
+            _m = json.load(f) or {}
+    _m["sha_legacy_1"] = {"sha256": "sha_legacy_1",
+                          "file_name": "设备台账_真实_选矿厂.xlsx",
+                          "workshop": LEGACY, "source": "filename",
+                          "confidence": 0.75, "candidates": [LEGACY],
+                          "file_path": "", "confirmed": False,
+                          "ts": "2026-11-07T19:20:40"}
+    with open(_mfile, "w", encoding="utf-8") as f:
+        json.dump(_m, f, ensure_ascii=False)
+    _cf = os.path.join(d, "workshop_candidates.json")
+    _c = {}
+    if os.path.isfile(_cf):
+        with open(_cf, encoding="utf-8") as f:
+            _c = json.load(f) or {}
+    _c[LEGACY] = {"name": LEGACY, "count": 1,
+                  "samples": ["设备台账_真实_选矿厂.xlsx"],
+                  "sources": ["filename"], "first_ts": "2026-11-07T19:20:40",
+                  "last_ts": "2026-11-07T19:20:40"}
+    with open(_cf, "w", encoding="utf-8") as f:
+        json.dump(_c, f, ensure_ascii=False)
+    wa._REG_CACHE.clear()
+
+    wl = M.get_workshops()
+    check("L8 历史遗留的台账外名字不进待审批区（只堵 detect 出口不够）",
+          LEGACY not in [x["name"] for x in (wl.get("pending_workshops") or [])],
+          "pending=%s" % [x["name"] for x in (wl.get("pending_workshops") or [])])
+    check("L8b 历史遗留名字不进候选队列接口",
+          LEGACY not in {x["name"] for x in wa.list_candidates()},
+          "candidates=%s" % sorted(x["name"] for x in wa.list_candidates()))
+    _tree = M.files_tree()
+    _t = _tree.get("tree") or {}
+    check("L8c 用户实际入口（文件树）也不显示它",
+          LEGACY not in (_t.get("L2") or {})
+          and LEGACY not in [x["name"] for x in (_t.get("pending_workshops") or [])],
+          "L2=%s pending=%s" % (list((_t.get("L2") or {}).keys()),
+                                [x["name"] for x in (_t.get("pending_workshops") or [])]))
+
     # ---- L6：人工确认过的名字即使不在台账里也保留 ----
     NOT_IN_LEDGER = "粗碎工段"
     wa.approve_workshop(NOT_IN_LEDGER, approved_by="user", note="人工确认的真实单元")

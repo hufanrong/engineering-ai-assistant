@@ -454,6 +454,15 @@ def ledger_workshop_names(data_dir=None) -> set:
     return names
 
 
+def _ledger_is_authoritative(data_dir=None) -> bool:
+    """台账里有车间名 → 台账就是唯一权威清单（v0.1.237）。
+
+    单独抽出来是因为判断点有三处（检测出口 / 候选清单 / 待审批分组），
+    三处口径必须同一份实现，否则又成「同一件事两个答案」。
+    """
+    return bool(ledger_workshop_names(data_dir))
+
+
 def is_workshop_allowed(name: str, data_dir=None) -> bool:
     """这个名字能不能作为正式车间用（v0.1.236）。
 
@@ -882,11 +891,22 @@ def is_workshop_rejected(name: str) -> bool:
 
 
 def list_candidates() -> list:
-    """待审批车间清单（v0.1.235）：按命中样本数降序，给界面用。"""
+    """待审批车间清单（v0.1.235）：按命中样本数降序，给界面用。
+
+    v0.1.237（实测复现）：正式清单已按台账裁干净了，**待审批区还在挂「选矿厂」**
+    —— 这个名字是文件名猜出来的，台账里 19 个车间没有它。用户看到的仍然是
+    一个「乱七八糟的车间名」，他的指令自然没被满足。所以候选队列与待审批分组
+    必须跟正式清单用同一把尺子（`is_workshop_allowed`），否则只是把脏名字
+    从左边挪到了右边。
+    """
     c = _load_candidates()
     rows = []
     for name, rec in c.items():
         if is_workshop_confirmed(name) or is_workshop_rejected(name):
+            continue
+        # 台账权威时，台账外的名字连「待审批」都不显示（人要审的是真的没定的事，
+        # 不是审「这个猜出来的名字像不像车间」）
+        if _ledger_is_authoritative() and name not in ledger_workshop_names():
             continue
         rows.append({"name": name,
                      "count": int(rec.get("count", 0)),
@@ -975,11 +995,15 @@ def list_pending_by_workshop() -> dict:
     """
     m = _load()
     out = {}
+    led = ledger_workshop_names()
     for sha, rec in m.items():
         w = (rec.get("workshop") or "").strip()
         if not w or is_workshop_confirmed(w):
             continue
         if is_workshop_rejected(w):
+            continue
+        # v0.1.237：台账外名字不显示为「待审批车间」（口径同 list_candidates）
+        if led and w not in led:
             continue
         out.setdefault(w, []).append(rec)
     for w in out:

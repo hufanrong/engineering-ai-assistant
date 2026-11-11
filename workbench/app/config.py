@@ -995,7 +995,14 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #         出口处 _veto_result 统一剔除不在台账里的名字（连待审批队列都不进）；
 #         /api/workshops 正式清单按台账裁剪；relations 那一层同口径。
 #       顺带修：人工确认过的车间即使名下还没文件，也必须出现在车间清单里。
-APP_VERSION = "0.1.236"
+#   D22 v0.1.236 在真实项目上复核时露出的缺口：「正式清单干净了、待审批区还在挂脏名」。
+#       实测：322fef90 的 /api/workshops 已裁成 19 个台账车间，但
+#       /api/files/tree 与 /api/workshops 的 **pending_workshops 里还挂着「选矿厂」**
+#       —— 那是 2026-11-07 由文件名猜出来、直接写进 workshop_assign.json 的历史记录，
+#       根本不经过 detect，所以只堵 detect 出口对它无效。用户眼里仍然是"乱七八糟的车间名"。
+#       → 候选清单与待审批分组同样按台账裁剪（list_candidates / list_pending_by_workshop），
+#         台账权威时台账外名字连"待审批"都不显示；归属记录与文件本身照旧保留（文件不丢）。
+APP_VERSION = "0.1.237"
 
 # 解析能力版本号（与 APP_VERSION 独立：界面/接口小改动不必重解析全库）。
 # **只要改了「同一份文件能抽出多少内容」，就把这个号加一** ——
