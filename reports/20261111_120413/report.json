@@ -1,0 +1,112 @@
+{
+  "run_id": "20261111_120413",
+  "started": "2026-11-11 12:04:13",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "0130747530647766d546406ec33abd0e085ffe22",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "沿用在线服务",
+      "rc": 0,
+      "out": "服务在线且版本一致(0.1.233)，跳过重启（不打断正在使用的人）"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 73, \"failed\": 2, \"skipped\": 1, \"by_phase\": {\"1\": {\"passed\": 18, \"failed\": 1, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"passed\": 23, \"failed\": 1, \"skipped\": 1}}, \"cover",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=869 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "专项回归套件",
+      "rc": 1,
+      "out": "P23/F1/T24 -> suites.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1 P73/F2/S1 suites_fail=1 漏测阶段=[4]"
+    }
+  ],
+  "summary": {
+    "passed": 73,
+    "failed": 2,
+    "skipped": 1,
+    "by_phase": {
+      "1": {
+        "passed": 18,
+        "failed": 1,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 23,
+        "failed": 1,
+        "skipped": 1
+      }
+    },
+    "coverage": {
+      "ran": [
+        1,
+        2,
+        3,
+        5,
+        6
+      ],
+      "missed": [
+        4
+      ],
+      "ran_labels": [
+        "① 解析/分类/资料库",
+        "② 资料生成管理",
+        "③ 竣工资料生成",
+        "⑤ 使用遥测/脱敏自检",
+        "⑥ 同一事实交叉比对"
+      ],
+      "missed_labels": [
+        "④ 竣工图清稿"
+      ],
+      "complete": false
+    }
+  },
+  "error": "",
+  "remote_head": "0130747530647766d546406ec33abd0e085ffe22",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-11 12:22:19",
+  "commit_before": "0130747530647766d546406ec33abd0e085ffe22",
+  "commit_after": "0130747530647766d546406ec33abd0e085ffe22"
+}
