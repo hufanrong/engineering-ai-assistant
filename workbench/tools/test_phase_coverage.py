@@ -66,16 +66,28 @@ def main():
     cov = payload.get("coverage") or {}
     chk("report.json 带 coverage 字段", bool(cov), str(cov)[:100])
     chk("ran 就是实际跑的 1,2,3,5", cov.get("ran") == [1, 2, 3, 5], str(cov.get("ran")))
-    chk("missed 精确指出 4 与 6", cov.get("missed") == [4, 6], str(cov.get("missed")))
+    # v0.1.234（D24）：阶段 4 是**老板决定不测**（需 Windows + AutoCAD），
+    # 它不该再被算成漏测 —— 否则每轮必红，真实的红信号被噪声盖住。
+    # 真正该红的是「launcher 要求跑却没跑」的 6。
+    chk("missed 只剩 6（阶段4 是既定决策跳过，不算漏测）",
+        cov.get("missed") == [6], str(cov.get("missed")))
+    chk("阶段4 进了 skipped_by_decision",
+        cov.get("skipped_by_decision") == [4], str(cov.get("skipped_by_decision")))
+    chk("主动跳过带原因（不能只说「跳过了」）",
+        str((cov.get("skipped_reasons") or {}).get("4") or "").strip() != "",
+        str(cov.get("skipped_reasons"))
+    )
     chk("complete=False（不能自称完整）", cov.get("complete") is False, str(cov.get("complete")))
     chk("漏测项有人话标签",
-        any("清稿" in x for x in (cov.get("missed_labels") or []))
-        and any("交叉比对" in x for x in (cov.get("missed_labels") or [])),
+        any("交叉比对" in x for x in (cov.get("missed_labels") or [])),
         str(cov.get("missed_labels")))
     # 报告正文第一屏必须写明，不能只藏在 json 里
     _head = md[:1200]
     chk("report.md 第一屏写了「阶段覆盖」", "阶段覆盖" in _head)
-    chk("report.md 明确写出漏了 4/6", "4/6" in _head or "漏测" in _head, _head[:200].replace("\n", " "))
+    chk("report.md 明确写出漏了（4/6 或点名漏测）", "4/6" in _head or "漏测" in _head,
+        _head[:200].replace("\n", " "))
+    chk("report.md 说明为什么跳过阶段4（不算漏测）",
+        "主动跳过" in md, md[:900].replace("\n", " "))
     chk("report.md 提醒通过数不代表整体可用",
         "不能当作整体可用" in md or "不代表整体可用" in md)
     # 漏测必须进失败计数，否则「没检查」等于「检查过」

@@ -6,6 +6,7 @@ import os
 import json
 import threading
 import datetime
+import time
 import uuid
 
 from . import config
@@ -367,6 +368,62 @@ def _is_temp_file(fn: str) -> bool:
     return any(low.endswith(ext) for ext in _TEMP_EXTS)
 
 
+# v0.1.234（D23）：单文件解析硬超时。
+#
+# 现场事实：真机 65 个样本（25 张 DWG + 十几份扫描件 PDF）整轮扫描跑了 19.5 分钟，
+# 而前 301 秒 /api/scan/status 一直返回 done=0/0、heartbeat 一次没刷新 ——
+# 自测按 300s 判「卡死」，用户界面只能显示"0/0"，看不出是在啃大文件还是已经死了。
+#
+# 一个文件卡住就拖死整轮，是这一类「慢」最坏的表现形态。给它一个上限：
+# 超时记失败、继续下一个文件，整轮永远能收尾。
+PARSE_FILE_TIMEOUT_SEC = 120
+
+
+def _parse_with_ticks(path, timeout=None, on_tick=None, tick_sec=2.0):
+    """在线程里执行 parse_file，边等边按 tick 回调，超时则放弃。
+
+    返回 (ParseResult | None, timed_out: bool, err: str)。
+
+    为什么不像 OCR 那样起子进程：parse_file 内部已经会起子进程（ODA 转换、
+    tesseract），外面再套一层进程，等于每个文件多付一次解释器启动开销
+    （65 个文件 × 百毫秒级）。这里用线程 + 轮询：
+
+      · **心跳由扫描线程自己刷**（每 tick_sec 一次），不是另起一个「永远在跳」的
+        定时器 —— 后者会让真正卡死的扫描看起来一直活着，那就是假守卫；
+      · 一旦超过 timeout，立刻放弃这个文件并继续下一个，所以「假活」最多持续
+        到 timeout 为止，不会无限期掩盖真死。
+    """
+    timeout = PARSE_FILE_TIMEOUT_SEC if timeout is None else timeout
+    out = {}
+
+    def _work():
+        try:
+            out["res"] = parse_file(path)
+        except BaseException as e:  # noqa: BLE001 —— 宿主 sitecustomize 的 SystemExit 也要收
+            out["err"] = f"{type(e).__name__}: {e}"
+
+    th = threading.Thread(target=_work, daemon=True)
+    th.start()
+    t0 = time.time()
+    last_tick = 0.0
+    while th.is_alive():
+        th.join(tick_sec)
+        if not th.is_alive():
+            break
+        elapsed = time.time() - t0
+        if elapsed >= timeout:
+            return None, True, f"解析超时（>{int(timeout)}s 未返回）"
+        if on_tick is not None and elapsed - last_tick >= tick_sec:
+            last_tick = elapsed
+            try:
+                on_tick(elapsed)
+            except Exception:  # noqa: BLE001
+                pass
+    if out.get("err"):
+        raise RuntimeError(out["err"])
+    return out.get("res"), False, ""
+
+
 def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None, data_dir=None) -> dict:
     """扫描一个或多个文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
     folder 可为字符串或字符串列表。data_dir 指定数据目录（为None时自动使用当前项目目录）。返回统计。"""
@@ -390,9 +447,27 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
     stats["found"] = len(file_list)
     _n_since_save = 0  # v0.1.177：索引分批落盘计数
 
+    # v0.1.234（D23）：**枚举完立刻报一次进度**。
+    # 原来 total 只在「某个文件解析完之后」的 cb 里才有值，于是扫描刚启动的
+    # 那段时间 /api/scan/status 返回 done=0/0，界面无法区分「在啃大文件」和「死了」。
+    # 真机实测这 301 秒里 done 一直是 0/0、heartbeat 一次未刷新。
+    if progress_cb:
+        try:
+            progress_cb(0, len(file_list), f"开始解析（共 {len(file_list)} 个文件）")
+        except Exception:  # noqa: BLE001
+            pass
+
     for i, path in enumerate(file_list):
         if cancel_event is not None and cancel_event.is_set():
             break
+        # v0.1.234（D23）：**解析开始前**打心跳，不是解析完之后。
+        # 首个文件可能是 100MB 的 DWG（ODA 转换）或几十页扫描件（OCR），
+        # 单它就上百秒；只在「解析完」回调，这段时间正好是心跳盲区。
+        if progress_cb:
+            try:
+                progress_cb(i, len(file_list), f"解析中 {os.path.basename(path)}")
+            except Exception:  # noqa: BLE001
+                pass
         try:
             if not force:
                 import hashlib
@@ -417,7 +492,25 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     progress_cb(i + 1, len(file_list), f"超限跳过 {os.path.basename(path)}")
                 continue
 
-            res: ParseResult = parse_file(path)
+            res, _timed_out, _to_err = _parse_with_ticks(
+                path,
+                on_tick=(lambda el, _i=i, _p=path: progress_cb(
+                    _i, len(file_list), f"解析中 {os.path.basename(_p)}（{int(el)}s）")
+                if progress_cb else None),
+            )
+            if _timed_out or res is None:
+                # v0.1.234（D23）：单文件超时不拖死整轮，记失败并继续下一个。
+                # 用户能在「失败清单」里看到它，也不会因此永远等不到扫描结束。
+                stats["failed"] += 1
+                stats.setdefault("timeouts", 0)
+                stats["timeouts"] += 1
+                if progress_cb:
+                    try:
+                        progress_cb(i + 1, len(file_list),
+                                    f"超时跳过 {os.path.basename(path)}")
+                    except Exception:  # noqa: BLE001
+                        pass
+                continue
             if res.status == "parsed" or res.status == "partial":
                 stats["parsed"] += 1
                 # 向量化失败不得影响已解析文件的入库（原实现中 index_file 抛异常
@@ -761,6 +854,11 @@ def background_scan(folder, force: bool = False, status: dict = None, progress_c
     if status is not None:
         status["running"] = True
         status["cancel"] = cancel
+        # v0.1.234（D26）：**在后台线程接手的第一时间就把 running 钉成 True**。
+        # 原来 /api/scan 先把 running 置 False、过一会儿才由本线程置 True，
+        # 这个窗口里来的第二个 POST /api/scan 不会被 409 拦住，会起第二个
+        # 扫描线程，两个线程共写同一份 SCAN_STATUS 与同一个 index.json。
+        status["heartbeat"] = time.time()
 
     def cb(done, total, msg):
         if status is not None:

@@ -58,6 +58,17 @@ PHASE_LABEL = {1: "① 解析/分类/资料库", 2: "② 资料生成管理", 3:
                4: "④ 竣工图清稿", 5: "⑤ 使用遥测/脱敏自检", 6: "⑥ 同一事实交叉比对"}
 RAN_PHASES = []       # 本次实际请求的阶段（按 --phase 解析）
 
+# v0.1.234（D24）：**按老板决定主动跳过的阶段**，与环境条件强相关的阶段登记在这里。
+#
+# 缺陷：阶段 4（竣工图清稿）需要 Windows + AutoCAD，老板 2026-10-31 已明确决定不测，
+# run_loop.cmd 固定 `--phases 1,2,3,5,6`。而阶段6 有一条「覆盖全部 6 个阶段」的断言，
+# 于是**每一轮都必然红**。这不是产品缺陷，是断言与既定决策冲突。
+#
+# 危害是「狼来了」：每轮都有一条红，真实的回归信号就埋在噪声里没人看。
+# 修法：只有「launcher 说要跑、实际没跑」才算漏测；主动跳过记为 skipped 并计入
+# summary.skipped，不判红。
+SKIPPED_BY_DECISION = {4: "竣工图清稿需 Windows + AutoCAD，老板 2026-10-31 决定不纳入自测"}
+
 # v0.1.173：自测建的测试项目 id。phase1 用完会切回原项目，但 phase3 的
 # 竣工/整卷断言必须在「有设备数据的那一个项目」上跑 —— 原来没记这个 id，
 # phase3 直接在用户的当前项目上跑，结果是 0。这里把 id 记下来，phase3 显式切过去。
@@ -2185,14 +2196,25 @@ def _walk_keys(obj, depth=0):
 
 # ---------------- 报告 ----------------
 def phase_coverage():
-    """本次实际请求了哪些阶段、漏了哪些，以及各自的人话标签。（v0.1.232）"""
+    """本次实际请求了哪些阶段、主动跳过哪些、真正漏了哪些。（v0.1.232 / v0.1.234）
+
+    v0.1.234（D24）：原来把「按老板决定跳过」和「该跑没跑」混成一个 missed，
+    于是阶段 4 每轮必红，真实的红信号被噪声盖住。现在三分：
+      ran              —— 真跑了
+      skipped_by_decision —— 老板/环境决定不跑（不算漏测）
+      missed           —— launcher 要求跑但没跑（这才是缺陷）
+    """
     ran = sorted(set(RAN_PHASES) or []) if RAN_PHASES else sorted(PHASE_SUMMARY)
-    missed = [p for p in ALL_PHASES if p not in ran]
+    skipped = [p for p in ALL_PHASES if p in SKIPPED_BY_DECISION and p not in ran]
+    missed = [p for p in ALL_PHASES if p not in ran and p not in SKIPPED_BY_DECISION]
     return {
         "ran": ran,
         "missed": missed,
+        "skipped_by_decision": skipped,
         "ran_labels": [PHASE_LABEL.get(p, str(p)) for p in ran],
         "missed_labels": [PHASE_LABEL.get(p, str(p)) for p in missed],
+        "skipped_labels": [PHASE_LABEL.get(p, str(p)) for p in skipped],
+        "skipped_reasons": {str(p): SKIPPED_BY_DECISION[p] for p in skipped},
         "complete": not missed,
     }
 
@@ -2212,13 +2234,21 @@ def write_report(out_path_json, out_path_md, samples_dir):
     if _missed_now and not any(
             "阶段覆盖完整" in str(r.get("step")) for r in RESULTS):
         record(6, "阶段覆盖完整（漏测要计数，不能只写进报告头）",
-               "本次自测覆盖全部 6 个阶段",
-               f"只跑了 {len(cov['ran'])}/6，漏测 " + "、".join(cov["missed_labels"]),
+               "本次要求跑的阶段全部执行了"
+               "（按既定决策主动跳过的阶段不算漏测，见 coverage.skipped_by_decision）",
+               f"跑了 {len(cov['ran'])}/6，主动跳过 "
+               + ("、".join(cov["skipped_labels"]) if cov["skipped_labels"] else "无")
+               + "，漏测 " + "、".join(cov["missed_labels"]),
                False,
                "真机实测 20261110_164517 的 console.log 首行是 --phase 1,2,3,5，"
                "阶段 4（竣工图清稿）与阶段 6（23 条跨接口一致性比对）从未执行，"
                "而报告只写「通过 50 / 失败 1」，读者会当成完整体检。"
                "这条断言的作用就是把「漏测」显式变成红灯。")
+    # v0.1.234（D24）：主动跳过的阶段计入 skipped，并**不产生失败**。
+    # 这一步以前完全缺失，所以 summary.skipped 从来没反映过「跳过的是哪些」。
+    for _p in cov["skipped_by_decision"]:
+        PHASE_SUMMARY.setdefault(_p, {"passed": 0, "failed": 0, "skipped": 0})
+        PHASE_SUMMARY[_p]["skipped"] = PHASE_SUMMARY[_p].get("skipped", 0) + 1
     payload = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "base_url": BASE,
@@ -2247,6 +2277,12 @@ def write_report(out_path_json, out_path_md, samples_dir):
         lines.append(f"  - 本次实际跑的：{'、'.join(cov['ran_labels'])}")
         lines.append("  - 漏测的阶段一条断言都没执行，本轮「通过数」不含它们，"
                      "**不能当作整体可用性的证据**")
+    # v0.1.234（D24）：主动跳过的阶段必须写明「为什么不算漏测」，
+    # 否则读者看到 5/6 会以为又漏了一个。
+    if cov["skipped_by_decision"]:
+        _why = "；".join(f"{PHASE_LABEL.get(p, p)}：{SKIPPED_BY_DECISION[p]}"
+                        for p in cov["skipped_by_decision"])
+        lines.append(f"- 按既定决策主动跳过：（{_why}）—— 不计入漏测，不算失败")
     lines += ["", "## 汇总", "",
              "| 阶段 | 通过 | 失败 | 跳过 |", "|---|---|---|---|"]
     names = PHASE_LABEL
@@ -2405,7 +2441,11 @@ def main():
     # 供 write_report 声明覆盖范围（v0.1.232）
     global RAN_PHASES
     RAN_PHASES = list(want)
-    _missed = [p for p in ALL_PHASES if p not in want]
+    _missed = [p for p in ALL_PHASES if p not in want and p not in SKIPPED_BY_DECISION]
+    _skipd = [p for p in ALL_PHASES if p not in want and p in SKIPPED_BY_DECISION]
+    if _skipd:
+        print(f"[覆盖] 按既定决策主动跳过："
+              f"{'、'.join(PHASE_LABEL.get(p, str(p)) for p in _skipd)}（不算漏测）")
     if _missed:
         print(f"[覆盖] 本次只跑 {len(want)}/{len(ALL_PHASES)} 个阶段，"
               f"漏测：{'、'.join(PHASE_LABEL.get(p, str(p)) for p in _missed)}")
@@ -2435,14 +2475,60 @@ def main():
         # 用户自己也可能建名字带「自测」的真实项目。且必须在切回原项目之后删，
         # 否则中间会出现「当前指针指着刚被删的项目」。
         _to_del = [x for x in CREATED_PIDS if x and x != _origin_pid]
+        # v0.1.234（D25）：清理结果必须**验到列表里没有它**，不能只看接口 ok。
+        # 真机实测：一轮自测后 `自测_20261111_073328`(a6443da1) 仍在项目列表里，
+        # 而 `operation_log.jsonl` 里连一条 delete 记录都没有 —— 于是被判断成
+        # 「本轮根本没发起删除」。这个判断其实是错的：本自测收尾会**主动清掉**
+        # 带自测标记的审计行（delete/delete_failed 都在标记里），审计空白再次
+        # 被当成否定证据。所以这里改成两条硬证据：
+        #   ① 删完再查一次 /api/projects，确认这个 id 真的不在了；
+        #   ② 把清理结果写进独立的 cleanup_report（不参与审计净化），可事后核。
+        _del_report = {"attempted": [], "gone": [], "still_there": [], "errors": []}
         for _tp in _to_del:
+            _del_report["attempted"].append(_tp)
             try:
                 _code_d, _db, _ = call("POST", "/api/projects/delete",
                                        {"project_id": _tp, "backup": False})
                 _ok_d = (_code_d == 200 and (_db or {}).get("ok", True))
-                print(f"[清理] 删除本次测试项目 {_tp} → {'OK' if _ok_d else 'FAILED'}")
+                print(f"[清理] 删除本次测试项目 {_tp} → {'OK' if _ok_d else 'FAILED'}"
+                      + ("" if _ok_d else f" {str(_db)[:120]}"))
+                if not _ok_d:
+                    _del_report["errors"].append(
+                        f"{_tp}: {str((_db or {}).get('error') or _db)[:200]}")
             except Exception as _e:  # noqa: BLE001
                 print(f"[WARN] 测试项目 {_tp} 清理失败：{_e}")
+                _del_report["errors"].append(f"{_tp}: {type(_e).__name__}: {_e}")
+        # 回查：这些 id 还在不在项目列表里？
+        try:
+            _c_list, _b_list, _ = call("GET", "/api/projects", None)
+            _ids_now = set()
+            for _p in ((_b_list or {}).get("projects") or []):
+                if isinstance(_p, dict) and _p.get("id"):
+                    _ids_now.add(_p["id"])
+            for _tp in _del_report["attempted"]:
+                (_del_report["still_there"] if _tp in _ids_now
+                 else _del_report["gone"]).append(_tp)
+        except Exception as _e:  # noqa: BLE001
+            _del_report["errors"].append(f"回查项目列表失败: {type(_e).__name__}: {_e}")
+        try:
+            with open(os.path.join(here, "selftest_cleanup.json"), "w",
+                      encoding="utf-8") as _f:
+                json.dump(_del_report, _f, ensure_ascii=False, indent=1)
+        except Exception:  # noqa: BLE001
+            pass
+        if 6 in want:
+            record(6, "自测项目清理干净（删除后端核对列表）",
+                   "本次自测建的项目在 /api/projects 里一个都不剩"
+                   "（不能只看删除接口 ok，也不能靠审计里有没有 delete 行判断 ——"
+                   "本收尾会按标记净化自测审计行）",
+                   f"尝试删 {len(_del_report['attempted'])} 个，已消失 "
+                   f"{len(_del_report['gone'])} 个，仍在列表 "
+                   f"{len(_del_report['still_there'])} 个{'' if not _del_report['errors'] else '，错误=' + '; '.join(_del_report['errors'])[:160]}",
+                   (not _del_report["still_there"]) and not _del_report["errors"],
+                   "真机实测 20261111_073324：清理后自测项目 a6443da1 仍在 /api/projects 里，"
+                   "file_count=0，磁盘目录完整。而审计流水里查不到 delete 行 ——"
+                   "因为本收尾恰好会清掉带自测标记的审计行。两条证据都不可靠，"
+                   "必须直接核对项目列表。")
 
         # v0.1.217：把本次自测写进**真实审计流水**的行删掉，再用断言复核
         # 「行数/末行回到开跑前」。注意顺序：必须放在删除测试项目之后 ——

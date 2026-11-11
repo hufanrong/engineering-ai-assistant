@@ -153,6 +153,11 @@ def run_helper_with_watchdog(script_path, expect_flag, timeout=150):
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
+def _strip_c(src):
+    """把整行注释删掉，避免「注释里写着就算实现」。"""
+    return "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
+
+
 def main():
     from app import auto_updater as au
     print("=" * 70)
@@ -435,13 +440,35 @@ def main():
                 if os.path.exists(lp):
                     logtxt = open(lp, encoding="utf-8", errors="replace").read()
                 nlogfail = logtxt.count("写结果失败")
+                # v0.1.234（D22）：失败**不允许**再写进业务日志 restart.log。
+                # 它现在应该只出现在 restart_error.log 里 —— restart.log 是老板要求
+                # 「失败要写清原因」的那份业务日志，掺基础设施噪音会误导运维。
+                errtxt = ""
+                ep = os.path.join(upd, "restart_error.log")
+                if os.path.exists(ep):
+                    errtxt = open(ep, encoding="utf-8", errors="replace").read()
+                nerrlog = errtxt.count("写结果失败")
                 r = au.restart_status()
                 chk("**8 个真进程并发收尾，结果文件仍是合法单对象**（本轮抓到的缺陷）",
                     r.get("known") is True and not r.get("corrupt"),
                     str(r)[:110])
-                chk("**并发写盘零失败**（固定临时名会让后写的把先写的 .tmp 删掉）",
-                    not fails and nlogfail == 0,
-                    "rc失败 %d 个 / LOG 记失败 %d 次" % (len(fails), nlogfail))
+                chk("**并发写盘零失败**（固定临时名会让后写的把先写的 .tmp 删掉；"
+                    "os.replace 不重试会撞 WinError 32）",
+                    not fails and nlogfail == 0 and nerrlog == 0,
+                    "rc失败 %d 个 / LOG 记失败 %d 次 / error日志 %d 次"
+                    % (len(fails), nlogfail, nerrlog))
+                # v0.1.234（D22）：**落盘的必须是最新那次写入**。
+                # 原来只断言「合法单对象」——那只证明没写坏，没证明没读到旧值。
+                # 真实场景里 helper / 探活实例 / 正式实例三方几乎同时收尾，
+                # D18 第 4 条读到的可能是中间态。
+                _tags = [("p%d-%d" % (i, 59)) for i in range(8)]
+                _last = r.get("tag") or (r.get("data") or {}).get("tag")
+                chk("**落盘的是并发写入里最后一次**（不是某个中间态）",
+                    _last in _tags,
+                    "读到 tag=%r，期望属于 %s" % (str(_last)[:20], _tags[:3] + ["..."]))
+                # 业务日志里只该有业务结论，不该有基础设施失败噪音
+                chk("**业务日志 restart.log 不含基础设施失败噪音**",
+                    nlogfail == 0, "restart.log 里「写结果失败」%d 次" % nlogfail)
         finally:
             au.WORKSPACE_ROOT = WB
             shutil.rmtree(wdir, ignore_errors=True)
@@ -497,6 +524,31 @@ def main():
         fake_v232["phase"] != "canary", str(fake_v232["phase"]))
     chk("新版把它变成 phase=canary + 旧服务在线，两条判据同时成立",
         True, "见场景 B")
+
+    print()
+    print("=" * 70)
+    print("场景 F（源码级）：D22 写结果必须原子且带重试 —— Linux 压不出 WinError 32")
+    print("=" * 70)
+    _src = open(os.path.join(WB, "app", "auto_updater.py"), encoding="utf-8",
+                errors="replace").read()
+    _code = _strip_c(_src)
+    _nretry = _code.count("for _k in range(5)")
+    _nreplace = _code.count("os.replace(tmp, RESULT)")
+    chk("**D22 os.replace 带退避重试（写在代码里，不是只在注释里）**",
+        _nretry >= 1 and _nreplace >= 1,
+        f"重试循环 {_nretry} 处，replace {_nreplace} 处")
+    _wr = _code[_code.find("def write_result"):]
+    _wr = _wr[:_wr.find("def _write_error_log")] if "def _write_error_log" in _wr else _wr
+    # 判据是「except 分支里不再调用业务日志函数 log(...)」——不能只搜字符串：
+    # 新实现里 _write_error_log("写结果失败：%s") 这行本身就含这五个字。
+    _exc = _wr[_wr.find("except Exception as e:"):] if "except Exception as e:" in _wr else _wr
+    import re as _rr
+    _has_biz_log = bool(_rr.search(r"(?<![_\w])log\(", _exc))
+    chk("D22 失败路径不再往业务日志 restart.log 写（改走独立 error log）",
+        (not _has_biz_log) and "_write_error_log(" in _exc,
+        f"except 分支内容：{_exc[:160]!r}")
+    chk("D22 失败改写独立的 restart_error.log",
+        "restart_error.log" in _code and "def _write_error_log" in _code)
 
     print()
     print(f"===== 通过 {PASS} / 失败 {FAIL} =====")

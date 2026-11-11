@@ -445,6 +445,13 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
         if os.path.exists(dest):
             dest = os.path.join(recycled_root,
                                 f"{project_id}_{int(datetime.datetime.now().timestamp())}")
+        # v0.1.234（D19）：仅删记录、把资料移入回收站这条路径同样会被 chroma
+        # 句柄挡住（shutil.move 跨目录移动时若目标文件被占用，Windows 上会失败）。
+        try:
+            from . import vector_store as _vs0
+            _vs0.close_stores_under(project_dir)
+        except Exception:  # noqa: BLE001
+            pass
         if os.path.exists(project_dir):
             shutil.move(project_dir, dest)
         _settle = _settle_current_after_delete(_successor) if _is_current else {}
@@ -476,6 +483,19 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
         except Exception:
             pass
 
+    # v0.1.234（D19）：**删目录之前先把这个项目的向量库句柄放掉**。
+    # 根因已由真机对照实验定性：删除逻辑本身没错，是 chroma 的 PersistentClient
+    # 打开后不释放 vector_db\<uuid>\data_level0.bin，服务进程自己攥着它，
+    # Windows 没有 unlink-on-open → rmtree 报 WinError 32，项目删一半留一半。
+    # 「重启服务后同一个请求原样再发一次就成功」正是这个根因的反证。
+    # 注意：这一步失败也不能阻断删除（关不掉只是可能仍删不掉，由 _safe_rmtree 报原因）。
+    _closed_stores = 0
+    try:
+        from . import vector_store as _vs
+        _closed_stores = _vs.close_stores_under(project_dir)
+    except Exception as _ce:  # noqa: BLE001
+        _closed_stores = 0
+
     # 删除项目目录
     _rm_ok, _rm_err = _safe_rmtree(project_dir)
     if not _rm_ok:
@@ -500,6 +520,7 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
             "deleted_id": project_id,
             "data_deleted": False,
             "partial_delete": True,
+            "closed_vector_stores": _closed_stores,
         }
         _op_log.log_op("delete_failed",
                        f"删除项目失败：{project['name']}（id={project_id}）：{_rm_err}")

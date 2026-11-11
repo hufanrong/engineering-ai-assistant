@@ -969,7 +969,19 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #
 #   tools/test_restart_really.py 43 条断言（含 8 个真进程并发写盘、旧服务全程在线采样
 #   96/96）；反向验证：改回固定临时名 → 41 次写盘失败、RC=1。
-APP_VERSION = "0.1.233"
+# v0.1.234（2026-11-11）：修 WORKbuddy 真机报的 5 个缺陷
+#   D23 扫描心跳盲区（P0）：心跳只在「文件解析完成」时刷新，首个大 DWG/OCR 文件
+#       会留下 301 秒 done=0/0 的静默窗口，界面无法区分「在啃大文件」和「已死」。
+#       → 先枚举报总数、派发前先打心跳、单文件 120s 硬上限（超时跳过并记账）。
+#   D26 扫描启动竞态：判 running 与置 True 之间有个窗口，第二个 POST 会起第二个扫描线程。
+#       → 判与占坑合并进 _claim_scan_slot()，同一把锁内完成，占位用独立 scan_slot 字段。
+#   D22 重启结果写盘：mkstemp 后 os.replace 仍有 5.8%~7.9% 撞 WinError 32。
+#       → 退避重试 5 次；基础设施故障转记 restart_error.log，不污染业务日志 restart.log。
+#   D19 删项目留 partial_delete：chroma PersistentClient 不释放 data_level0.bin，
+#       Windows 无 unlink-on-open。→ 删目录前 close_stores_under()（按 commonpath 判边界）。
+#   D24 自测把「老板决定跳过阶段4」和「该跑没跑」混成一个 missed，每轮必红。
+#       → 三分：ran / skipped_by_decision（不计漏测）/ missed（真缺陷）。
+APP_VERSION = "0.1.234"
 
 # 解析能力版本号（与 APP_VERSION 独立：界面/接口小改动不必重解析全库）。
 # **只要改了「同一份文件能抽出多少内容」，就把这个号加一** ——

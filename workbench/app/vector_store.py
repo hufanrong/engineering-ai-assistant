@@ -8,6 +8,63 @@ import datetime
 
 from . import config
 
+# v0.1.234（D19）：**所有被创建过的 VectorStore 实例都要能被找到并关掉**。
+#
+# 真机根因（WORKbuddy 对照实验定性）：删项目时报
+#   PermissionError [WinError 32] …vector_db\<uuid>\data_level0.bin
+# 而「重启服务释放句柄后，同一个请求原样再发一次」立刻成功 ——
+# 说明删除逻辑没错，是 chroma 的 PersistentClient 打开后从不关闭，
+# 服务进程自己攥着那个 .bin 文件。Windows 没有 unlink-on-open，删不掉。
+#
+# 这里用一个弱引用注册表：谁创建了 VectorStore，谁就在表里，
+# 删除项目前按 db_path 前缀把它们逐个关掉，再删目录。
+# 用 weakref 是为了不因为注册表本身把实例续命（否则永远关不掉）。
+_STORE_REGISTRY = []
+
+
+def _register(store):
+    import weakref
+    try:
+        _STORE_REGISTRY.append(weakref.ref(store))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def close_stores_under(prefix: str) -> int:
+    """关掉所有 db_path 落在 prefix 之下的向量库实例，返回关闭个数。
+
+    调用点：删除项目目录**之前**。不关就直接 rmtree，Windows 上必撞
+    WinError 32（data_level0.bin / chroma.sqlite3 被本进程占着）。
+    """
+    import gc
+    prefix = os.path.abspath(prefix)
+    closed = 0
+    alive = []
+    for ref in list(_STORE_REGISTRY):
+        st = ref()
+        if st is None:
+            continue
+        alive.append(ref)
+        try:
+            p = os.path.abspath(getattr(st, "_db_path", "") or "")
+        except Exception:  # noqa: BLE001
+            continue
+        if not p:
+            continue
+        # 目录比较要按「路径是项目目录的子路径」判，不能用字符串 startswith
+        # （D:\proj\p1 与 D:\proj\p10 会假命中）。
+        try:
+            if os.path.commonpath([p, prefix]) == prefix:
+                st.close()
+                closed += 1
+        except Exception:  # noqa: BLE001
+            continue
+    # 清掉已死的引用，避免注册表无界增长
+    _STORE_REGISTRY[:] = alive
+    if closed:
+        gc.collect()
+    return closed
+
 
 class VectorStore:
     def __init__(self, db_path: str = None):
@@ -16,6 +73,37 @@ class VectorStore:
         self._collection = None
         # 默认项目向量库；平台级规范库传入独立目录（v0.1.10）
         self._db_path = db_path or os.path.join(config.DATA_DIR, "vectordb")
+        _register(self)
+
+    def close(self):
+        """释放底层 chroma 句柄。删除项目目录前必须调用（Windows 无 unlink-on-open）。"""
+        errors = []
+        col = getattr(self, "_collection", None)
+        cli = getattr(self, "_client", None)
+        self._collection = None
+        self._client = None
+        # 先放 collection，再关 client；反过来 client 关了 collection 还握着
+        for obj, name in ((col, "collection"), (cli, "client")):
+            if obj is None:
+                continue
+            for meth in ("close", "reset"):
+                fn = getattr(obj, meth, None)
+                if not callable(fn):
+                    continue
+                try:
+                    fn()
+                    break
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"{name}.{meth}: {type(e).__name__}: {e}")
+            # 有些版本的客户端只有一个可调用的 clear/stop，兜底把引用丢掉
+            try:
+                del obj
+            except Exception:  # noqa: BLE001
+                pass
+        # 句柄有没有真放开，只有 gc + 再删一次目录才知道；这里只做尽力而为，
+        # 由调用方（delete_project）在 rmtree 失败时把原因写进审计。
+        self._closed_errors = errors
+        return not errors
 
     # ---------- 懒加载 ----------
     def _get_model(self):

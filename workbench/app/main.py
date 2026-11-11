@@ -102,6 +102,37 @@ async def _telemetry_middleware(request: Request, call_next):
 # 共享扫描状态（单任务）
 # v0.1.134：增加 start_ts/heartbeat 用于卡死检测（守护线程自动恢复）
 SCAN_STATUS = {"running": False, "start_ts": 0, "heartbeat": 0}
+# v0.1.234（D26）：扫描启动的原子闸。
+#
+# 缺陷：下面 start_scan 是「先读 running 判 409 → 再把 running 置 False →
+# 后台线程过一会儿才置 True」。中间那段时间 running 恒为 False，第二个
+# POST /api/scan 从窗口里挤进来，就会起第二个扫描线程，两个线程共写
+# 同一个 SCAN_STATUS 和同一个 index.json。
+# 修法：判「有没有任务在跑」和「占住这个坑」必须在同一把锁里完成，
+# 并且占位是一个**独立字段**（scan_slot），不依赖后台线程有没有起来。
+_SCAN_START_LOCK = threading.Lock()
+
+
+def _claim_scan_slot() -> bool:
+    """抢扫描占位。判「有没有任务在跑」与「占住这个坑」在同一把锁里完成。
+
+    v0.1.234（D26）：原实现是
+        if SCAN_STATUS["running"]: 409
+        SCAN_STATUS["running"] = False   # 清掉上一轮状态
+        threading.Thread(...).start()    # 线程过一会儿才把 running 置 True
+    这三步之间 running 恒为 False，第二个请求挤进窗口就会起第二个扫描线程。
+    占位改用独立字段 scan_slot，不依赖后台线程是否已起来。
+
+    抽成独立函数是为了让回归测试能压**产品里真正跑的这段代码**，
+    而不是在测试里复制一份等价逻辑（那样回退修复后测试照样通过 = 假守卫）。
+    """
+    with _SCAN_START_LOCK:
+        if SCAN_STATUS.get("running") or SCAN_STATUS.get("scan_slot"):
+            return False
+        SCAN_STATUS.update({"running": True, "scan_slot": True, "done": 0, "total": 0,
+                            "msg": "正在启动扫描…", "stats": None, "error": "",
+                            "start_ts": time.time(), "heartbeat": time.time()})
+        return True
 _store = VectorStore()
 
 # v0.1.134：向量库"项目/全局"双轨制（补丁合入）
@@ -226,9 +257,8 @@ def start_scan(req: ScanReq):
     for f in folders:
         if not os.path.isdir(f):
             raise HTTPException(400, f"路径不存在或不可访问：{f}")
-    if SCAN_STATUS.get("running"):
+    if not _claim_scan_slot():
         raise HTTPException(409, "已有扫描任务在运行")
-    SCAN_STATUS.update({"running": False, "done": 0, "total": 0, "msg": "", "stats": None})
     
     def _scan_with_stats(folders, force, status):
         """扫描完成后自动更新项目统计。
@@ -263,14 +293,23 @@ def start_scan(req: ScanReq):
                 pass
         finally:
             status["running"] = False
+            # v0.1.234（D26）：坑必须在这里释放，否则一次扫描之后所有后续扫描
+            # 都会被自己的占位挡成 409（那是比原缺陷更糟的「永久锁死」）。
+            status["scan_slot"] = False
             try:
                 _refresh_project_stats()
             except Exception:  # noqa: BLE001
                 pass
     
-    SCAN_STATUS.update({"start_ts": time.time(), "heartbeat": time.time()})
     t = threading.Thread(target=_scan_with_stats, args=(folders, req.force, SCAN_STATUS), daemon=True)
-    t.start()
+    try:
+        t.start()
+    except BaseException as e:  # noqa: BLE001
+        # v0.1.234（D26）：线程都没起来，占位必须立刻还回去。
+        # 少了这一步，一次「起线程失败」会让之后每一次扫描都撞 409。
+        SCAN_STATUS.update({"running": False, "scan_slot": False,
+                            "error": f"扫描线程启动失败: {type(e).__name__}: {e}"[:500]})
+        raise HTTPException(500, "扫描线程启动失败，请重试")
     return {"ok": True, "folders": folders}
 
 

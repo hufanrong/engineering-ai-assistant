@@ -777,6 +777,9 @@ def log(msg):
         pass
 
 
+ERROR_LOG = os.path.join(WS, "updates", "restart_error.log")
+
+
 def write_result(d):
     d = dict(d)
     d.setdefault("tag", TAG)
@@ -796,7 +799,28 @@ def write_result(d):
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(d, f, ensure_ascii=False, indent=1)
-            os.replace(tmp, RESULT)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:  # noqa: BLE001
+                    pass
+            # v0.1.234（D22）：**os.replace 要重试**。
+            # 真机实测：mkstemp 之后仍有 28~38/480 次（5.8%~7.9%）写失败，
+            # 原因是 Windows 上目标文件正被别的进程读着（/api/update/restart/status
+            # 轮询、另一个 helper 刚写完），replace 抛 WinError 32。
+            # 这类冲突是**转瞬即逝**的，退避几百毫秒就过去了；直接把异常吞掉
+            # 等于让「结果没落盘」变成常态。
+            last_err = None
+            for _k in range(5):
+                try:
+                    os.replace(tmp, RESULT)
+                    last_err = None
+                    break
+                except OSError as _e:
+                    last_err = _e
+                    time.sleep(0.05 * (2 ** _k))  # 50/100/200/400/800 ms
+            if last_err is not None:
+                raise last_err
         except Exception:
             try:
                 os.remove(tmp)
@@ -804,8 +828,23 @@ def write_result(d):
                 pass
             raise
     except Exception as e:
-        log("写结果失败：%s" % e)
+        # v0.1.234（D22）：失败**不再**往 restart.log 写「写结果失败」。
+        # restart.log 是老板要求「失败要写清原因」的那份业务日志，
+        # 480 次并发写往里掺几十行基础设施噪音，运维读日志会被误导。
+        # 转记到独立的 restart_error.log，主日志只留业务结论。
+        _write_error_log("写结果失败：%s" % e)
     return d
+
+
+def _write_error_log(msg):
+    """把「结果文件没落盘」这类基础设施故障写到独立日志，不污染 restart.log。"""
+    try:
+        os.makedirs(os.path.dirname(ERROR_LOG), exist_ok=True)
+        with open(ERROR_LOG, "a", encoding="utf-8") as f:
+            f.write("[%s] [helper %s] %s\n" % (
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), TAG, msg))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def free_port_taken(port):
