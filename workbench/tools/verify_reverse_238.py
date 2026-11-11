@@ -88,6 +88,16 @@ case(
     ["R6c", "R6d"],
 )
 
+# ---- 6) device_workshop.rebuild_from_excel：抽取器不接力 data_dir ----
+# 这处的缺陷方向是「干净名字被别处的台账误裁」（与 B/C 的脏名字漏入相反）。
+case(
+    "F 还原 rebuild_from_excel 抽取器不接力 data_dir",
+    "app/device_workshop.py",
+    """                eqs = _extract(d, data_dir)""",
+    """                eqs = _extract(d)""",
+    ["R8b"],
+)
+
 FAIL_NAME = re.compile(r"^  \[FAIL\] (.+?):")
 
 
@@ -136,10 +146,10 @@ def main():
                 print(f"[ERROR] {c['rel']} 还原失败！")
                 all_ok = False
 
-    # 还原后再跑一次，必须回到 15/0
+    # 还原后再跑一次，必须回到全绿（断言数不写死，避免加断言就得改这里）
     rc, reds, out = run_test()
     green = rc == 0 and not reds
-    print(f"[{'PASS' if green else 'FAIL'}] F 还原后回到全绿: rc={rc} 红={reds}")
+    print(f"[{'PASS' if green else 'FAIL'}] 收尾 全部还原后回到全绿: rc={rc} 红={reds}")
     if not green:
         all_ok = False
         print(out[-2000:])

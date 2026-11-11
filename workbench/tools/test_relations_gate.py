@@ -95,6 +95,7 @@ LEDGER_A = "粗碎站"
 LEDGER_B = "磨浮车间"
 DIRTY_DOC = "建宇建主减速机油站"   # 用户点名骂过的句子碎片
 DIRTY_HINT = "1号车间"             # 正文正则推出来、台账里没有
+RELAY_WS = "精选车间"              # R8 用：A 自己的表里合法写着、但不在环境台账里
 DIRTY_TAG = "4号车间"              # 位号前缀推出来、台账里没有
 
 
@@ -293,6 +294,53 @@ def main():
     ok5 = dw.assign_device("Z-999", DIRTY_HINT, source="tag_infer", confidence=0.4,
                            force=True, data_dir=d2)
     check("R5b 台账为空时自动登记仍可写入（不把一切判空）", True, ok5, ok5 is True)
+
+    # ---------- R8：rebuild_from_excel 必须把 data_dir 接力给抽取器 ----------
+    # 这条路径的缺陷方向与 R1/R2 相反：不是「脏名字漏进来」，而是**干净名字被别处
+    # 的台账误裁**。实测（2026-11-12）：项目 A 的台账为空（按约定应退回旧逻辑、
+    # 不裁剪），但抽取器 `_equipment_from_cache(d)` 没拿到 A 的目录，读的是环境
+    # 台账（当前项目 B，里面有「粗碎站」）→ 把 A 表里合法的「精选车间」判成台账外
+    # → hint 裁成 None → 设备 P-301 归属整条丢失。A 台账非空、名字真在台账外时
+    # 两种写法结果都是 0（下游 assign_device 闸门挡住了），所以**那种场景区分不出
+    # 对错**，不能拿它当判据。
+    d3 = os.path.join(_TMP, "p3")
+    d4 = os.path.join(_TMP, "p4")
+    _write(os.path.join(d3, "index.json"), {
+        "sha_relay": {"id": "sha_relay", "sha256": "sha_relay", "file_name": "A台账.xlsx",
+                      "file_type": "xlsx", "status": "parsed", "ts": "2026-01-01"},
+        "devices": {},
+    })
+    _write(os.path.join(d4, "index.json"), {
+        "devices": {"B-201": {"tag": "B-201", "name": "浮选机", "workshop": LEDGER_A,
+                              "source_file": "B台账.xlsx"}},
+    })
+    relay_cache = {"sha256": "sha_relay", "file_name": "A台账.xlsx", "parser": "excel",
+                   "status": "parsed", "text": "",
+                   "structure": {"sheets": [{"header": ["位号", "设备名称", "车间"],
+                                             "rows": [{"位号": "P-301", "设备名称": "泵",
+                                                       "车间": RELAY_WS}]}]}}
+    # 环境台账（不传 data_dir 时读到的那个）= d4
+    wa._ISOLATED_DIR = d4
+    wa._LEDGER_CACHE.clear()
+    try:
+        led_a = wa.ledger_workshop_names(d3)
+        led_env = wa.ledger_workshop_names()
+        wa._LEDGER_CACHE.clear()
+        check("R8a 场景成立：A 台账为空、环境台账非空（否则这条测不出东西）",
+              (set(), {LEDGER_A}), (set(led_a), set(led_env)),
+              not led_a and bool(led_env),
+              "A 台账不是空 or 环境台账是空 → 下面两条断言失去判别力")
+
+        n_relay = dw.rebuild_from_excel({"sha_relay": relay_cache}, d3)
+        got = dw.get_workshop("P-301", d3)
+        check("R8b 抽取器接力 data_dir：A 的空台账不该借 B 的清单去裁自己的 hint",
+              (1, RELAY_WS), (n_relay, got),
+              n_relay == 1 and got == RELAY_WS,
+              f"旧写法实测 n=0 / P-301=''（设备归属整条丢失），hint 被环境台账裁成 None；"
+              f"现在 n={n_relay} / P-301={got!r}")
+    finally:
+        wa._ISOLATED_DIR = _TMP
+        wa._LEDGER_CACHE.clear()
 
     # ---------- R6：无当前项目时数据目录必须跟随 config.DATA_DIR ----------
     ddir_now = pm.get_project_data_dir()

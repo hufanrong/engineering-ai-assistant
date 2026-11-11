@@ -213,7 +213,12 @@ def rebuild_from_excel(docs: dict, data_dir=None) -> int:
         eqs = d.get("equipments")
         if eqs is None and _extract is not None:
             try:
-                eqs = _extract(d)
+                # v0.1.239：必须把 data_dir 传给抽取器。不传时它会用「当前项目」
+                # 的台账裁决 workshop_hint —— 传了 A 的目录、却拿 B 的清单放行，
+                # 与 build_relations 那处是同一个「参数有但没接力」。
+                # 实测（2026-11-12）：A 台账只有「粗碎站」，B 台账里有「精选车间」，
+                # 不传 → P-301 hint 原样「精选车间」并写进登记；传 A → hint 裁成 None、0 条写入。
+                eqs = _extract(d, data_dir)
             except Exception:  # noqa: BLE001
                 eqs = []
         for e in (eqs or []):
@@ -233,7 +238,12 @@ def rebuild_from_excel(docs: dict, data_dir=None) -> int:
         eqs = d.get("equipments")
         if eqs is None and _extract is not None:
             try:
-                eqs = _extract(d)
+                # v0.1.239：必须把 data_dir 传给抽取器。不传时它会用「当前项目」
+                # 的台账裁决 workshop_hint —— 传了 A 的目录、却拿 B 的清单放行，
+                # 与 build_relations 那处是同一个「参数有但没接力」。
+                # 实测（2026-11-12）：A 台账只有「粗碎站」，B 台账里有「精选车间」，
+                # 不传 → P-301 hint 原样「精选车间」并写进登记；传 A → hint 裁成 None、0 条写入。
+                eqs = _extract(d, data_dir)
             except Exception:  # noqa: BLE001
                 eqs = []
         for e in (eqs or []):
