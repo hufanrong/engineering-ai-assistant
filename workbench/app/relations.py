@@ -215,7 +215,7 @@ def _classify(name: str, title_block: dict, text: str = "") -> str:
 
 
 # ---------------- 设备位号提取（按文件类型） ----------------
-def _equipment_from_cache(cache: dict) -> list:
+def _equipment_from_cache(cache: dict, data_dir=None) -> list:
     """从解析缓存里抽取 {tag, where, workshop_hint} 集合。"""
     out = []
     if not cache:
@@ -400,7 +400,37 @@ def _equipment_from_cache(cache: dict) -> list:
     else:
         for m in _TAG_RE.finditer(text):
             out.append({"tag": m.group(1), "where": "text"})
-    return out
+    return _veto_device_hints(out, data_dir)
+
+
+def _veto_device_hints(equips: list, data_dir=None) -> list:
+    """v0.1.238：设备级车间名的**唯一出口闸门**。
+
+    放在 `_equipment_from_cache` 的 return 处而不是逐个通道加，是因为这里
+    有四条通道（cad_block / cad_text / 正文text / OCR / excel_row），
+    逐通道加必漏一路（v0.1.236 在文件级已经踩过同样的坑）。
+
+    口径与文件级完全一致：台账非空 → 台账外的名字不成为车间归属。
+    只裁 `workshop_hint` 不够，因为 device_workshop.rebuild_from_excel 与
+    layout 的票数都直接拿它投票；裁掉 hint 后设备落回文件级车间（文件级的
+    名字已经过闸），或留空进「车间未确认」让人定 —— 不丢设备、不编名字。
+    """
+    if not equips:
+        return equips
+    try:
+        from . import workshop_assign as _wa
+        led = _wa.ledger_workshop_names(data_dir)
+        if not led:
+            return equips          # 台账为空 → 不裁剪（旧逻辑）
+        for e in equips:
+            if not isinstance(e, dict):
+                continue
+            h = e.get("workshop_hint")
+            if h and not _wa.is_workshop_allowed(h, data_dir):
+                e["workshop_hint"] = None
+    except Exception:  # noqa: BLE001
+        pass
+    return equips
 
 
 def _parse_scale(title_block: dict) -> int:
@@ -501,12 +531,12 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
                 from . import workshop_assign as _wa2
                 # v0.1.236：台账车间也是权威 —— is_workshop_allowed = 人工确认过的
                 # 或设备台账里真有的；两者都不满足才降级为 provisional。
-                if not _wa2.is_workshop_allowed(ws):
+                if not _wa2.is_workshop_allowed(ws, ddir):
                     _prov = ws
                     ws = None
             except Exception:  # noqa: BLE001
                 _prov = ""
-        eqs = _equipment_from_cache(cache)
+        eqs = _equipment_from_cache(cache, ddir)
         sp = (cache.get("structure") or {}).get("spatial") or {}
         docs[sha] = {
             "file_name": fname, "parser": cache.get("parser"),
@@ -578,12 +608,15 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
             # v0.1.167：设备级车间证据 = 该设备自己的行/句车间；没有才回落到文件级。
             # 原来两者都收，多车间正文（「1号车间安装 P-101，2号车间设 V-201」）
             # 会给 V-201 凭空记一票 1号车间，与台账行的 2号车间打成平票冲突。
+            # v0.1.238：设备级车间名已在唯一出口 `_equipment_from_cache` →
+            # `_veto_device_hints()` 处裁剪（四条通道一处判定，避免逐通道加必漏）。
+            # 这里直接用它裁好的 hint，不再二次判定 —— 两处判定就是两个答案的温床。
             _hint = e.get("workshop_hint")
             _dev_ws = _hint or d["workshop"]
             entry = {
                 "file": d["file_name"], "workshop": _dev_ws,
                 "where": e["where"], "x": e.get("x"), "y": e.get("y"),
-                "workshop_hint": e.get("workshop_hint"),
+                "workshop_hint": _hint,
                 "elevation_hint": e.get("elevation_hint"),
                 "coord_confidence": e.get("coord_confidence"),
             }
@@ -596,7 +629,7 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
     # v0.1.29：设备级车间归属——从台账行 workshop_hint 自动登记（人工优先不覆盖）
     try:
         from . import device_workshop
-        device_workshop.rebuild_from_excel(docs)
+        device_workshop.rebuild_from_excel(docs, ddir)
     except Exception:  # noqa: BLE001
         pass
 
@@ -736,7 +769,7 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
         _dw = ""
         try:
             from . import device_workshop
-            _dw = device_workshop.get_workshop(tag)
+            _dw = device_workshop.get_workshop(tag, ddir)
         except Exception:  # noqa: BLE001
             pass
         if _dw:

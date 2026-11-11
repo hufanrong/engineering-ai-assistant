@@ -616,12 +616,14 @@ def get_project_data_dir(project_id: str = None) -> str:
         if current:
             project_id = current["id"]
         else:
-            # 没有当前项目时，使用默认目录（兼容旧数据）
-            default_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "data"
-            )
-            return default_dir
+            # 没有当前项目时，使用默认目录（兼容旧数据）。
+            # v0.1.238 实测事故：这里原来是**硬编码安装目录**下的 data/，
+            # 于是无论 config.DATA_DIR 指到哪儿（隔离测试 / FANGONG_DATA_DIR 探活实例 /
+            # 用户把数据根改到别的盘），只要当前没有项目，写入就会落到安装目录。
+            # 实测：测试把 DATA_DIR 切到 /tmp 之后，device_workshop.json 仍然写进了
+            # 真实 data/ —— 所有「把 DATA_DIR 切走做隔离」的测试对这条路径全部静默失效。
+            # 现在跟随 config.DATA_DIR，与 PROJECTS_ROOT / CURRENT_PROJECT_FILE 同源。
+            return _config.DATA_DIR
     
     return _get_project_dir(project_id)
 
