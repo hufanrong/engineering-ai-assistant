@@ -1018,8 +1018,39 @@ VOICE_EXT = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".flac", ".wma", ".
 #            —— 所有「切走 DATA_DIR 做隔离」的测试对这条路径全部静默失效。
 #       顺带修：`workshop_assign._dir_for` 与同模块 `_assign_file` 的优先级相反
 #       （一个隔离优先、一个显式 data_dir 优先）—— 同一模块里"该用哪个目录"有两个答案。
-APP_VERSION = "0.1.239"
+APP_VERSION = "0.1.240"
 
+# v0.1.240：删项目时目录被占用（Windows WinError 32）→ 项目必须立刻从列表消失。
+#
+#   真机事故（WORKbuddy 报告 20261111_170414，results[74]）：
+#     「尝试删 2 个，已消失 1 个，仍在列表 1 个，
+#       错误=…PermissionError: [WinError 32] …\vector_db\<uuid>\data_level0.bin」
+#   用户视角是「点删除没反应、再点还报错」—— 既进不去也出不去。比「删一半」更糟：
+#   残骸卡在列表里，用户没有任何办法把它清掉。
+#
+#   根因已由真机对照实验定性（v0.1.234 D19 只按弱引用表关库，抓不到已被 GC 回收
+#   的实例；chromadb 的 SharedSystemClient 按 path 维护**全局** client 缓存，
+#   Python 实例回收 ≠ 底层 sqlite/hnswlib 句柄关闭）：
+#     · 本轮补 `vector_store._clear_chroma_system_cache()`（清全局 cache）+
+#       `last_close_report()`（把「到底关掉几个」写进返回体与审计）；
+#     · 但**沙箱里没有 chromadb**（ModuleNotFoundError），这条句柄释放路径
+#       本地无法复现，只能在真机验证 —— 交付说明里必须明确写这一点。
+#
+#   处置原则：**意图优先于文件锁**。删不干净时
+#     · 把 project_meta.json 挪到 `_detached/<id>/`（同盘改名，不需要被占用的
+#       那个句柄）→ list_projects()/get_project() 立刻读不到 → 项目从界面消失；
+#     · 目录整体留在原地（不删任何资料）+ 登记进 `pending_project_sweep.json`；
+#     · 下次启动 `sweep_pending_deletes()` 补删干净（那时句柄必然已释放）。
+#   元数据挪不动时**退回原样报错**（那时确实什么也没做成，不能谎报成功）。
+#
+#   顺带修掉一个隔离失效（S14 抓出来的）：`project_backup.BACKUP_DIR` 原来用
+#   `__file__` 推导安装目录，是 v0.1.195 那批「业务数据不跟随 config.DATA_DIR」
+#   的漏网之鱼；后果是任何切 DATA_DIR 的测试都会往**真实** data/backups 写包
+#   （实测本轮测试写了 3 个）。现改为 `backup_dir()` 现算 + 模块级 __getattr__。
+#
+#   回归：tools/test_delete_sweep.py（15 断言，含 S14 内容全等判污染）；
+#         反向验证 tools/verify_reverse_240.py（A 打红 8 条 / B 只打红 S14）。
+#
 # v0.1.239：`device_workshop.rebuild_from_excel` 的两处 `_extract(d)` 没接力 `data_dir`
 #     （与 v0.1.238 的 build_relations 那处是同一个「参数有但没接力」）。
 #     缺陷方向与闸门那批**相反**，所以既有测试全绿也抓不到：

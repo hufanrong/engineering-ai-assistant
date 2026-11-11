@@ -21,6 +21,10 @@ from . import config
 # 用 weakref 是为了不因为注册表本身把实例续命（否则永远关不掉）。
 _STORE_REGISTRY = []
 
+# v0.1.240：最近一次「关库」的实际结果，给 delete_project 写进返回体与审计 ——
+# 否则真机上只能说「我调了 close_stores_under」而说不出它到底关了没有。
+_LAST_CLOSE_REPORT = {"closed": 0, "cache_cleared": False}
+
 
 def _register(store):
     import weakref
@@ -61,9 +65,48 @@ def close_stores_under(prefix: str) -> int:
             continue
     # 清掉已死的引用，避免注册表无界增长
     _STORE_REGISTRY[:] = alive
+    # v0.1.240：**弱引用表清空 ≠ 句柄释放**。
+    #
+    # 真机 2026-11-11 17:04 的报告里，v0.1.234 加了 close_stores_under 之后
+    # 删项目仍然报：
+    #   PermissionError [WinError 32] …\0a0bd124\vector_db\04c8304f-…\data_level0.bin
+    # 且「重启服务后同一个请求原样再发一次」立刻成功 —— 说明进程里仍有东西攥着那个
+    # .bin。漏的就是这一层：chromadb 的 SharedSystemClient 按 path 维护**全局**
+    # client 缓存，Python 层的 VectorStore 实例被 GC 回收（弱引用变 None）并不等于
+    # 底层 sqlite / hnswlib 句柄关了；注册表只看得见还活着的实例，早就回收掉的那个
+    # 恰好在缓存里继续持有文件。
+    # 所以关完实例还要清 chromadb 自己的系统缓存，两条路径都试（0.5.x / 1.x 搬家过）。
+    # 拿不到 chromadb（离线/精简环境）不影响删除主流程 —— 这里只做尽力而为，
+    # 结果通过 last_close_report() 暴露给调用方与真机报告，可判「这条到底生效没有」。
+    cache_cleared = _clear_chroma_system_cache()
     if closed:
         gc.collect()
+    _LAST_CLOSE_REPORT["closed"] = closed
+    _LAST_CLOSE_REPORT["cache_cleared"] = cache_cleared
     return closed
+
+
+def _clear_chroma_system_cache() -> bool:
+    """清 chromadb 的全局 client 缓存，返回是否清成功。永不抛异常。"""
+    for mod, attr in (
+        ("chromadb.api.client", "SharedSystemClient"),              # chromadb 1.x
+        ("chromadb.api.shared_system_client", "SharedSystemClient"),  # chromadb 0.5.x
+    ):
+        try:
+            import importlib
+            m = importlib.import_module(mod)
+            fn = getattr(getattr(m, attr), "clear_system_cache", None)
+            if callable(fn):
+                fn()
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def last_close_report() -> dict:
+    """最近一次 close_stores_under 的实际结果（给 delete_project 写进返回体与审计）。"""
+    return dict(_LAST_CLOSE_REPORT)
 
 
 class VectorStore:

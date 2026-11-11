@@ -263,6 +263,126 @@ def _project_has_data(p: Dict) -> bool:
         return False
 
 
+def _sweep_file_path() -> str:
+    """待续删登记表路径（与 projects 同级，不在 projects 里 —— 否则会被当成项目）。"""
+    return os.path.join(os.path.dirname(PROJECTS_ROOT), "pending_project_sweep.json")
+
+
+def _detach_project_meta(project_id: str) -> bool:
+    """把项目从「列表里看得见」这件事上摘掉，但**不删任何资料**。
+
+    v0.1.240：删项目时目录被占用（Windows WinError 32）删不干净，原实现只报错、
+    项目继续留在列表里 —— 用户点删除没反应、再点还报错。这里把 project_meta.json
+    从项目目录挪到 `_detached/`（同盘改名，不需要拿到被占用的句柄），
+    `list_projects()` / `get_project()` 读不到它，项目立刻从界面消失。
+
+    挪走而不是删除：目录里还有用户的资料，万一用户想把项目找回来，
+    `_detached/<id>/project_meta.json` 还在，可以手工放回。
+    """
+    meta = _get_project_meta_path(project_id)
+    if not os.path.isfile(meta):
+        # 没有 meta 就不在列表里，本来就已经"摘掉了"
+        return True
+    dest_dir = os.path.join(os.path.dirname(PROJECTS_ROOT), "_detached", project_id)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, "project_meta.json")
+    try:
+        if os.path.exists(dest):
+            os.remove(dest)
+        os.replace(meta, dest)
+        return True
+    except Exception:  # noqa: BLE001
+        # os.replace 在 Windows 上对同盘改名是原子的、不需要 restype；
+        # 极端情况（跨盘/权限）退回复制 + 删除源文件。
+        try:
+            shutil.copy2(meta, dest)
+            os.remove(meta)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+
+def _queue_sweep(project_id: str, project_dir: str, reason: str) -> bool:
+    """登记一条「下次启动把目录删干净」的记录。失败不影响删除主流程。"""
+    try:
+        path = _sweep_file_path()
+        try:
+            items = json.load(open(path, "r", encoding="utf-8"))
+            if not isinstance(items, list):
+                items = []
+        except Exception:  # noqa: BLE001
+            items = []
+        items = [x for x in items if not (isinstance(x, dict) and x.get("id") == project_id)]
+        items.append({"id": project_id, "dir": project_dir,
+                      "reason": str(reason)[:300],
+                      "ts": datetime.datetime.now().isoformat()})
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def sweep_pending_deletes() -> Dict:
+    """v0.1.240：启动时把「登记过要删、但当时被占用没删掉」的项目目录清干净。
+
+    真机场景：用户点删除 → 目录被 chroma/杀软占用 → 已从列表摘掉、但目录还在。
+    下次启动时那些句柄一定已经没了，这里补删一次；删成功就从登记表里移除。
+    幂等：重复执行、目录本来就不存在，都算成功。
+    """
+    path = _sweep_file_path()
+    if not os.path.isfile(path):
+        return {"ok": True, "checked": 0, "removed": 0, "left": 0, "items": []}
+    try:
+        items = json.load(open(path, "r", encoding="utf-8"))
+        if not isinstance(items, list):
+            items = []
+    except Exception:  # noqa: BLE001
+        items = []
+    removed, left, report = 0, 0, []
+    keep = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        pid = str(it.get("id") or "")
+        pdir = str(it.get("dir") or "")
+        if not pdir:
+            continue
+        # 先试关库，再删（和删除主路径同一套动作）
+        try:
+            from . import vector_store as _vs
+            _vs.close_stores_under(pdir)
+        except Exception:  # noqa: BLE001
+            pass
+        ok, err = _safe_rmtree(pdir, retries=2, delay=0.3)
+        if ok:
+            removed += 1
+            report.append({"id": pid, "ok": True})
+        else:
+            left += 1
+            keep.append({**it, "last_error": str(err)[:200]})
+            report.append({"id": pid, "ok": False, "error": str(err)[:120]})
+    try:
+        if keep:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(keep, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        else:
+            os.remove(path)
+    except Exception:  # noqa: BLE001
+        pass
+    if removed or left:
+        _op_log.log_op(
+            "delete_sweep",
+            f"启动续删：检查 {len(items)} 个待清理项目，清理成功 {removed} 个，仍占用 {left} 个")
+    return {"ok": True, "checked": len(items), "removed": removed,
+            "left": left, "items": report}
+
+
 def _pick_successor_project(exclude_id: str) -> Optional[Dict]:
     """v0.1.215：为「即将被删掉的当前项目」挑一个接任者。
 
@@ -507,11 +627,52 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
         #      异常冒到 FastAPI 变 500，而目录已经删了一半，项目变成残骸；
         #   ② 更糟的是 BaseException 类（SystemExit / KeyboardInterrupt）
         #      不会被 except Exception 拦住，会**把 uvicorn 主进程直接结束**。
-        #      实测 2026-11-10 09:22：删一个 59 文件的测试项目，
-        #      sitecustomize 的批量删除护栏抛 SystemExit(1)，
-        #      整个工作台进程当场退出，后面整轮自测全部级联失败 ——
-        #      界面上看起来是「一堆功能同时坏了」，真实原因只是删了一次项目。
-        # 现场意义：客户点「删除项目」，工作台不能跟着消失。
+        #      实测 2026-10-10 09:22 那次是这个原因（记录见 _safe_rmtree 注释）。
+        #
+        # v0.1.240（真机 2026-11-11 17:04 反馈第 74 项）：真机上这一支走完之后
+        # **项目还留在列表里**（报告原文「尝试删 2 个，已消失 1 个，仍在列表 1 个，
+        # 错误=…PermissionError: [WinError 32] … data_level0.bin」）。用户视角是
+        # 「删了没反应、又删不掉」——列表里点它还在，点删除还报错。这是比「删一半」
+        # 更糟的状态：残骸既进不去（没资料）也出不去（删不掉）。
+        #
+        # 所以删不干净时改成**先把项目从列表里摘掉**（移走 project_meta.json，
+        # 这是 list_projects / get_project 的唯一入口），目录本身登记成待续删：
+        #   · 用户点删除 = 意图明确，不该因为文件被占用就一直挂在那儿；
+        #   · 目录里的资料不会丢（备份在删前已做 + 目录整体还在原地）；
+        #   · 下一次启动（占用它的句柄这时肯定没了）自动续删干净。
+        # 元数据移走失败才退回原样报错——那时确实什么也没做。
+        _detached = False
+        try:
+            _detached = _detach_project_meta(project_id)
+        except Exception:  # noqa: BLE001
+            _detached = False
+        if _detached:
+            _queue_sweep(project_id, project_dir, _rm_err)
+        if _detached:
+            if _is_current:
+                _settle = _settle_current_after_delete(_successor)
+            else:
+                _settle = {}
+            result = {
+                "ok": True,
+                "message": f"项目「{project['name']}」已从列表移除；"
+                           f"资料目录仍被占用（{_rm_err}），已登记为待清理，"
+                           f"下次启动自动删除干净（删除前备份"
+                           f"{'已生成' if (backup_result or {}).get('ok') else '未启用'}）",
+                "deleted_id": project_id,
+                "data_deleted": False,
+                "pending_sweep": True,
+                "closed_vector_stores": _closed_stores,
+            }
+            if _is_current:
+                result["switched_to"] = _settle.get("switched_to")
+                if _settle.get("switch_message"):
+                    result["message"] += f"（{_settle['switch_message']}）"
+            result["log_written"] = _op_log.log_op(
+                "delete",
+                f"删除项目：{project['name']}（id={project_id}，"
+                f"已从列表移除，资料目录待清理：{_rm_err[:120]}）")
+            return result
         result = {
             "ok": False,
             "error": f"项目资料删除失败：{_rm_err}。项目未完全删除，"

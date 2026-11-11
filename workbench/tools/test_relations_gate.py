@@ -38,13 +38,28 @@ _REAL_DATA_DIR = config.DATA_DIR
 
 
 # ---------------- 真实数据快照（必须在切 DATA_DIR 之前，用真实路径） ----------------
-def _snap_dir(root):
+def _snap_dir(root, skip_runtime_logs=True):
+    """目录快照 {路径: 大小}。
+
+    v0.1.240：**必须排除正在运行的服务进程持续追加的日志**，否则 R7c 恒假红。
+    实测 2026-11-12 07:4x：服务（pid 4085）每处理一个请求就往
+    data/telemetry/requests.jsonl 追加一行，前后两次 snapshot 大小必不同 →
+    R7c 报「前 246 / 后 246」（数量一致、内容不同）被判成「绕过隔离写了真实数据」。
+    那不是产品缺陷，是断言口径错了：R7c 要证明的是**本测试**没写真实数据，
+    而服务自身的运行期日志与测试无关，测试也无法阻止它写。
+
+    只排除这两个明确的追加型日志；其余文件一律照比（排除范围过宽等于废掉断言）。
+    """
     snap = {}
     if not os.path.isdir(root):
         return snap
     for dp, _dn, fn in os.walk(root):
         for f in fn:
             p = os.path.join(dp, f)
+            if skip_runtime_logs:
+                rel = os.path.relpath(p, root).replace("\\", "/")
+                if rel in ("telemetry/requests.jsonl", "workbench.log"):
+                    continue
             try:
                 snap[p] = os.path.getsize(p)
             except OSError:

@@ -5340,6 +5340,18 @@ def run():
             print(f"  [修复] {_heal.get('message')}")
     except Exception as _e:  # noqa: BLE001
         print(f"  [修复] 当前项目自愈跳过：{_e}")
+    # v0.1.240：续删「上次点删除、但目录被占用没删掉」的项目目录。
+    # 真机实测（2026-11-11 17:04 第 74 项）：删项目报 WinError 32 之后项目仍留在
+    # 列表里，用户既进不去也删不掉。现在删除时先把元数据摘掉（项目立刻从列表消失）
+    # 并登记一条待清理，启动时（占用句柄肯定已经没了）补删干净。
+    try:
+        from . import project_manager as _pm1
+        _sweep = _pm1.sweep_pending_deletes()
+        if _sweep.get("checked"):
+            print(f"  [清理] 待续删项目 {_sweep.get('checked')} 个："
+                  f"已清干净 {_sweep.get('removed')} 个，仍占用 {_sweep.get('left')} 个")
+    except Exception as _e:  # noqa: BLE001
+        print(f"  [清理] 待续删项目跳过：{_e}")
     # v0.1.188：原来这里连着调了两次 _start_guardian()，起了两个守护线程。
     # 卡死超时后两个线程会在同一分钟内各自判一次「卡死」并同时调
     # retry_failed_files(shas=None)，同一批失败文件被重试两遍、retry_count 加倍

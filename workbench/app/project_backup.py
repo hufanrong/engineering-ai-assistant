@@ -40,10 +40,43 @@ from typing import Optional, Dict, List
 
 
 # 备份目录
-BACKUP_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "backups"
-)
+#
+# v0.1.240：**改回跟随 config.DATA_DIR**（不再是 `__file__` 推导的安装目录）。
+#
+# 这是 v0.1.195 修过的同一类缺陷的漏网之鱼：当时把 project_manager 的
+# PROJECTS_ROOT / CURRENT_PROJECT_FILE 改成跟随 config.DATA_DIR，理由是
+# 「用户把数据目录设到 D:\ 时，业务数据照样往安装目录里写」+「测试切走
+# DATA_DIR 做隔离对这条路径静默失效」。BACKUP_DIR 漏改了，后果一模一样：
+#
+#   ① 用户把数据目录指到 D:\ → 备份仍然落在安装目录 data\backups（可分发部署
+#      时安装目录可能不可写，删除前备份会直接失败）；
+#   ② 任何「切 DATA_DIR 做隔离」的测试，只要走到 delete_project(backup=True)
+#      或 export_project()，就会往**真实** data\backups 里写 .fgbak。实测
+#      2026-11-12 07:25：tools/test_delete_sweep.py 在临时 DATA_DIR 里删了
+#      3 个自造项目，真实 data/backups 凭空多出 3 个 .fgbak —— 而测试自己的
+#      「真实数据未污染」断言正是抓它的那条（S14）。
+#
+# tools/test_project_backup_complete.py 第 57 行原来是手工写
+# `pb.BACKUP_DIR = os.path.join(_TMP_DATA, "backups")` 来绕，等于每个测试都得
+# 自己记得补一句；漏补的那次就是上面这 3 个包。现在改成：
+#   · backup_dir() 每次现算（config.DATA_DIR 可能在运行时被切）；
+#   · 模块级 BACKUP_DIR 由 __getattr__ 现算给出，读到的永远是最新值；
+#   · 若调用方**显式赋值** pb.BACKUP_DIR（旧测试的做法），仍然尊重它。
+def backup_dir() -> str:
+    """备份目录 —— 每次现算，不缓存（config.DATA_DIR 可能在运行时被切）。"""
+    override = globals().get("BACKUP_DIR")
+    if override:
+        return override
+    from . import config as _config
+    return os.path.join(_config.DATA_DIR, "backups")
+
+
+def __getattr__(name):
+    # 只有模块里**没有**这个属性时才会走到这里；一旦有人显式赋值
+    # pb.BACKUP_DIR，就变成普通模块属性、不再进这里。
+    if name == "BACKUP_DIR":
+        return backup_dir()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # 需要备份的文件和目录
 # v0.1.218：**不再作为打包白名单使用**，仅为兼容历史调用方保留。
@@ -94,7 +127,7 @@ def iter_project_items(project_dir: str):
 
 
 def _ensure_backup_dir():
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    os.makedirs(backup_dir(), exist_ok=True)
 
 
 def export_project(project_id: str, output_path: str = None) -> Dict:
@@ -123,7 +156,7 @@ def export_project(project_id: str, output_path: str = None) -> Dict:
         _ensure_backup_dir()
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = "".join(c for c in project["name"] if c.isalnum() or c in "_-")
-        output_path = os.path.join(BACKUP_DIR, f"{safe_name}_{timestamp}.fgbak")
+        output_path = os.path.join(backup_dir(), f"{safe_name}_{timestamp}.fgbak")
     
     # 确保输出目录存在
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -335,10 +368,10 @@ def list_backups() -> Dict:
     """列出所有备份文件。"""
     _ensure_backup_dir()
     backups = []
-    if os.path.isdir(BACKUP_DIR):
-        for f in os.listdir(BACKUP_DIR):
+    if os.path.isdir(backup_dir()):
+        for f in os.listdir(backup_dir()):
             if f.endswith(".fgbak"):
-                fp = os.path.join(BACKUP_DIR, f)
+                fp = os.path.join(backup_dir(), f)
                 backups.append({
                     "file_name": f,
                     "file_path": fp,
@@ -350,13 +383,13 @@ def list_backups() -> Dict:
         "ok": True,
         "total": len(backups),
         "backups": backups,
-        "backup_dir": BACKUP_DIR,
+        "backup_dir": backup_dir(),
     }
 
 
 def delete_backup(backup_file: str) -> Dict:
     """删除备份文件。"""
-    backup_path = os.path.join(BACKUP_DIR, backup_file)
+    backup_path = os.path.join(backup_dir(), backup_file)
     if not os.path.isfile(backup_path):
         # 尝试直接用传入的路径
         if os.path.isfile(backup_file):
@@ -390,7 +423,7 @@ def backup_before_delete(project_id: str) -> Dict:
     _ensure_backup_dir()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c for c in project["name"] if c.isalnum() or c in "_-")
-    backup_path = os.path.join(BACKUP_DIR, f"deleted_{safe_name}_{timestamp}.fgbak")
+    backup_path = os.path.join(backup_dir(), f"deleted_{safe_name}_{timestamp}.fgbak")
     
     result = export_project(project_id, backup_path)
     if result["ok"]:
