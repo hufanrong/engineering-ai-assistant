@@ -1,0 +1,114 @@
+{
+  "verify_id": "20261111_073000_d18_verify_v233",
+  "target_defect": "D18",
+  "claim": "点『重启服务』后工作台整台消失",
+  "app_version": "0.1.233",
+  "commit": "5e0a3f6",
+  "fix_commit": "b045341",
+  "previous_report": "reports/20261111_072500_d18_verify",
+  "verdict": "passed_all_four",
+  "service_process_origin": "计划任务 FangongAI-StartWorkbench（会话外），非本轮 shell 的 Job 对象",
+  "items": {
+    "D18-1_normal_restart": {
+      "verdict": "pass",
+      "old_pid": 21612,
+      "new_pid": 15668,
+      "elapsed_seconds": 10.7,
+      "limit_seconds": 30,
+      "api_status_ok": true,
+      "pid_changed": true,
+      "canary_port": 40801,
+      "canary_alive_seconds": 5.3,
+      "spawn_first_attempt_ok": true,
+      "spawn_first_attempt_seconds": 4.5
+    },
+    "D18-2_canary_fail_old_survives": {
+      "verdict": "pass",
+      "injected_fault": "app/main.py -> app/main.py.bak",
+      "baseline_pid": 15668,
+      "samples_total": 45,
+      "samples_available": 45,
+      "samples_unreachable": 0,
+      "old_pid_alive_after_restart": true,
+      "workbench_usable_after_restart": true,
+      "pid_unchanged_throughout": true,
+      "canary_port": 5282,
+      "canary_probe_seconds": 46.7,
+      "canary_verdict": false,
+      "kill_skipped": true,
+      "fault_restored": true,
+      "main_py_size_bytes": 256814,
+      "bak_residue": false,
+      "first_time_ever_verified": true
+    },
+    "D18-3_restart_log": {
+      "verdict": "pass",
+      "restart_log_lines_for_run": 4,
+      "has_helper_start": true,
+      "has_target_pid_and_port": true,
+      "has_probe_result": true,
+      "has_failure_reason": true,
+      "failure_reason_text": "探活失败：新代码起不来。旧服务保持原样，本次不重启",
+      "canary_log_has_root_cause": true,
+      "canary_root_cause": "启动自检失败：程序代码可能不完整（自动更新后常见）。错误： ModuleNotFoundError: No module named 'app.main'",
+      "restart_result_json": {
+        "ok": false,
+        "phase": "canary",
+        "guarantee": "canary_verified_before_kill",
+        "elapsed": 46.8,
+        "old_alive": [15668],
+        "canary_port": 5282,
+        "tag": "20261111_072637_15668"
+      }
+    },
+    "D18-4_status_endpoint": {
+      "verdict": "pass",
+      "method": "GET",
+      "path": "/api/update/restart/status",
+      "http_status": 200,
+      "known": true,
+      "service_alive_now": true,
+      "result_age_seconds": 10.2,
+      "v232_baseline_http_status": 404,
+      "v232_service_down_http_status": "000"
+    }
+  },
+  "root_cause_v232": "helper 由服务 subprocess.Popen(CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS) 创建，只脱离控制台不脱离进程树；helper 用 taskkill /PID <服务> /T /F，/T 连带杀掉自己，死在 kill_tree()，后续端口释放/拉起/写结果全部未执行",
+  "fix_v233": [
+    "探活前置：临时端口 + 临时数据目录先跑新代码，/api/status 通过才动手",
+    "taskkill 不带 /T，只杀目标 PID",
+    "结果写 updates/restart_result.json，并注册 GET /api/update/restart/status"
+  ],
+  "my_false_negatives": [
+    {
+      "round": 1,
+      "symptom": "误判 v0.1.233 仍宕机",
+      "cause": "服务用 Bash run_in_background 起，与本轮 shell 同落一个 Windows Job 对象，旧进程一死整组被回收",
+      "fix": "改用计划任务在会话外起服务，复验后第1条 10.7s 达标",
+      "note_for_dev": "自动化测试若用后台 shell 起服务，会得到同样的假阴性，建议在测试脚本注释中写明"
+    },
+    {
+      "round": 2,
+      "symptom": "采样只拿到 1~2 个点就判不可达",
+      "cause": "if elapsed in (2,4,6,...) 用浮点比较永不命中，且 elapsed>=13 提前 break",
+      "fix": "改整数计数循环 1..45",
+      "note_for_dev": "与本产品无关，属验收脚本自身缺陷"
+    }
+  ],
+  "open_items": {
+    "D19": "删项目前先关 chroma/向量库（WinError 32 data_level0.bin），批量 ≤40 一批，清理失败要让报告变红 —— 未动，下一轮主活",
+    "D20": "新扫描车间名 9/10 带废字（相对室 等）；真实项目干净是因 39 个人工指定 —— 待老板拍板：白名单自动归类 vs 一律推待确认",
+    "D13_D15": "工艺设备表表头行识别，验收口径 台账≥600台 / 位号非空率≥90% —— 未修，台账 614 台位号未入",
+    "D21": "计划任务 WakeToRun=False，休眠不唤醒不补跑，02:04 那轮 MissedRuns=2 —— 建议改 True",
+    "pending_delete": ["v01201实测项目B", "9 个 v01201实测_*", "v182_195236"]
+  },
+  "final_state": {
+    "service_alive": true,
+    "pid": 15668,
+    "version": "0.1.233",
+    "indexed_files": 62,
+    "vector_count": 1669,
+    "queue_pending": 60,
+    "git_worktree_clean": true
+  }
+}

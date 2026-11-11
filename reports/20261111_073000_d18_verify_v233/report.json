@@ -1,0 +1,72 @@
+{
+  "run_id": "20261111_073000_d18_verify_v233",
+  "started": "2026-11-11 07:21:30",
+  "finished": "2026-11-11 07:30:00",
+  "status": "passed",
+  "kind": "manual_defect_verify",
+  "note": "D18 四条验收口径的实机复验报告（第二份）。检验版本 v0.1.233（b045341 修复后），与上一份 20261111_072500_d18_verify（v0.1.232 全不达标）配对。四条全部达标，含历史首次通过的『第2条：失败时旧服务必须存活』。",
+  "steps": [
+    {
+      "step": "前置：确认版本与代码来源",
+      "rc": 0,
+      "out": "APP_VERSION=0.1.233；HEAD=b045341『v0.1.233 修 D18 点重启工作台整台消失』；updates/restart_service.py 由服务在重启时生成，14626 字节，取代 v0.1.232 的 taskkill /T 旧 helper"
+    },
+    {
+      "step": "前置：在会话外启动服务",
+      "rc": 0,
+      "out": "用计划任务 FangongAI-StartWorkbench 调 start_workbench.cmd（FANGONG_NO_BROWSER=1）拉起，避免服务落在本轮 shell 的 Windows Job 对象里。就绪：PID 21612 / v0.1.233 / 62 文件 / 1669 向量"
+    },
+    {
+      "step": "第1条：点一次重启，30 秒内 /api/status 可用且 PID 已变",
+      "rc": 0,
+      "out": "POST /api/update/restart -> helper tag=20261111_072606_21612。探活端口 40801，5.3s 判定新代码可用；『已结束旧进程 PID=21612（未使用 /T，helper 自身不受影响）』；第 1 次拉起结果 ok=True 耗时 4.5s pid=[15668]。旧=[21612] 新=[15668] 总耗时 10.7s < 30s。判定：达标"
+    },
+    {
+      "step": "第2条（本轮核心）：注入『新进程起不来』后重启，旧进程须存活、工作台须照常可用",
+      "rc": 0,
+      "out": "基线 PID=[15668] v0.1.233；注入故障 app/main.py -> main.py.bak；注入后服务仍可用 True/PID[15668]。点重启后 45 次采样（t=1s..45s）：可用 45 次 / 不可达 0 次，全程 PID=[15668] 未变。helper 探活端口 5282 耗时 46.7s 判 False，写入『探活失败：新代码起不来。旧服务保持原样，本次不重启』，随后不执行 kill。旧进程存活=True，工作台照常可用=True。判定：达标（历史首次）"
+    },
+    {
+      "step": "第2条：故障还原",
+      "rc": 0,
+      "out": "finally 块内 main.py.bak -> main.py 还原成功；app/main.py 256814 字节，无 .bak 残留"
+    },
+    {
+      "step": "第3条：restart.log 有本次 restart 完整记录，失败写清原因",
+      "rc": 0,
+      "out": "restart.log 四段齐全：helper 启动（tag/PID/端口）-> 探活端口与数据目录 -> 『探活结果=False 耗时=46.7s』-> 『探活失败：新代码起不来。旧服务保持原样，本次不重启』。restart_canary.log 同步记到真实原因：『启动自检失败：ModuleNotFoundError: No module named app.main』。restart_result.json 落盘 ok=false phase=canary guarantee=canary_verified_before_kill elapsed=46.8 old_alive=[15668]。判定：达标"
+    },
+    {
+      "step": "第4条：服务状态与 GET /api/update/restart/status",
+      "rc": 0,
+      "out": "服务在跑时 GET /api/update/restart/status -> HTTP 200，返回 known=true、service_alive_now=true、result_age_seconds=10.2、phase=canary、old_alive=[15668]、guarantee、canary_log 路径与错误说明。v0.1.232 时该路由为 404。判定：达标"
+    },
+    {
+      "step": "恢复最终状态",
+      "rc": 0,
+      "out": "服务 v0.1.233 在线 PID 15668，/api/status 正常（62 文件 / 1669 向量 / 待解析 60）；git 工作区干净；四份日志已归档到本报告 logs/"
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0,
+    "by_phase": {
+      "D18-1": {"passed": 1, "failed": 0, "skipped": 0},
+      "D18-2": {"passed": 1, "failed": 0, "skipped": 0},
+      "D18-3": {"passed": 1, "failed": 0, "skipped": 0},
+      "D18-4": {"passed": 1, "failed": 0, "skipped": 0}
+    }
+  },
+  "error": null,
+  "commit_before": "5e0a3f6",
+  "commit_after": "5e0a3f6",
+  "detail_doc": "defects_d18_verify_v233.md",
+  "evidence": "evidence_d18_verify_v233.json",
+  "attachments": [
+    "logs/restart.log",
+    "logs/restart_canary.log",
+    "logs/restart_helper.log",
+    "logs/restart_result.json"
+  ]
+}

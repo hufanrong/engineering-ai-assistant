@@ -1,0 +1,47 @@
+
+=== 2026-10-25 09:48:12 重启服务 ===
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+Traceback (most recent call last):
+  File "D:\fangong-workbench\workbench\start.py", line 33, in <module>
+    from app.main import run
+  File "D:\fangong-workbench\workbench\app\main.py", line 915, in <module>
+    from . import supervision_integration as si
+ImportError: cannot import name 'supervision_integration' from 'app' (D:\fangong-workbench\workbench\app\__init__.py)
+
+=== 2026-11-10 14:38:34 重启服务 ===
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8756): [winerror 10048] 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+========================================================
+  繁工AI 本地解析工作台 (MVP)
+  访问地址: http://127.0.0.1:8756
+  数据目录: D:\fangong-workbench\workbench\data
+  解析节点: 我的电脑
+========================================================
+
+=== manual restart 2026-11-10 14:39:21 ===
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+[2026-11-11 07:22:48] [helper 20261111_072247_9192] helper 启动 argv=D:\fangong-workbench\workbench\updates\restart_service.py cwd=D:\fangong-workbench\workbench pid=21760
+[2026-11-11 07:22:48] [helper 20261111_072247_9192] 目标旧进程=[9192] 端口=8756 tag=20261111_072247_9192
+[2026-11-11 07:22:48] [helper 20261111_072247_9192] 探活：端口=14702 数据目录=D:\fangong-workbench\workbench\updates\_probe_data_20261111_072247_9192
+[2026-11-11 07:22:56] [helper 20261111_072247_9192] 探活结果=True 耗时=7.8s version=0.1.233
+[2026-11-11 07:26:06] [helper 20261111_072606_21612] helper 启动 argv=D:\fangong-workbench\workbench\updates\restart_service.py cwd=D:\fangong-workbench\workbench pid=8548
+[2026-11-11 07:26:06] [helper 20261111_072606_21612] 目标旧进程=[21612] 端口=8756 tag=20261111_072606_21612
+[2026-11-11 07:26:06] [helper 20261111_072606_21612] 探活：端口=40801 数据目录=D:\fangong-workbench\workbench\updates\_probe_data_20261111_072606_21612
+[2026-11-11 07:26:11] [helper 20261111_072606_21612] 探活结果=True 耗时=5.3s version=0.1.233
+[2026-11-11 07:26:12] [helper 20261111_072606_21612] 已结束旧进程 PID=21612（未使用 /T，helper 自身不受影响）
+[2026-11-11 07:26:12] [helper 20261111_072606_21612] 端口 8756 释放=True 仍占用=[]
+[2026-11-11 07:26:12] [helper 20261111_072606_21612] 第 1 次拉起正式实例（端口 8756）
+
+--- spawn D:\fangong-workbench\workbench\venv\Scripts\python.exe D:\fangong-workbench\workbench\start.py (2026-11-11 07:26:12) ---
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+[2026-11-11 07:26:17] [helper 20261111_072606_21612] 第 1 次结果 ok=True 耗时=4.5s pid=[15668] version=0.1.233
+[2026-11-11 07:26:17] [helper 20261111_072606_21612] 重启成功：旧=[21612] 新=[15668] 版本=0.1.233 总耗时=10.7s
+[2026-11-11 07:26:37] [helper 20261111_072637_15668] helper 启动 argv=D:\fangong-workbench\workbench\updates\restart_service.py cwd=D:\fangong-workbench\workbench pid=21476
+[2026-11-11 07:26:37] [helper 20261111_072637_15668] 目标旧进程=[15668] 端口=8756 tag=20261111_072637_15668
+[2026-11-11 07:26:37] [helper 20261111_072637_15668] 探活：端口=5282 数据目录=D:\fangong-workbench\workbench\updates\_probe_data_20261111_072637_15668
+[2026-11-11 07:27:24] [helper 20261111_072637_15668] 探活结果=False 耗时=46.7s version=None
+[2026-11-11 07:27:24] [helper 20261111_072637_15668] 探活失败：新代码起不来。**旧服务保持原样，本次不重启**

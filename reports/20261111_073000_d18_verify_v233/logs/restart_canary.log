@@ -1,0 +1,17 @@
+
+--- spawn D:\fangong-workbench\workbench\venv\Scripts\python.exe D:\fangong-workbench\workbench\start.py (2026-11-11 07:22:48) ---
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+
+--- spawn D:\fangong-workbench\workbench\venv\Scripts\python.exe D:\fangong-workbench\workbench\start.py (2026-11-11 07:26:06) ---
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+
+--- spawn D:\fangong-workbench\workbench\venv\Scripts\python.exe D:\fangong-workbench\workbench\start.py (2026-11-11 07:26:37) ---
+============================================================
+启动自检失败：程序代码可能不完整（自动更新后常见）。
+错误： ModuleNotFoundError: No module named 'app.main'
+处理建议：
+  1) 若刚执行过自动更新，请重启一次（回滚到上一版本目录）；
+  2) 或从 GitHub 重新下载安装包覆盖安装（data 目录不受影响）。
+============================================================

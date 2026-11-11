@@ -1,0 +1,19 @@
+{
+ "ok": false,
+ "phase": "canary",
+ "error": "新代码在探活端口 5282 上 45s 内没能应答 /api/status，旧服务未被动过（工作台仍可用）。请查看 updates/restart_canary.log",
+ "canary_port": 5282,
+ "canary_log": "D:\\fangong-workbench\\workbench\\updates\\restart_canary.log",
+ "canary_last": {
+  "_err": "<urlopen error timed out>"
+ },
+ "old_alive": [
+  15668
+ ],
+ "guarantee": "canary_verified_before_kill",
+ "elapsed": 46.8,
+ "tag": "20261111_072637_15668",
+ "ts": 1794374844.302096,
+ "at": "2026-11-11T07:27:24.302101",
+ "port": 8756
+}
