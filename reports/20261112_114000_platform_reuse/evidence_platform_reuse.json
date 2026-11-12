@@ -1,0 +1,105 @@
+{
+  "advice_id": "20261112_114000_platform_reuse",
+  "owner_directive": {
+    "verbatim": "你给他回传测试数据，但是你要明白你给他数据只是为了让他建立一个，可以供多个施工项目使用的ai平台，不是只用于某一个项目，对于一些问题你可以给提供一些思路和方法",
+    "decoded_judgement": "换一个工程，不改一行进程代码，只加/换一份配置，就能吃下新台账、归好类",
+    "also_asked": "对问题提供思路和方法，不只是报缺陷"
+  },
+  "as_is": {
+    "already_platform": {
+      "file": "app/platform_store.py",
+      "evidence": "注释写明『国标/规范/通用文件独立建库，与子项目解析库分开（多项目共享）』『导出 .fpglib 平台库包 → 导入即可复用全部规范库』",
+      "gap": "平台层只装规范文件，未装解析规则/profile"
+    },
+    "polluted_by_project": {
+      "file": "app/equipment_merge.py:73-91",
+      "hardcoded_aliases": {
+        "tag": ["位号", "设备位号", "设备编号", "编号", "tag", "TAG"],
+        "name": ["设备名称", "名称", "品名"]
+      },
+      "fatal_1": "列名是 6 个硬编码字面量，换设计院表头写法即失效",
+      "fatal_2": "row 来自 parse_excel 的 {表头:值} dict，一切依赖表头行识别正确；表头错则整表皆空",
+      "links_to": "D29 的 200 条台账空行根因在此层"
+    },
+    "industry_pack_exists": "app/ 下有 mining_* 系列作为行业包，但无独立表格适配层，解析逻辑散在 equipment_merge / scanner / relations"
+  },
+  "layer_model": {
+    "L1_framework": {"content": "表头探测/列映射引擎/主参行判定/多sheet展开/候选队列与审批流/索引关系模型", "changes_on_new_project": false, "location": "app/ 代码"},
+    "L2_industry": {"content": "行业术语词表/设备分类/常用表种模板", "changes_on_new_project": "仅换行业时", "location": "app/profiles/industries/*.yaml"},
+    "L3_project_config": {"content": "台账适配器 profile/组织单元命名习惯/编号规则/验收门槛", "changes_on_new_project": true, "location": "DATA_DIR/projects/<id>/profile/"},
+    "L4_project_data": {"content": "文件/图纸/设备/现场记录", "changes_on_new_project": true, "location": "DATA_DIR/projects/<id>/"}
+  },
+  "methods": {
+    "M1_header_detection": {
+      "algorithm": "前 20 行滑动；每行按字段词表加权打分（编号类3 / 名称类3 / 数量类2 / 参数类1）；取 argmax；max<阈值则标记 ledger_unparsed 并推人工配 profile",
+      "hard_rule": "低于阈值绝不静默判空",
+      "solves": "表头行不在第 1 行（火法表全部在第 6 行）"
+    },
+    "M2_column_profile": {
+      "example_yaml": {
+        "match": {"filename_regex": "工艺设备表|设备表", "sheet_names": [".*"]},
+        "header": {"search_rows": [1, 20], "min_score": 6},
+        "columns": {
+          "tag": ["设备编号", "位号", "设备位号", "编号", "代号"],
+          "name": ["规格型号", "设备名称", "名称", "品名"],
+          "model": ["型号", "规格型号"],
+          "qty": ["数量", "台数"], "unit": ["单位"],
+          "power": ["功率", "功率(kW)"], "weight": ["单重", "单重(kg)"]
+        },
+        "org_unit": {"from": "sheet_sub_item", "fallback": "filename", "level_names": ["装置", "车间", "工段", "系统"]},
+        "data_rows": {"primary_key": "tag_nonempty"}
+      },
+      "note": "columns.name 把「规格型号」排第一：火法表该列实装设备名称，真型号在下方参数行。需记录实际命中列以便人工核对",
+      "solves": "换工程列名不同即失效"
+    },
+    "M3_primary_vs_param_rows": {
+      "rule": "编号列非空 = 新设备主行；编号列空 = 上一台设备的参数行",
+      "evidence_0205": "R7 CF0205ME01 板链斗式提升机 台1 16000 / R8 型号 NE150 / R9 能力 90 t/h / R10 提升高度 20.4 m / R14 CF0205ME01-DR1 电机",
+      "coverage": "国内设计院工艺设备表普遍成立，可作 L1 默认，profile 可覆盖（跨行合并单元格需先还原）",
+      "solves": "参数行被误算成空行（当前 200 条中大部分属此类或表头未识别）"
+    },
+    "M4_multi_sheet": {
+      "rules": ["每 sheet 独立探测表头行", "sheet 内「子项名称」字段为组织单元首选来源", "sheet 名（0205/0201-脱硫脱氟）可作组织单元编号", "保留 (sheet,row) 溯源坐标"],
+      "solves": "10 个 sheet 被当一张表"
+    },
+    "M5_normalize_before_map": {
+      "order": "读原始矩阵 → 还原合并单元格 → 去全空行/列 → 探测表头 → 按表头文字定位列 → 取值",
+      "forbidden": "按列号取数（0101 的 A 列是编号，0205 的 A 列空而 B 列才是编号）",
+      "perf_note": "火法表 max_column 达 252，多为空列/格式残留，规整后可显著提速"
+    }
+  },
+  "reuse_acceptance": {
+    "why": "只用马诺诺验，很可能把火法表特征写进代码，下一个工程照样死",
+    "synthetic_project": {
+      "header_row": 3,
+      "column_names": ["位号", "设备名称", "规模型号"],
+      "org_unit_naming": ["标段", "区域"],
+      "sheet_count": 2,
+      "special": "一个规整、一个含合并单元格",
+      "id_rule": "任意，如 ABC-01",
+      "size": "20~30 行假数据即可"
+    },
+    "pass_criteria": "不改一行代码、只加一份 profile，马诺诺与合成工程两条数据都能吃下，设备数与组织单元数与预期完全一致"
+  },
+  "refactor_checklist": [
+    {"order": 1, "action": "抽出 app/ledger_adapter.py：表头探测 + profile 列映射 + 主参行判定 + 多 sheet 展开", "solves": "D29 / D30 主体"},
+    {"order": 2, "action": "替换 equipment_merge.py:73-91 的 6 个硬编码字面量为 profile 读取", "solves": "换工程即失效"},
+    {"order": 3, "action": "ledger_skipped_rows.reason 区分「真空行 / 未识别表头 / 无编号参数行」", "solves": "静默失败"},
+    {"order": 4, "action": "profile 目录纳入项目备份与导出（同 .fpglib 思路）", "solves": "迁移复用"},
+    {"order": 5, "action": "合成工程回归套件", "solves": "平台性证明"}
+  ],
+  "layer_tagging_of_previous_reports": {
+    "D20 车间归类口径": "L1 产品规则（进框架）",
+    "火法表 8 个车间名 / >=600 台 / 熟料粉磨>=60 台": "L3 项目配置（只作马诺诺 profile 验收值，不进代码）",
+    "D27 未确认名字混入正式清单": "L1 缺陷（改代码）",
+    "D29 台账 3709 行判空": "L1 缺陷（D30 的表象）",
+    "台账表头在第 6 行 / 列名叫规格型号": "L3 项目特征（由 profile 描述）"
+  },
+  "new_defect": {
+    "id": "D30",
+    "severity": "P0",
+    "title": "解析规则以硬编码列名与『首行即表头』假设固化在代码里，每接新工程都要改代码",
+    "relationship": "D29 是其表象；修 D29 而不修 D30，只对马诺诺有效",
+    "acceptance": "必须包含合成工程的复用性回归"
+  }
+}

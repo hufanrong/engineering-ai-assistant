@@ -1,0 +1,45 @@
+{
+  "run_id": "20261112_114000_platform_reuse",
+  "started": "2026-11-12 11:32:00",
+  "finished": "2026-11-12 11:55:00",
+  "status": "failed",
+  "kind": "platform_advice",
+  "note": "老板纠正方向：回传数据是为了让对方建一个『可供多个施工项目复用的 AI 平台』，不是只服务马诺诺。本报告把前一轮的项目级口径上收为平台级机制，并给出表头探测/列映射/主参行判定/多工作表展开的通用方法与复用性验收办法。",
+  "steps": [
+    {"step": "方向校正", "rc": 0, "out": "老板原话：『你给他数据只是为了让他建立一个可以供多个施工项目使用的 AI 平台，不是只用于某一个项目』。判据：换一个工程，不改进程代码、只换配置，就能吃下新台账"},
+    {"step": "现状评估：已具备的平台层", "rc": 0, "out": "app/platform_store.py 已是『平台级规范库』——国标/规范独立建库、多项目共享、可导出 .fpglib 包迁移到新电脑。说明平台层物理位置已存在，但目前只装『规范文件』，没装『解析规则』"},
+    {"step": "现状评估：被项目细节污染的点（代码级定位）", "rc": 1, "out": "app/equipment_merge.py:73-91 把列名别名硬编码为 6 个字面量（位号/设备位号/设备编号/编号、设备名称/名称/品名），换一个工程的表头写法即失效；row.get() 说明解析结果依赖 parse_excel 的 dict 行，而这些 dict 行完全由『表头行识别』决定 —— 表头识别错，整表皆空。火法表表头在第 6 行、列名为『规格型号』，正落在这个盲区"},
+    {"step": "现状评估：行业包已存在但无适配层", "rc": 0, "out": "app/ 下有 mining_* 系列（mining_equipment/mining_archive_organize/mining_completeness 等）作为行业包，但没有独立的『表格适配器』层；解析逻辑散在 equipment_merge / scanner / relations 之间，没有可配置的入口"},
+    {"step": "给出方法论 1：表头行探测", "rc": 0, "out": "滑动窗口 1..20 行，用列名词表对各行打分（命中『设备编号/位号/名称/规格型号/数量/单位/功率』等加权），取最高分行为表头；设最低分阈值，低于阈值则整表转『无法识别，需配 profile』而不是静默判空"},
+    {"step": "给出方法论 2：列映射 profile 化", "rc": 0, "out": "把硬编码的 6 个字面量外置为 profile（每工程一份）：field -> [同义词…]，支持正则；未映射列写进『未映射列清单』给人看，不静默丢弃。这是『换工程只换配置』的关键动作"},
+    {"step": "给出方法论 3：主设备行 vs 参数行判定", "rc": 0, "out": "以『编号列非空』为主锚点：编号非空=新设备行（主行），编号空=上一台设备的参数行（型号/功率/能力/材质）。火法表 0205 正是此结构（R7=CF0205ME01 主行，R8「型号 NE150」参数行）。该规律对绝大多数设计院工艺设备表成立，可作为平台默认规则，也被 profile 覆盖"},
+    {"step": "给出方法论 4：多工作表独立展开", "rc": 0, "out": "每个 sheet 独立探测表头行、独立成『组织单元』，不假设各 sheet 结构一致；sheet 内的『子项名称/单元名称』字段是天然的组织单元来源，优先级高于从文件名猜"},
+    {"step": "给出方法论 5：合并单元格与列偏移", "rc": 0, "out": "先规整矩阵（去全空列/全空行、还原合并单元格的左上值），再按表头文字定位列，禁止按列号硬编码。火法表 0101 的 A 列是设备编号、0205 的 A 列空而 B 列才是编号，同一文件内列偏移就不一致"},
+    {"step": "给出复用性验收办法（关键）", "rc": 0, "out": "不能只用马诺诺验。造第二个『合成工程』做回归：表头放第 3 行、列名换成『位号/设备名称/规模型号』、组织单元叫『标段/区域』、两个 sheet、含合并单元格。要求不改一行代码、只加一份 profile 就能吃下，且设备数/组织单元数与预期一致"},
+    {"step": "回传方式自我修正", "rc": 0, "out": "以后缺陷分两类回报：平台级缺陷（换工程也会犯，必须改进程）与项目配置问题（换 profile 即可）。避免开发端把项目特例写进框架，也避免把配置问题误当框架缺陷去改代码"},
+    {"step": "落地", "rc": 0, "out": "方法论写入 spec_platform_reuse.md 并回传仓库 main"}
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 1,
+    "skipped": 0,
+    "by_phase": {
+      "DIRECTION": {"passed": 1, "failed": 0, "skipped": 0},
+      "AS-IS-PLATFORM": {"passed": 1, "failed": 0, "skipped": 0},
+      "AS-IS-POLLUTION": {"passed": 0, "failed": 1, "skipped": 0},
+      "METHOD-1": {"passed": 1, "failed": 0, "skipped": 0},
+      "METHOD-2": {"passed": 1, "failed": 0, "skipped": 0},
+      "METHOD-3": {"passed": 1, "failed": 0, "skipped": 0},
+      "METHOD-4": {"passed": 1, "failed": 0, "skipped": 0},
+      "METHOD-5": {"passed": 1, "failed": 0, "skipped": 0},
+      "REUSE-ACCEPTANCE": {"passed": 1, "failed": 0, "skipped": 0},
+      "SELF-CORRECTION": {"passed": 1, "failed": 0, "skipped": 0}
+    }
+  },
+  "error": "非缺陷，是架构债务。D29 的表面症状是『火法表 3709 行判空』，实质是 D30：解析规则以硬编码列名（equipment_merge.py:73-91 的 6 个字面量）和『第 1 行即表头』的隐含假设固化在代码里，导致每接一个新工程都要改代码。老板要求的是换工程不改代码，因此 D29 应连同 D30 一起修，且验收必须包含第二个合成工程的复用性回归，否则修完仍然只对马诺诺有效。",
+  "commit_before": "4ee106d",
+  "commit_after": "4ee106d",
+  "detail_doc": "spec_platform_reuse.md",
+  "evidence": "evidence_platform_reuse.json",
+  "attachments": ["spec_platform_reuse.md"]
+}
