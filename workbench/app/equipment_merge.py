@@ -21,6 +21,7 @@ import json
 import threading
 import re
 import datetime
+import unicodedata
 from . import config
 from . import project_scope as _scope
 
@@ -227,6 +228,82 @@ def _norm_tag(tag: str) -> str:
     return t
 
 
+# ---------------- 设备身份键（v0.1.241） ----------------
+# 用户决策（2026-11-12 13:20，interaction 7707149546354150699）：
+#   「位号为空时，设备主键按什么定？」
+#   → 「车间+设备名称作主键，同名多行再按型号区分，仍冲突则进人工确认」
+#
+# 但**这个主键只能当「身份」，不能当「实例」**。实测真实项目 322fef90（228 台）：
+#     车间+名称        → 178 台（少 50）
+#     车间+名称+型号   → 202 台（少 26）
+# 被并掉的行数量列各不相同，是不同实例，不是重复行：
+#     渣浆泵 6 行 数量 2/4/2/2/2/2 ；一级高效脱介筛 4 行 3/6/3/3
+# 竣工资料按台出表，少一台就少一整套确认表。v0.1.179 正是为此把
+# 「源文件+行号」塞进 canonical_tag 的，不能退回去。
+#
+# 所以分两层：
+#   identity_key(canonical_tag 之外的**并列字段**)
+#       = 「车间|名称|型号」—— 用来认出「这两处资料说的是同一台设备」。
+#         不含源文件、不含行号：同一台设备出现在两份台账里，身份相同。
+#         型号为空时两者会落到同一个身份上，这正是用户要的「同名多行再按
+#         型号区分」；型号也相同且确实是不同实例时，由 canonical_tag 区分，
+#         需要人工确认哪几行是同一台（进 pending，不擅自合并）。
+#   canonical_tag（实例键，维持 v0.1.179 现状）
+#       = 一台一行，起诉到源文件与行号，保证不丢设备。
+#
+# 一句话：**身份用来建立联系，实例用来出表计数。**
+def identity_key(name: str = "", workshop: str = "", model: str = "") -> str:
+    """设备身份键 = 车间|名称|型号（规范化后）。
+
+    规范化必要的：实测台账里同一型号写成「8/6E-AH」和「8/6e-ah」、车间名里
+    混入全角空格的情况都存在，不收敛就会把同一台设备裂成两个身份。
+    """
+    def _n(s):
+        s = unicodedata.normalize("NFKC", str(s or ""))
+        s = s.replace("\u3000", " ")
+        return " ".join(s.split()).strip()
+
+    return "|".join([
+        _n(workshop),
+        _n(name),
+        _n(model).upper(),
+    ])
+
+
+def find_by_identity(data_dir: str, name: str = "", workshop: str = "",
+                     model: str = "") -> list:
+    """按身份键反查设备实例（可跨源文件）。
+
+    返回该身份的**全部实例**（1..n 条），每条带 canonical_tag / source_file。
+    这是「文件夹名→设备」「图纸挂到设备」这类联系能力的唯一查询入口：
+    没有它，同一台设备在不同文件里的资料就永远挂不到一起。
+    """
+    key = identity_key(name, workshop, model)
+    idx_path = os.path.join(data_dir or config.DATA_DIR, "index.json")
+    if not os.path.isfile(idx_path):
+        return []
+    try:
+        with open(idx_path, encoding="utf-8") as f:
+            idx = json.load(f)
+    except Exception:  # noqa: BLE001
+        return []
+    devs = idx.get("devices") or {}
+    if not isinstance(devs, dict):
+        return []
+
+    out = []
+    for tag, d in devs.items():
+        if not isinstance(d, dict):
+            continue
+        k = d.get("identity_key") or identity_key(
+            d.get("name", ""), d.get("workshop", ""), d.get("model", ""))
+        if k == key:
+            row = dict(d)
+            row["canonical_tag"] = tag
+            out.append(row)
+    return out
+
+
 def _name_similarity(name1: str, name2: str) -> float:
     """名称相似度：关键词重叠率。"""
     if not name1 or not name2:
@@ -329,6 +406,11 @@ def merge_equipment_list(equipment_list: list) -> dict:
             # 新设备
             merged[tag] = {
                 "canonical_tag": tag,
+                # v0.1.241：身份键与实例键并列落库。身份用来跨文件认出同一台设备，
+                # 实例键保证一台一行不丢设备（见 identity_key() 处的长注释）。
+                "identity_key": identity_key(eq.get("name", ""),
+                                             eq.get("workshop", ""),
+                                             eq.get("model", "")),
                 "name": eq.get("name", ""),
                 "model": eq.get("model", ""),
                 # v0.1.179：规格提到顶层 —— 无位号台账里型号列常常整列为空，
@@ -397,6 +479,11 @@ def merge_equipment_list(equipment_list: list) -> dict:
             new_tag = f"{tag}_dup_{len([p for p in pending if p['existing_tag'] == tag])}"
             merged[new_tag] = {
                 "canonical_tag": new_tag,
+                # v0.1.241：实例仍是独立一台（_dup_ / _vN），但身份与主实例相同 ——
+                # 这样按身份反查能把它们一起拿回来，交给人工确认是否同一台。
+                "identity_key": identity_key(eq.get("name", ""),
+                                             eq.get("workshop", ""),
+                                             eq.get("model", "")),
                 "name": eq.get("name", ""),
                 "model": eq.get("model", ""),
                 "spec": eq.get("spec", ""),
@@ -414,6 +501,11 @@ def merge_equipment_list(equipment_list: list) -> dict:
             new_tag = f"{tag}_v{existing['source_count']}"
             merged[new_tag] = {
                 "canonical_tag": new_tag,
+                # v0.1.241：实例仍是独立一台（_dup_ / _vN），但身份与主实例相同 ——
+                # 这样按身份反查能把它们一起拿回来，交给人工确认是否同一台。
+                "identity_key": identity_key(eq.get("name", ""),
+                                             eq.get("workshop", ""),
+                                             eq.get("model", "")),
                 "name": eq.get("name", ""),
                 "model": eq.get("model", ""),
                 "spec": eq.get("spec", ""),
@@ -539,6 +631,11 @@ def sync_devices_to_index(data_dir: str) -> dict:
         devices[tag] = {
             "name": d.get("name", ""),
             "model": d.get("model", ""),
+            # v0.1.241：身份键必须落进索引。只放在 merge 的临时结果里，
+            # 下游（find_by_identity / 资料归属 / 大模型检索）读不到，
+            # 等于「算了一遍又丢掉」——本项目反复出现的「同一件事两个答案」。
+            "identity_key": d.get("identity_key") or identity_key(
+                d.get("name", ""), d.get("workshop", ""), d.get("model", "")),
             "quantity": d.get("quantity", ""),
             "weight": d.get("weight", ""),
             # v0.1.180：单位写进索引 —— 整卷要知道哪些车间是"材料"（m2/米/kg）而非设备
