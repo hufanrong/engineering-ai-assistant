@@ -5566,9 +5566,27 @@ def _refresh_project_stats():
         # 车间/设备数取真实数据源（车间登记表/关联图谱），保证卡片统计同步
         try:
             from . import workshop_assign as _wa
-            # v0.1.139：车间数排除「未归车间」分组（避免待确认文件把车间数虚高）
+            # v0.1.244：车间数必须与 /api/workshops 同源。
+            #
+            # 缺陷（v0.1.244 实证）：真实项目台账里真实存在 19 个车间
+            #   （粗碎站/磨浮车间/脱水车间…），/api/workshops 返回 19，
+            #   而项目卡片 workshop_count 显示 **0**。
+            # 根因同上轮 layout 那条：「同一件事两个答案」的合并只补了一半 ——
+            # /api/workshops 会把**设备台账行里的车间**并进来（_ledger_workshops，
+            #   台账是人工填的结构化列，可信），而 _refresh_project_stats 仍只读
+            #   workshop_assign.list_by_workshop()，那个函数自 v0.1.235 起
+            #   「只返回已人工确认的车间」，未确认的台账车间一个都不在里面，
+            #   于是只剩「未归车间」这组，剔除后恒为 0。
+            # 修法：与 /api/workshops 完全同一口径 ——
+            #   ① 已人工确认的车间（list_by_workshop + 登记册）
+            #   ② 设备台账行里的车间（_ledger_workshops）
+            # 并集去重。绝不用文件级自动推导的名字（用户指令：未审批不建车间）。
             _bw = _wa.list_by_workshop()
-            wcount = len([k for k in (_bw or {}) if k != "未归车间"])
+            _ws_set = {k for k in (_bw or {}) if k != "未归车间"}
+            _ws_set |= {str(r.get("name") or "").strip() for r in _wa.list_registry()
+                        if str(r.get("name") or "").strip()}
+            _ws_set |= set(_ledger_workshops(cur["id"]))
+            wcount = len(_ws_set)
         except Exception:  # noqa: BLE001
             wcount = None
         try:
