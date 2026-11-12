@@ -1,0 +1,245 @@
+{
+ "total": 34,
+ "passed": 30,
+ "failed": 4,
+ "items": [
+  {
+   "name": "test_archive_concurrency.py",
+   "rc": 0,
+   "seconds": 0.8,
+   "tail": "结果：通过 13 / 失败 0 / 共 13",
+   "err": ""
+  },
+  {
+   "name": "test_atomic_io.py",
+   "rc": 1,
+   "seconds": 3.2,
+   "tail": "FAIL: 队列包 20 个一个不少  实得 1 个",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_atomic_write.py",
+   "rc": 0,
+   "seconds": 1.3,
+   "tail": "结果：通过 29 / 失败 0 / 共 29",
+   "err": ""
+  },
+  {
+   "name": "test_delete_project_pointer.py",
+   "rc": 0,
+   "seconds": 10.2,
+   "tail": "结果：通过 32 / 失败 0",
+   "err": ""
+  },
+  {
+   "name": "test_delete_sweep.py",
+   "rc": 0,
+   "seconds": 3.5,
+   "tail": "结果：通过 15 / 失败 0（共 15 条）",
+   "err": ""
+  },
+  {
+   "name": "test_device_identity.py",
+   "rc": 0,
+   "seconds": 0.5,
+   "tail": "结果：通过 14 / 失败 0（共 14 条）",
+   "err": ""
+  },
+  {
+   "name": "test_device_identity_242.py",
+   "rc": 0,
+   "seconds": 0.5,
+   "tail": "结果：通过 21 / 失败 0（共 21 条）",
+   "err": ""
+  },
+  {
+   "name": "test_gb_fallback.py",
+   "rc": 0,
+   "seconds": 11.4,
+   "tail": "结果：193 passed, 0 failed",
+   "err": ""
+  },
+  {
+   "name": "test_index_count.py",
+   "rc": 0,
+   "seconds": 0.6,
+   "tail": "结果：通过 10 / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_ledger_authority.py",
+   "rc": 0,
+   "seconds": 1.2,
+   "tail": "结果：通过 15 / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_ledger_units.py",
+   "rc": 0,
+   "seconds": 0.5,
+   "tail": "结果：通过 8 / 失败 0 / 共 8",
+   "err": ""
+  },
+  {
+   "name": "test_merge_agg.py",
+   "rc": 0,
+   "seconds": 0.1,
+   "tail": "通过 33 项，失败 0 项",
+   "err": ""
+  },
+  {
+   "name": "test_multi_project_245.py",
+   "rc": 1,
+   "seconds": 0.9,
+   "tail": "失败 3 条  ['M9b 当前项目的索引/归属/队列/版本台账一个字节都没变', 'M9c 当前项目的上传队列没有多出包', 'M9d 隔离目录里确实落了解析缓存/索引/队列包（说明扫描真跑了）']",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_parsed_cache_path.py",
+   "rc": 0,
+   "seconds": 0.6,
+   "tail": "结果：通过 12 / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_phase_coverage.py",
+   "rc": 0,
+   "seconds": 0.3,
+   "tail": "===== 通过 28 / 失败 0 =====",
+   "err": ""
+  },
+  {
+   "name": "test_project_audit_log.py",
+   "rc": 0,
+   "seconds": 4.5,
+   "tail": "结果：通过 24 / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_project_backup_complete.py",
+   "rc": 0,
+   "seconds": 3.7,
+   "tail": "汇总：通过 19 / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_project_scope.py",
+   "rc": 0,
+   "seconds": 0.3,
+   "tail": "全部通过",
+   "err": ""
+  },
+  {
+   "name": "test_readonly_no_write.py",
+   "rc": 0,
+   "seconds": 7.2,
+   "tail": "结果：17 passed, 0 failed",
+   "err": ""
+  },
+  {
+   "name": "test_relations_gate.py",
+   "rc": 0,
+   "seconds": 0.4,
+   "tail": "===== 通过 22 / 失败 0 =====",
+   "err": ""
+  },
+  {
+   "name": "test_relations_workshops.py",
+   "rc": 0,
+   "seconds": 0.1,
+   "tail": "===== 通过 10 / 失败 0 =====",
+   "err": ""
+  },
+  {
+   "name": "test_restart_really.py",
+   "rc": 0,
+   "seconds": 55.6,
+   "tail": "===== 通过 48 / 失败 0 =====",
+   "err": ""
+  },
+  {
+   "name": "test_restore_target.py",
+   "rc": 0,
+   "seconds": 0.3,
+   "tail": "===== 通过 9 / 失败 0 =====",
+   "err": ""
+  },
+  {
+   "name": "test_scan_heartbeat.py",
+   "rc": 0,
+   "seconds": 118.4,
+   "tail": "===== 通过 29 / 失败 0 =====",
+   "err": " 0/199 [00:00<?, ?it/s]\nLoading weights:  28%|██▊       | 56/199 [00:00<00:00, 553.67it/s]\nLoading weights: 100%|██████████| 199/199 [00:00<00:00, 1757.94it/s]\n"
+  },
+  {
+   "name": "test_smart_doc_persist.py",
+   "rc": 0,
+   "seconds": 2.3,
+   "tail": "合计：111 PASS / 0 FAIL",
+   "err": ""
+  },
+  {
+   "name": "test_source_path_fields.py",
+   "rc": 1,
+   "seconds": 8.8,
+   "tail": "[C5] 临时目录里重解析不得写进真实项目队列",
+   "err": "78, in main\n    old_q, old_l = UQ.QUEUE_DIR, UQ.LOG_PATH\n                   ^^^^^^^^^^^^\nAttributeError: module 'app.upload_queue' has no attribute 'QUEUE_DIR'\n"
+  },
+  {
+   "name": "test_spatial_ledger_243.py",
+   "rc": 0,
+   "seconds": 0.1,
+   "tail": "通过 ALL / 失败 0",
+   "err": ""
+  },
+  {
+   "name": "test_template_concurrency.py",
+   "rc": 0,
+   "seconds": 0.6,
+   "tail": "通过 9 项，失败 0 项",
+   "err": ""
+  },
+  {
+   "name": "test_upload_queue.py",
+   "rc": 1,
+   "seconds": 0.2,
+   "tail": "",
+   "err": "\\test_upload_queue.py\", line 90, in main\n    qdir = uq.QUEUE_DIR\n           ^^^^^^^^^^^^\nAttributeError: module 'app.upload_queue' has no attribute 'QUEUE_DIR'\n"
+  },
+  {
+   "name": "test_volume_no_overwrite.py",
+   "rc": 0,
+   "seconds": 7.5,
+   "tail": "合计：27 PASS / 0 FAIL",
+   "err": ""
+  },
+  {
+   "name": "test_wb_loop_git.py",
+   "rc": 0,
+   "seconds": 2.3,
+   "tail": "===== 通过 21 / 失败 0 =====",
+   "err": ""
+  },
+  {
+   "name": "test_workshop_approval.py",
+   "rc": 0,
+   "seconds": 0.8,
+   "tail": "结果：通过 23 / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_workshop_count_244.py",
+   "rc": 0,
+   "seconds": 0.7,
+   "tail": "通过 ALL / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  },
+  {
+   "name": "test_workshop_source.py",
+   "rc": 0,
+   "seconds": 0.8,
+   "tail": "结果：通过 10 / 失败 0",
+   "err": "s\\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!\n  warnings.warn(\n"
+  }
+ ]
+}
