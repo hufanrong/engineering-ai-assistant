@@ -1,0 +1,15 @@
+
+===== boot start 2026-11-12 07:25:10 argv=['--preflight'] =====
+[2026-11-12 07:25:10] ============================================================
+[2026-11-12 07:25:10] 预检开始（--preflight）：只看环境，不跑自测、不动业务数据
+[2026-11-12 07:25:10] [OK  ] Python 可执行 D:\fangong-workbench\workbench\venv\Scripts\pythonw.exe
+[2026-11-12 07:25:10] [OK  ] 工作目录 D:\fangong-workbench
+[2026-11-12 07:25:10] [OK  ] git 可执行 找到 git：C:\Users\hufanrong\AppData\Local\Programs\WorkBuddy\resources\vendor\PortableGit\mingw64\bin\git.EXE
+[2026-11-12 07:25:10] [OK  ] 是 git 仓库 git_dir=D:\fangong-workbench\.git common=D:\fangong-workbench\.git
+[2026-11-12 07:25:11] [OK  ] origin 远端 https://github.com/hufanrong/engineering-ai-assistant
+[2026-11-12 07:25:12] [OK  ] 能连远端（ls-remote） adbe1db9ed66
+[2026-11-12 07:25:12] [OK  ] 能写 reports/ 目录 D:\fangong-workbench\reports
+[2026-11-12 07:25:12] [OK  ] stdout 可用（pythonw 下常为 None） 
+[2026-11-12 07:25:12] 预检结束：8/8 通过，全部 OK
+[2026-11-12 07:25:12] ============================================================
+===== boot end 2026-11-12 07:25:12 code=0 =====

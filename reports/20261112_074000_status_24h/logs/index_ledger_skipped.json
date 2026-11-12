@@ -1,0 +1,47 @@
+{
+ "ledger_skipped_total": 200,
+ "by_source": {
+  "28172857098f_刚果（金）Manono锂盐项目火法部分工艺设备表（0430).xlsx": 200
+ },
+ "by_reason": {
+  "台账空行（无名称/型号/规格）": 200
+ },
+ "devices_total": 24,
+ "workshops": {
+  "中矿堆": {
+   "device_count": 12
+  },
+  "粗碎车间": {
+   "device_count": 12
+  }
+ },
+ "sample_skipped": [
+  {
+   "source_file": "28172857098f_刚果（金）Manono锂盐项目火法部分工艺设备表（0430).xlsx",
+   "row_index": 0,
+   "workshop": "",
+   "unit": "",
+   "quantity": "",
+   "vendor": "",
+   "reason": "台账空行（无名称/型号/规格）"
+  },
+  {
+   "source_file": "28172857098f_刚果（金）Manono锂盐项目火法部分工艺设备表（0430).xlsx",
+   "row_index": 1,
+   "workshop": "",
+   "unit": "",
+   "quantity": "",
+   "vendor": "",
+   "reason": "台账空行（无名称/型号/规格）"
+  },
+  {
+   "source_file": "28172857098f_刚果（金）Manono锂盐项目火法部分工艺设备表（0430).xlsx",
+   "row_index": 2,
+   "workshop": "",
+   "unit": "",
+   "quantity": "",
+   "vendor": "",
+   "reason": "台账空行（无名称/型号/规格）"
+  }
+ ]
+}

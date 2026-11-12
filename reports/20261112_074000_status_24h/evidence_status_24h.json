@@ -1,0 +1,110 @@
+{
+  "check_id": "20261112_074000_status_24h",
+  "window": "2026-11-11 07:00 -> 2026-11-12 07:40",
+  "service": {
+    "alive": true,
+    "version": "0.1.240",
+    "pid": 22148,
+    "versions_upgraded_since_last_check": ["0.1.234", "0.1.236", "0.1.237", "0.1.238", "0.1.239", "0.1.240"],
+    "downtime_observed": false
+  },
+  "rounds": [
+    {"time": "2026-11-11 12:04", "run_id": "20261111_120413", "pulled": 0, "status": "failed", "p/f/s": "73/2/1"},
+    {"time": "2026-11-11 17:04", "run_id": "20261111_170414", "pulled": 1, "status": "failed", "p/f/s": "73/2/2", "suites": "all green"},
+    {"time": "2026-11-11 22:04", "run_id": null, "pulled": 4, "status": "crashed", "defect": "D28"},
+    {"time": "2026-11-12 03:04", "run_id": null, "pulled": 2, "status": "crashed", "defect": "D28"},
+    {"time": "2026-11-12 07:04", "run_id": "20261112_070426", "pulled": 0, "status": "failed", "p/f/s": "74/1/2", "note": "manual catch-up, best result so far"}
+  ],
+  "defects": {
+    "D29": {
+      "severity": "P0",
+      "title": "火法部分工艺设备表 3709 行全部判为空行，一行未入库",
+      "file": "data/uploads/28172857098f_刚果（金）Manono锂盐项目火法部分工艺设备表（0430).xlsx",
+      "observed_in_index": {
+        "ledger_skipped_total": 200,
+        "all_from_same_file": true,
+        "reason_all": "台账空行（无名称/型号/规格）",
+        "devices_total": 24,
+        "workshops": {"中矿堆": 12, "粗碎车间": 12}
+      },
+      "actual_file_structure": {
+        "sheet_count": 10,
+        "total_rows": 3709,
+        "header_row_in_every_sheet": 6,
+        "sheets": [
+          {"name": "0101", "rows": 195, "header_row": 6, "sub_item": "锂辉石库"},
+          {"name": "0103", "rows": 551, "header_row": 6, "sub_item": "锂辉石烘干"},
+          {"name": "0104", "rows": 251, "header_row": 6, "sub_item": "锂辉石计量"},
+          {"name": "0201", "rows": 580, "header_row": 6, "sub_item": "回转窑尾装置"},
+          {"name": "0201-尘硝一体", "rows": 72, "header_row": 6, "sub_item": ""},
+          {"name": "0201-脱硫脱氟", "rows": 93, "header_row": 6, "sub_item": ""},
+          {"name": "0202", "rows": 222, "header_row": 6, "sub_item": "回转窑中装置"},
+          {"name": "0203", "rows": 949, "header_row": 6, "sub_item": "回转窑头装置"},
+          {"name": "0204", "rows": 232, "header_row": 6, "sub_item": "熟料送存仓"},
+          {"name": "0205", "rows": 564, "header_row": 6, "sub_item": "熟料粉磨装置"}
+        ]
+      },
+      "root_causes": [
+        "表头行不在第 1 行：10 张表表头全部在第 6 行，row_index 从 0 起连续 200 条判空，说明未做表头行扫描",
+        "列名映射失败：产品找「名称/型号/规格」，实际列名是「设备编号/规格型号」",
+        "多工作表未展开：每个 sheet 的「子项名称」就是车间名，是天然且可靠的车间来源",
+        "同文件内列偏移不一致：0101 的 A 列是设备编号，0205 的 A 列空、B 列才是设备编号，不能按列号硬编码"
+      ],
+      "sample_row_0205": "R4 子项名称=熟料粉磨装置 | R6 表头=设备编号|规格型号|技术参数|功率|压缩空气|冷却水|单位|数量|单重 | R7=CF0205ME01|板链斗式提升机|台|1|16000",
+      "acceptance": "设备数 >= 600 台；车间 >= 8 个；位号非空率 >= 90%；熟料粉磨装置单车间 >= 60 台",
+      "business_impact": "熟料粉磨 564 行、回转窑头 949 行全部缺失；竣工资料/组卷/缺件清单全空；平台在现场用不起来"
+    },
+    "D28": {
+      "severity": "P1",
+      "title": "回传通道自身崩溃不留痕",
+      "evidence": [
+        "reports/ 下无 202611112204* 与 20261112* 目录",
+        "_loop.log 两轮均停在「远端有 N 个新提交，拉取」，无「本轮结束」",
+        "workbench/tools/selftest_cleanup.json mtime = 2026-11-12 03:16:01，证明 03:04 轮 selftest 已跑到阶段6 收尾（12 分钟）",
+        "计划任务 LastTaskResult = 1"
+      ],
+      "ambiguity": "wb_loop --once 正常 failed 返回 1，未捕获异常退出码也是 1，计划任务无法区分",
+      "root_cause": "pythonw.exe 无控制台，sys.stdout/sys.stderr 为 None，未捕获 traceback 被静默丢弃；死亡点在 finish() -> write_report_files()",
+      "fixed_by_workbuddy": {
+        "file": "C:\\Users\\hufanrong\\AppData\\Local\\fangong\\run_loop_boot.py",
+        "approach": "保留 pythonw（Interactive 任务弹窗会打扰用户），在 Python 内部重绑 stdout/stderr 到 reports/_task_stdout.log，捕获 BaseException 后先 print_exc 再退出，日志 4MB 轮转",
+        "wired_into": "run_loop.cmd",
+        "verified": "--preflight 8/8 通过，stdout 接管成功"
+      },
+      "dev_recommendation": "这层保护应由 wb_loop.py 自身的 main() 入口实现并写入 _loop.log，否则换环境会再次失明"
+    },
+    "D27": {
+      "severity": "P2",
+      "title": "同一车间名同时出现在正式清单与待审批候选",
+      "assertion": "[阶段1] 车间自动分类",
+      "expected": "自动识别只产出待审批候选；未审批名字不混入正式车间清单",
+      "actual": "正式车间 ['中矿堆','粗碎车间'](已归类 0 文件)；待审批候选 ['粗碎车间'](临时归类 2 文件)；混入=['粗碎车间']",
+      "api_evidence": "/api/workshops 中 粗碎车间 from_ledger=false 但仍在正式清单",
+      "fix_suggestion": "from_ledger=false 一律降级为待审批候选"
+    }
+  },
+  "verified_fixed": {
+    "D22": {"evidence": "test_restart_really.py 48 passed / 0 failed (was 42/1)"},
+    "D23": {"evidence": "new suite test_scan_heartbeat.py 29 passed / 0 failed; scan completed within 10 min"},
+    "D24": {"evidence": "phase 4 now skipped_by_decision, coverage.missed=[], complete=true"},
+    "D19": {"evidence": "new suite test_delete_sweep.py 15 passed / 0 failed; cleanup gone=2 still_there=[] errors=[]"}
+  },
+  "latest_round": {
+    "run_id": "20261112_070426",
+    "p/f/s": "74/1/2",
+    "coverage_complete": true,
+    "skipped_by_decision": [4],
+    "pushed": true,
+    "report_commit": "adbe1db9ed66408cf80710be425f25cafea8a6f7",
+    "only_failure": "D27"
+  },
+  "project_state": {
+    "name": "马诺诺",
+    "files": 62,
+    "devices": 24,
+    "workshops": 2,
+    "workshop_candidates": 0,
+    "files_with_workshop_field": "mostly empty",
+    "ledger_gate_working": "已排除非台账名 ['未归车间']"
+  }
+}

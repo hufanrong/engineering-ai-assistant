@@ -1,0 +1,48 @@
+{
+  "run_id": "20261112_074000_status_24h",
+  "started": "2026-11-12 07:03:00",
+  "finished": "2026-11-12 07:40:00",
+  "status": "failed",
+  "kind": "manual_defect_report",
+  "note": "24 小时运行状况核查 + 修复验证 + 新缺陷。覆盖 v0.1.233 -> v0.1.240 六个版本。已验证 D19/D22/D23/D24 修复；新报 D27（车间候选混入正式清单）、D28（回传通道自身崩溃不留痕，已由 WORKbuddy 在环境层堵住）、D29（火法设备台账 3709 行一行未入，P0）。",
+  "steps": [
+    {"step": "服务状态", "rc": 0, "out": "v0.1.240 在线，PID 22148，/api/status 正常；自 0.1.233 起共升级 6 个版本（234/236/237/238/239/240）"},
+    {"step": "自动循环 24h 时间线", "rc": 1, "out": "17:04 轮成功出报告；22:04 轮拉取 4 个提交后无产物；03:04 轮拉取 2 个提交后无产物。reports/ 下无 202611112204* 与 20261112* 目录，_loop.log 两轮均停在『远端有 N 个新提交，拉取』，无『本轮结束』"},
+    {"step": "两轮消失定位（D28）", "rc": 1, "out": "决定性证据：workbench/tools/selftest_cleanup.json 的 mtime = 2026-11-12 03:16:01，说明 03:04 轮 selftest 已跑到阶段6 收尾（仅 12 分钟），随后在 finish() 写报告前死亡。计划任务 LastTaskResult=1，但 wb_loop 的 --once 正常 failed 也返回 1、未捕获异常也返回 1，两者无法区分；pythonw 无控制台，sys.stderr=None，traceback 被静默丢弃"},
+    {"step": "修复 D28（环境层）", "rc": 0, "out": "新增 C:\\Users\\hufanrong\\AppData\\Local\\fangong\\run_loop_boot.py：保留 pythonw（不弹窗）但在 Python 内部把 sys.stdout/sys.stderr 重绑到 reports\\_task_stdout.log，未捕获异常先 traceback.print_exc() 再退出。run_loop.cmd 改经此引导。实测 --preflight 8/8 通过，stdout 接管成功，日志正常落盘"},
+    {"step": "补测 v0.1.240（手动前台一轮）", "rc": 0, "out": "reports/20261112_070426：P74 / F1 / S2，为本项目历史最好成绩；coverage.complete=true，阶段4 记为 skipped_by_decision（『竣工图清稿需 Windows + AutoCAD，老板 2026-10-31 决定不纳入自测』）；已推送 adbe1db"},
+    {"step": "验证 D22 已修", "rc": 0, "out": "test_restart_really.py 48 通过 / 0 失败（原 42/1）。并发写盘断言已转绿，且用例从 43 增至 48"},
+    {"step": "验证 D23 已修", "rc": 0, "out": "新增套件 test_scan_heartbeat.py 29 通过 / 0 失败；本轮扫描约 10 分钟内完成，未再出现 done=0/0 判卡死"},
+    {"step": "验证 D24 已修", "rc": 0, "out": "阶段4 从『漏测必红』改为 skipped_by_decision，coverage.missed=[]，complete=true，措辞含老板决策依据；本轮无该红项"},
+    {"step": "验证 D19 已修", "rc": 0, "out": "新增 test_delete_sweep.py 15 通过 / 0 失败；本轮自测项目清理 gone=2 / still_there=[] / errors=[]，未再出现 WinError 32"},
+    {"step": "新缺陷 D27：车间候选混入正式清单", "rc": 1, "out": "阶段1『车间自动分类』失败：期望『未审批名字不混入正式车间清单』，实际 正式车间['中矿堆','粗碎车间']（已归类 0 文件）、待审批候选['粗碎车间']（临时归类 2 文件）、混入=['粗碎车间']。同一名字同时出现在正式清单与候选队列"},
+    {"step": "新缺陷 D29（P0）火法设备台账 3709 行一行未入", "rc": 1, "out": "index.json 中 ledger_skipped_rows=200 条全部来自『火法部分工艺设备表（0430).xlsx』，理由全为『台账空行（无名称/型号/规格）』，workshop/unit/quantity/vendor 全空。直接读原表核对：该文件 10 个工作表、合计 3709 行真实数据，每表表头均在第 6 行，子项名称齐全（锂辉石库/烘干/计量、回转窑尾/中/头装置、熟料送存仓、熟料粉磨装置），第 7 行起为设备编号+规格型号+单位+数量。结论：200 条『空行』是误判，整张核心台账未入库"},
+    {"step": "项目数据现状", "rc": 1, "out": "马诺诺项目 62 文件；正式车间仅 2 个（中矿堆 12 台 from_ledger=true、粗碎车间 12 台 from_ledger=false），设备共 24 台，全部来自『选厂设备清单1.xlsx』；文件条目 workshop 字段基本为空；候选队列 0 条；台账闸门已生效并排除 1 个非台账名『未归车间』"},
+    {"step": "恢复最终状态", "rc": 0, "out": "服务 v0.1.240 在线；本轮报告已推送；git 工作区仅 1 个未跟踪临时文件（selftest_cleanup.json，工具产物）"}
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 3,
+    "skipped": 0,
+    "by_phase": {
+      "VERIFIED-D19": {"passed": 1, "failed": 0, "skipped": 0},
+      "VERIFIED-D22": {"passed": 1, "failed": 0, "skipped": 0},
+      "VERIFIED-D23": {"passed": 1, "failed": 0, "skipped": 0},
+      "VERIFIED-D24": {"passed": 1, "failed": 0, "skipped": 0},
+      "D27": {"passed": 0, "failed": 1, "skipped": 0},
+      "D28": {"passed": 0, "failed": 1, "skipped": 0},
+      "D29": {"passed": 0, "failed": 1, "skipped": 0}
+    }
+  },
+  "error": "三点。①D28：11-11 22:04 与 11-12 03:04 两轮拉取新代码后跑完自测却在 finish() 写报告前死亡，pythonw 无 stderr 导致 traceback 全丢，回传通道自身失明；已用 run_loop_boot.py 在 Python 内部接管输出堵住。②D29（P0）：火法部分工艺设备表 3709 行真实设备数据被整张判为『台账空行』，一行未入库，导致马诺诺项目只有 24 台设备、2 个车间，熟料粉磨装置（564 行）与回转窑头装置（949 行）全部缺失；根因是表头在第 6 行未识别、多工作表子项未展开、『设备编号/规格型号』列名未映射。③D27：同一车间名同时出现在正式清单与待审批候选队列。",
+  "commit_before": "ec4f458ccb4e401ab30a5760c85be14ed5f6093d",
+  "commit_after": "ec4f458ccb4e401ab30a5760c85be14ed5f6093d",
+  "detail_doc": "defects_status_24h.md",
+  "evidence": "evidence_status_24h.json",
+  "attachments": [
+    "logs/ledger_0205_liaohua_fengmu_head.txt",
+    "logs/index_ledger_skipped.json",
+    "logs/loop_tail.txt",
+    "logs/boot_preflight.txt"
+  ]
+}
