@@ -1,0 +1,128 @@
+{
+  "run_id": "20261112_080413",
+  "started": "2026-11-12 08:04:13",
+  "status": "failed",
+  "steps": [
+    {
+      "step": "查远端 HEAD",
+      "rc": 0,
+      "out": "4ee106d1754d88f6126d417c97967d0127f96b8f",
+      "err": ""
+    },
+    {
+      "step": "git fetch",
+      "rc": 0,
+      "out": "",
+      "err": "From https://github.com/hufanrong/engineering-ai-assistant\n * branch            main       -> FETCH_HEAD"
+    },
+    {
+      "step": "远端无新提交",
+      "rc": 0,
+      "out": "behind=0 ahead=0"
+    },
+    {
+      "step": "taskkill 22148",
+      "rc": 0,
+      "out": "�ɹ�: ����ֹ PID Ϊ 22148 �Ľ��̡�",
+      "err": ""
+    },
+    {
+      "step": "启动服务",
+      "rc": 0,
+      "out": "服务已就绪（在线版本 0.1.240 ≠ 工作区 0.1.241，需要重启）"
+    },
+    {
+      "step": "selftest",
+      "rc": 1,
+      "out": "{\"passed\": 74, \"failed\": 1, \"skipped\": 2, \"by_phase\": {\"1\": {\"passed\": 18, \"failed\": 1, \"skipped\": 0}, \"2\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"3\": {\"passed\": 14, \"failed\": 0, \"skipped\": 0}, \"5\": {\"passed\": 9, \"failed\": 0, \"skipped\": 0}, \"6\": {\"passed\": 24, \"failed\": 0, \"skipped\": 1}, \"4\": {\"",
+      "err": ""
+    },
+    {
+      "step": "导出使用遥测",
+      "rc": 0,
+      "out": "requests=659 parse_failed=0 -> telemetry_bundle.json"
+    },
+    {
+      "step": "专项回归套件",
+      "rc": 1,
+      "out": "P29/F1/T30 -> suites.json"
+    },
+    {
+      "step": "判定",
+      "rc": 0,
+      "out": "status=failed rc=1 P74/F1/S2 suites_fail=1"
+    }
+  ],
+  "summary": {
+    "passed": 74,
+    "failed": 1,
+    "skipped": 2,
+    "by_phase": {
+      "1": {
+        "passed": 18,
+        "failed": 1,
+        "skipped": 0
+      },
+      "2": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "3": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0
+      },
+      "5": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "6": {
+        "passed": 24,
+        "failed": 0,
+        "skipped": 1
+      },
+      "4": {
+        "passed": 0,
+        "failed": 0,
+        "skipped": 1
+      }
+    },
+    "coverage": {
+      "ran": [
+        1,
+        2,
+        3,
+        5,
+        6
+      ],
+      "missed": [],
+      "skipped_by_decision": [
+        4
+      ],
+      "ran_labels": [
+        "① 解析/分类/资料库",
+        "② 资料生成管理",
+        "③ 竣工资料生成",
+        "⑤ 使用遥测/脱敏自检",
+        "⑥ 同一事实交叉比对"
+      ],
+      "missed_labels": [],
+      "skipped_labels": [
+        "④ 竣工图清稿"
+      ],
+      "skipped_reasons": {
+        "4": "竣工图清稿需 Windows + AutoCAD，老板 2026-10-31 决定不纳入自测"
+      },
+      "complete": true
+    }
+  },
+  "error": "",
+  "remote_head": "4ee106d1754d88f6126d417c97967d0127f96b8f",
+  "behind": 0,
+  "ahead": 0,
+  "finished": "2026-11-12 08:17:41",
+  "commit_before": "4ee106d1754d88f6126d417c97967d0127f96b8f",
+  "commit_after": "4ee106d1754d88f6126d417c97967d0127f96b8f"
+}
