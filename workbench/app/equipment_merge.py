@@ -257,17 +257,164 @@ def identity_key(name: str = "", workshop: str = "", model: str = "") -> str:
 
     规范化必要的：实测台账里同一型号写成「8/6E-AH」和「8/6e-ah」、车间名里
     混入全角空格的情况都存在，不收敛就会把同一台设备裂成两个身份。
+
+    v0.1.242：**名称是身份的必要条件，空名一律返回空身份**。
+    实测真实项目 322fef90 有 13 行名称列为空（台账合并单元格/换行造成的），
+    其中 3 行的型号也为空 —— 按「车间||型号」拼键会让同车间两台都空名空型号
+    的设备落到同一个身份上，等于凭空断言「这两台是同一台」。身份键的作用是
+    认出「同一台设备」，没有名字就认不出任何设备，只能返回空、交给人工补名。
+    空身份不会被 find_by_identity 匹配（那里显式挡掉）。
     """
     def _n(s):
         s = unicodedata.normalize("NFKC", str(s or ""))
         s = s.replace("\u3000", " ")
         return " ".join(s.split()).strip()
 
+    _name = _n(name)
+    if not _name:
+        return ""
     return "|".join([
         _n(workshop),
-        _n(name),
+        _name,
         _n(model).upper(),
     ])
+
+
+def identity_conflicts(data_dir: str) -> list:
+    """型号为空且同车间同名称多实例 → 无法按型号区分，交人工确认。
+
+    用户决策原文：「车间+设备名称作主键，同名多行再按型号区分，**仍冲突则进
+    人工确认**」。这里就是「仍冲突」那一半：型号列整列为空时，同名多行既分不开
+    也合不掉 —— 擅自合并会丢设备（实测渣浆泵 6 行数量 2/4/2/2/2/2，是一批
+    2 台装的泵组，不是同一台），强行拆开又会把同一台设备当两台。
+
+    只**登记**不处置：返回冲突清单供 human_confirm 呈现，实例一条不动。
+    """
+    idx_path = os.path.join(_index_dir(data_dir), "index.json")
+    if not os.path.isfile(idx_path):
+        return []
+    try:
+        with open(idx_path, encoding="utf-8") as f:
+            idx = json.load(f)
+    except Exception:  # noqa: BLE001
+        return []
+    devs = idx.get("devices") or {}
+    if not isinstance(devs, dict):
+        return []
+
+    groups = {}
+    for tag, d in devs.items():
+        if not isinstance(d, dict):
+            continue
+        k = d.get("identity_key") or identity_key(
+            d.get("name", ""), d.get("workshop", ""), d.get("model", ""))
+        if not k:
+            continue                      # 空名：没有身份，单独进「名称缺失」
+        groups.setdefault(k, []).append((tag, d))
+
+    out = []
+    for k, rows in groups.items():
+        if len(rows) < 2:
+            continue
+        _ws, _name, _model = (k.split("|") + ["", "", ""])[:3]
+        if _model:
+            continue                      # 型号能区分 → 不算冲突
+        # v0.1.242：数量的「合计」必须按单位分组，不能混着加。
+        # 实测这 14 组里有一组是「水源取水 / 螺旋焊接钢管」，数量列 705901.5 与
+        # 526149，单位是 kg —— 那是材料不是台数。把 kg 和台加在一起得到 1232163，
+        # 是个看着像数字、实际没有任何意义的合计（数错比不数更危险）。
+        by_unit = {}
+        for _, d in rows:
+            u = str(d.get("unit", "") or "").strip() or "（未填单位）"
+            by_unit[u] = by_unit.get(u, 0) + _to_float(d.get("quantity"))
+        unit_sums = {u: _fmt_num(v) for u, v in sorted(by_unit.items())}
+        out.append({
+            "type": "身份冲突（型号为空）",
+            "identity_key": k,
+            "workshop": _ws,
+            "name": _name,
+            "tags": [t for t, _ in rows],
+            # 单位一致时才给单一合计；不一致就给分单位小计，绝不跨单位相加
+            "total_qty": (list(unit_sums.values())[0] if len(unit_sums) == 1 else None),
+            "unit": (list(unit_sums)[0] if len(unit_sums) == 1 else None),
+            "qty_by_unit": unit_sums,
+            "evidence": sorted({d.get("source_file", "") for _, d in rows if d.get("source_file")}),
+            "note": "同车间同名称、型号列为空，无法按型号区分；请确认这些行是同一台设备（应合并）还是不同设备（应补型号）",
+        })
+    return out
+
+
+def devices_missing_name(data_dir: str) -> list:
+    """名称为空的设备实例（台账里没取到设备名）—— 无法建身份，交人工补名。
+
+    v0.1.242 命名说明：不叫 nameless_devices —— supervision_integration.py 已有
+    同名函数（意思是「出不了竣工表、要回台账补名」）。同一名字两个用途，
+    下游按名字引用必然出错，这正是本项目反复踩的「同一件事两个答案」。
+    """
+    idx_path = os.path.join(_index_dir(data_dir), "index.json")
+    if not os.path.isfile(idx_path):
+        return []
+    try:
+        with open(idx_path, encoding="utf-8") as f:
+            idx = json.load(f)
+    except Exception:  # noqa: BLE001
+        return []
+    devs = idx.get("devices") or {}
+    if not isinstance(devs, dict):
+        return []
+    out = []
+    for tag, d in devs.items():
+        if not isinstance(d, dict):
+            continue
+        if not str(d.get("name", "")).strip():
+            out.append({
+                "type": "设备名称缺失",
+                "tag": tag,
+                "workshop": d.get("workshop", ""),
+                "model": d.get("model", ""),
+                "quantity": d.get("quantity", ""),
+                "source_file": d.get("source_file", ""),
+                "note": "台账该行名称为空（多为合并单元格/换行），无法建立设备身份，请补设备名",
+            })
+    return out
+
+
+def _to_float(v) -> float:
+    """数量列转数字。取不到就 0（台账里常见空值/「—」）。"""
+    try:
+        return float(str(v).strip().replace(",", ""))
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _fmt_num(v: float):
+    """数字回显：整数不带 .0，小数保留原精度。"""
+    if abs(v - round(v)) < 1e-9:
+        return int(round(v))
+    return round(v, 4)
+
+
+def _index_dir(data_dir=None) -> str:
+    """解析「index.json 所在目录」—— 显式 data_dir > 当前项目目录 > 全局 data。
+
+    v0.1.242 修：原来三处直接写 `data_dir or config.DATA_DIR`，不传 data_dir 就
+    落到全局 data/，而真实项目的数据在 data/projects/<pid>/ —— 于是「按身份反查
+    设备」在正常调用下永远查不到，返回空却被当成「没有这台设备」。这就是本项目
+    反复出现的 EE/FF 类问题：参数一路传给函数，内部某一处又换成别的目录。
+    这里收敛成唯一入口，谁要读 index.json 都从这里拿路径。
+    """
+    if data_dir:
+        return data_dir
+    try:
+        from . import project_manager as _pm
+        cur = _pm.get_current_project()
+        if cur:
+            pdir = _pm.get_project_data_dir(cur["id"])
+            if pdir:
+                return pdir
+    except Exception:  # noqa: BLE001
+        pass
+    return config.DATA_DIR
 
 
 def find_by_identity(data_dir: str, name: str = "", workshop: str = "",
@@ -279,7 +426,11 @@ def find_by_identity(data_dir: str, name: str = "", workshop: str = "",
     没有它，同一台设备在不同文件里的资料就永远挂不到一起。
     """
     key = identity_key(name, workshop, model)
-    idx_path = os.path.join(data_dir or config.DATA_DIR, "index.json")
+    if not key:
+        # v0.1.242：空身份（名称缺失）不做任何匹配。否则传空名会把所有空名行
+        # 当成「同一台设备」一起返回 —— 凭空断言比查不到更糟。
+        return []
+    idx_path = os.path.join(_index_dir(data_dir), "index.json")
     if not os.path.isfile(idx_path):
         return []
     try:
@@ -588,7 +739,7 @@ def sync_devices_to_index(data_dir: str) -> dict:
     """把当前项目解析出的设备台账行写进 index.json 的 devices 字段。
     返回 {"devices": n, "with_workshop": n, "sources": [...]}；无数据时 devices=0 且不覆盖原值以外的键。
     """
-    data_dir = data_dir or config.DATA_DIR
+    data_dir = _index_dir(data_dir)
     idx_path = os.path.join(data_dir, "index.json")
     cache_dir = os.path.join(data_dir, "parsed_cache")
     if not os.path.isfile(idx_path):

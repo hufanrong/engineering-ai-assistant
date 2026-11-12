@@ -487,6 +487,9 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
     ddir = _get_data_dir(data_dir)
     _ensure(ddir)
     idx = _load_index(ddir)
+    # v0.1.243：台账设备（index.json["devices"]）——建图与对外读数必须用同一份
+    ledger = idx.get("devices") or {}
+
     docs = {}   # sha -> {file_name, parser, workshop, doc_type, tags, title_block, frame}
     for sha, info in idx.items():
         cache = _load_cache(sha, ddir)
@@ -787,6 +790,23 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
                                   "workshops": [v["workshop"] for v in row["votes"]],
                                   "files": [f["file"] for f in device_map[row["tag"]]["in_files"]]})
 
+    # v0.1.242：身份层面的「仍冲突」登记（用户决策的后半句）
+    #   ① 型号为空且同车间同名称多实例 → 既分不开也合不掉，必须人工定；
+    #   ② 名称为空的台账行 → 建不出身份，必须人工补名。
+    # 只登记不处置：设备实例一条不动（擅自合并会丢设备，见 identity_key 注释）。
+    # 这两类与上面的「跨车间冲突」是不同维度：上面的冲突是车间归属，这里是
+    # 身份归属 —— 一台设备的资料挂不挂得对，取决于后者。
+    try:
+        from . import equipment_merge as _em
+        for _c in _em.identity_conflicts(ddir):
+            human_confirm.append(_c)
+        for _n in _em.devices_missing_name(ddir):
+            human_confirm.append(_n)
+    except Exception as _e:  # noqa: BLE001
+        # 不静默：身份冲突登记失败本身就是「人工确认队列不完整」，
+        # 但它是附加信息、不该让整张图谱建不起来
+        human_confirm.append({"type": "身份冲突登记失败", "error": str(_e)[:200]})
+
     # v0.1.23：人工确认结果覆盖/挂载到 layout（设计院图纸为准，人工仲裁兜底）
     for tag, c in confirmed_map.items():
         row = next((r for r in layout if r["tag"] == tag), None)
@@ -851,17 +871,39 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
             "built_at": datetime.datetime.now().isoformat(),
         },
     }
-    _save(graph)
     _append_spatial_summary(graph, docs, idx)
-    # v0.1.35：构建设备空间关系模型（AI 可读的类3D空间结构）
+
+    # v0.1.243：建空间模型之前先把台账设备并进图谱。
+    #
+    # 缺陷（本轮全量自测实证，73 PASS / 2 FAIL 里的第二条）：
+    #   GET /api/relations         → devices 228（load_relations 时合并台账）
+    #   GET /api/spatial/structure → stats.total_devices 0（build 时未合并）
+    # 自测断言「设备数跨接口一致」直接判红：relations=228 spatial=0。
+    #
+    # 根因同上一条 layout 缺陷（同一母题「同一件事两个答案」）：
+    # graph["devices"] 在 build 阶段只来自**已解析文档**，而对外读数还要再加台账。
+    # 空间模型若用 build 阶段的半成品去建，同一个项目就有两套设备集合：
+    # 图纸解析过 = 台数正确；只导入台账未解析图纸 = 空间模型 0 台。
+    # 修法：建模型这一处也走 _merge_index_devices —— 与 load_relations 同一个函数、
+    # 同一份台账、同一个出口，不再自己算一遍。
+    graph = _merge_index_devices(graph, ledger or {})
     try:
         from . import spatial_model
         spatial = spatial_model.build_spatial_model(graph)
-        spatial_model.save_spatial(spatial)
+        # v0.1.243：必须显式给路径。save_spatial(path=None) 走 project_scope.path()，
+        # 那条路径只认「当前项目」—— 隔离目录里跑测试/重建时会写进真实项目
+        # （EE/FF 同病：参数传了、内部没接着传）。这里跟着 ddir 走。
+        spatial_model.save_spatial(spatial, os.path.join(ddir, "spatial_model.json"))
         graph["spatial_stats"] = spatial["stats"]
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _e:  # noqa: BLE001
+        # v0.1.243：不能静默吞掉。原先这里 except 后什么都不留，空间模型为空时
+        # /api/spatial/structure 返回 ok:False「未构建」，而原因无人知晓。
+        graph["spatial_stats"] = {"total_devices": 0, "build_error": str(_e)[:300]}
+        print(f"[relations] 空间模型构建失败: {_e}")
 
+    # 合并台账 + 空间统计都在这里做完再落盘：relations.json 里的设备集合、
+    # stats.devices、spatial_stats 三者出自同一次计算。
+    _save(graph, ddir)
     return graph
 
 
@@ -1072,6 +1114,53 @@ def _merge_index_devices(graph: dict, ledger: dict) -> dict:
             st = {}
             graph["stats"] = st
         st["workshops"] = len(ws_list)
+
+    # v0.1.242：把台账设备也补进 graph["layout"]。
+    #
+    # 缺陷（本轮实证）：上面两段只补 devices 与 workshops，从不碰 layout ——
+    # 而 /api/relations/layout 是按 graph["layout"] 出的。结果是同一时刻：
+    #     GET /api/relations        → devices 228 / workshops 19
+    #     GET /api/relations/layout → items 0 / count 0
+    # 界面「车间-设备布局」页因此空白，而设备清单页有 228 台。
+    # 这是「同一件事两个答案」的第 N 次复现：合并逻辑只补一半。
+    # 口径与 build_relations() 的 layout 行一致，只用台账里真实存在的值：
+    #   workshop 用设备自带的车间（设备只有一个车间时才有单一归属）；
+    #   votes 给一票 weight=1（台账行的证据强度，同 build_relations 的 excel 行）；
+    #   files=0（台账不是图纸，不假装它产生过图纸关联）；
+    #   confirmed=True —— 车间名直接取自台账「车间」列，不是猜的，无需再确认。
+    layout_list = graph.get("layout")
+    if not isinstance(layout_list, list):
+        layout_list = []
+        graph["layout"] = layout_list
+    _have_layout = {r.get("tag") for r in layout_list if isinstance(r, dict)}
+    _layout_added = 0
+    for d in devs:
+        if not isinstance(d, dict):
+            continue
+        tag = d.get("tag")
+        if not tag or tag in _have_layout:
+            continue
+        ws_all = [w for w in (d.get("workshops") or []) if w]
+        if not ws_all:
+            continue          # 没有车间归属的设备不进 layout（与 build_relations 一致）
+        ws_one = ws_all[0] if len(set(ws_all)) == 1 else None
+        layout_list.append({
+            "tag": tag,
+            "workshop": ws_one,
+            "votes": [{"workshop": w, "weight": 1} for w in sorted(set(ws_all))],
+            "files": 0,
+            "confirmed": ws_one is not None,
+            "device_workshop_source": "ledger",
+            "cross_drawings": 0,
+        })
+        _have_layout.add(tag)
+        _layout_added += 1
+    if _layout_added:
+        st = graph.get("stats")
+        if not isinstance(st, dict):
+            st = {}
+            graph["stats"] = st
+        st["layout"] = len(layout_list)
     return graph
 
 
