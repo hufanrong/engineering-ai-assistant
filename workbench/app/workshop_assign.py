@@ -15,8 +15,12 @@ _MIGRATED = False
 _LOCK = threading.RLock()
 
 
-# v0.1.214：非 None 时所有落点都用这个目录（单测/离线重解析的隔离钩子）。
-_ISOLATED_DIR = None
+# v0.1.214 这里是 `_ISOLATED_DIR`（隔离目录开关）。
+# v0.1.245：**已删除**。原来 assign_workshop 靠「改全局 → 调 → finally 还原」
+# 把 data_dir 传下去，并发下会让 A 项目的读者读到 B 的指针（跨项目串味）；
+# 平台化之后一个进程要同时服务多个施工项目，全局可变的落点指针必须消失。
+# 隔离一律走**显式 data_dir 逐层传递**。留一个改了也没用的死开关在这里，
+# 只会让后来人以为「改全局」是可用做法。
 
 # v0.1.235：车间登记册读缓存。
 # list_by_workshop / get_workshop / detect_workshop / _queue_candidate 都会问
@@ -38,7 +42,7 @@ def _assign_file(data_dir=None) -> str:
     界面上表现为「待人工确认」从 0 涨到 10 —— 用户看到一堆自己没上传过的文件。
     这和 upload_queue 那次是同一类：同一个动作，两个落点算出两个目录。
     """
-    ddir = data_dir or _ISOLATED_DIR
+    ddir = data_dir
     if ddir:
         os.makedirs(ddir, exist_ok=True)
         return os.path.join(ddir, "workshop_assign.json")
@@ -107,7 +111,7 @@ def _migrate_legacy():
 def _load(data_dir=None) -> dict:
     # 隔离目录下不做旧文件迁移：迁移是「全局 → 各项目」的一次性动作，
     # 在临时目录里跑会把用户真实的全局历史文件改名备份掉。
-    if not (data_dir or _ISOLATED_DIR):
+    if not data_dir:
         _migrate_legacy()
     f = _assign_file(data_dir)
     if os.path.exists(f):
@@ -370,7 +374,7 @@ def _dir_unit(seg: str):
     return _norm_dir_segment(seg)
 
 
-def _norm_path(path: str):
+def _norm_path(path: str, data_dir=None):
     """v0.1.143：目录路径信号——用户资料一般按车间分文件夹，
     目录名（磨浮车间/锂辉石库/0101-主厂房）是最强线索，优先于文件名。
 
@@ -397,7 +401,9 @@ def _norm_path(path: str):
         if w:
             return w
     # 兜底：段名里包含项目已确认过的空间单元
-    known = _known_set()
+    # v0.1.245：跟随 data_dir —— 否则给项目 A 解析文件时，兜底命中用的是
+    # 「当前项目 B」的登记册与台账，又是一处「参数有、内部没接着传」。
+    known = _known_set(data_dir)
     for seg in reversed(segs):
         for k in sorted(known, key=len, reverse=True):
             if k and k in seg:
@@ -501,7 +507,7 @@ def _match_ledger(hay: str, data_dir=None) -> list:
     return out
 
 
-def _known_set() -> set:
+def _known_set(data_dir=None) -> set:
     """项目已**人工确认**的车间集合（v0.1.235 改口径）。
 
     旧实现（v0.1.143）从 `workshop_assign.json` 的**所有记录**里学车间，只要有人
@@ -512,28 +518,29 @@ def _known_set() -> set:
     现在只认登记册（人工确认过的）：自动推导的名字**没有资格**给别的文件做兜底。
     这正是用户 2026-11-11 说的「人工确认该车间存在时，再正式建立该车间」。
     """
-    names = {r["name"] for r in list_registry() if r.get("name")}
+    names = {r["name"] for r in list_registry(data_dir) if r.get("name")}
     # v0.1.236：台账车间同属权威（用户明确「设备清单里已经给出车间了」）
-    names |= ledger_workshop_names()
+    names |= ledger_workshop_names(data_dir)
     return names
 
 
 def detect_workshop(file_name: str = "", text: str = "", structure: dict = None,
-                    file_path: str = "") -> dict:
+                    file_path: str = "", data_dir=None) -> dict:
     """按优先级识别车间 → {workshop, source, confidence, candidates}。
     无法唯一确认 → workshop=None，candidates 列出候选（供人工）。
     v0.1.143：新增目录路径信号（file_path，0.85）与已知车间兜底（0.6）。
     v0.1.235：结果统一过一遍人工否决名单（_veto_result）——被否决的名字
     不许再出现在 workshop 或 candidates 里。"""
-    return _veto_result(_detect_workshop_raw(file_name, text, structure, file_path))
+    return _veto_result(_detect_workshop_raw(file_name, text, structure, file_path,
+                                              data_dir), data_dir)
 
 
 def _detect_workshop_raw(file_name: str = "", text: str = "", structure: dict = None,
-                         file_path: str = "") -> dict:
+                         file_path: str = "", data_dir=None) -> dict:
     structure = structure or {}
     # 0) **设备台账优先**（v0.1.236）：台账里已经有人填好的车间名，先拿它反查
     hay = f"{file_path or ''} {file_name or ''}"
-    led = _match_ledger(hay)
+    led = _match_ledger(hay, data_dir)
     if len(led) == 1:
         return {"workshop": led[0], "source": "ledger", "confidence": 0.95,
                 "candidates": [led[0]]}
@@ -553,7 +560,7 @@ def _detect_workshop_raw(file_name: str = "", text: str = "", structure: dict = 
             return {"workshop": w, "source": "cad_title", "confidence": 0.9, "candidates": [w]}
     # 2) 目录路径（用户按车间分文件夹是最强工程信号；v0.1.143 新增）
     if file_path:
-        w = _norm_path(file_path)
+        w = _norm_path(file_path, data_dir)
         if w:
             return {"workshop": w, "source": "file_path", "confidence": 0.85, "candidates": [w]}
     # 3) 文件名（v0.1.141：分段解析，识别 0101-锂辉石库-xxx.dwg → 锂辉石库）
@@ -569,7 +576,7 @@ def _detect_workshop_raw(file_name: str = "", text: str = "", structure: dict = 
         # 多车间（如台账/清单跨车间）→ 不强行归单车间，列候选
         return {"workshop": None, "source": "content_multi", "confidence": 0.3, "candidates": cands}
     # 5) 已知车间兜底（v0.1.143）：项目已确认车间，文件名/路径包含该车间名 → 命中
-    known = _known_set()
+    known = _known_set(data_dir)
     if known:
         hay = f"{file_path or ''} {file_name or ''}"
         for w in sorted(known, key=len, reverse=True):
@@ -578,7 +585,7 @@ def _detect_workshop_raw(file_name: str = "", text: str = "", structure: dict = 
     return {"workshop": None, "source": "none", "confidence": 0.0, "candidates": []}
 
 
-def _veto(name):
+def _veto(name, data_dir=None):
     """v0.1.235：人工否决过的名字直接作废。
 
     detect_workshop 的四条自动通道（标题栏/路径/文件名/正文）都会产出名字，
@@ -587,10 +594,10 @@ def _veto(name):
     """
     if not name:
         return name
-    return None if is_workshop_rejected(name) else name
+    return None if is_workshop_rejected(name, data_dir) else name
 
 
-def _veto_result(info: dict) -> dict:
+def _veto_result(info: dict, data_dir=None) -> dict:
     """把 detect_workshop 的结果过两道闸（v0.1.235 / v0.1.236）。
 
     闸① 人工否决名单：否决过的名字不许再出现在 workshop 或 candidates 里。
@@ -605,20 +612,22 @@ def _veto_result(info: dict) -> dict:
     """
     if not isinstance(info, dict):
         return info
-    info["candidates"] = [c for c in (info.get("candidates") or []) if not is_workshop_rejected(c)]
-    if info.get("workshop") and is_workshop_rejected(info["workshop"]):
+    info["candidates"] = [c for c in (info.get("candidates") or [])
+                          if not is_workshop_rejected(c, data_dir)]
+    if info.get("workshop") and is_workshop_rejected(info["workshop"], data_dir):
         info["workshop"] = None
         info["source"] = "rejected"
         if not info["candidates"]:
             info["confidence"] = 0.0
     # 闸②：台账白名单
-    led = ledger_workshop_names()
+    led = ledger_workshop_names(data_dir)
     if led:
         if info.get("candidates"):
-            kept = [c for c in info["candidates"] if c in led or is_workshop_confirmed(c)]
+            kept = [c for c in info["candidates"]
+                    if c in led or is_workshop_confirmed(c, data_dir)]
             info["candidates"] = kept
         if info.get("workshop") and not (
-                info["workshop"] in led or is_workshop_confirmed(info["workshop"])):
+                info["workshop"] in led or is_workshop_confirmed(info["workshop"], data_dir)):
             info["workshop"] = None
             if not info["source"].endswith("_multi"):
                 info["source"] = "not_in_ledger"
@@ -634,24 +643,24 @@ def assign_workshop(sha: str, file_name: str = "", text: str = "", structure: di
     v0.1.214：新增 data_dir —— 临时目录场景（单测 / 离线重解析）必须能指定落点。
     不传时行为不变（写当前项目）。
     """
-    if data_dir:
-        global _ISOLATED_DIR
-        with _LOCK:
-            _prev = _ISOLATED_DIR
-            try:
-                _ISOLATED_DIR = data_dir
-                return _assign_workshop_impl(sha, file_name, text, structure, force, file_path)
-            finally:
-                _ISOLATED_DIR = _prev
-    return _assign_workshop_impl(sha, file_name, text, structure, force, file_path)
+    # v0.1.245：**不再临时改写模块级 _ISOLATED_DIR**。
+    # 原来靠「改全局 → 调 → finally 还原」把 data_dir 传下去，代价是并发串味：
+    # 线程甲在给项目 A 归车间（全局=_A），线程乙此刻读「当前项目 B」的归属
+    # （_load() 不带参数 → _dir_for 解析到 _A），于是 B 读到了 A 的车间归属。
+    # 平台化之后一个进程要同时服务多个施工项目，这种全局可变量不可接受。
+    # 现在 data_dir 一路显式传到底，落点解析只保留一处（_dir_for）。
+    with _LOCK:
+        return _assign_workshop_impl(sha, file_name, text, structure, force, file_path,
+                                     data_dir)
 
 
-def _assign_workshop_impl(sha, file_name, text, structure, force, file_path):
-    m = _load()
+def _assign_workshop_impl(sha, file_name, text, structure, force, file_path,
+                           data_dir=None):
+    m = _load(data_dir)
     existing = m.get(sha)
     if existing and existing.get("source") == "manual" and not force:
         return existing
-    info = detect_workshop(file_name, text, structure, file_path)
+    info = detect_workshop(file_name, text, structure, file_path, data_dir)
 
     # v0.1.235（用户 2026-11-11 指令）：
     #   「所有新建立的车间必须交由人工审批，人工确认该车间存在时，再正式建立该车间，
@@ -661,7 +670,7 @@ def _assign_workshop_impl(sha, file_name, text, structure, force, file_path):
     # 但该车间在正式清单里是**待审批**状态，confirmed=False。
     # 只有 manual_assign / approve_workshop 走过后，confirmed 才为 True。
     _ws = info["workshop"]
-    _confirmed = bool(_ws) and is_workshop_confirmed(_ws)
+    _confirmed = bool(_ws) and is_workshop_confirmed(_ws, data_dir)
     rec = {
         "sha256": sha,
         "file_name": file_name,
@@ -674,10 +683,11 @@ def _assign_workshop_impl(sha, file_name, text, structure, force, file_path):
         "ts": datetime.datetime.now().isoformat(),
     }
     m[sha] = rec
-    _save(m)
+    _save(m, data_dir)
     # 自动推导出的新名字进审批队列（人工确认前只算候选车间）
     if _ws:
-        _queue_candidate(_ws, file_name=file_name, sha=sha, source=info["source"])
+        _queue_candidate(_ws, file_name=file_name, sha=sha, source=info["source"],
+                         data_dir=data_dir)
     return rec
 
 
@@ -713,10 +723,15 @@ def _dir_for(data_dir=None):
     """
     if data_dir:
         return data_dir
-    if _ISOLATED_DIR:
-        return _ISOLATED_DIR
     af = _assign_file()
     return os.path.dirname(af) if af else None
+
+
+# v0.1.245 平台化通则（写在这里，后续新增落点必须遵守）：
+#   ① 任何落盘点都必须跟随 data_dir —— 不允许「函数收了参数、内部调用却不传」；
+#   ② 落点解析收敛到**单一函数**（本模块的 _dir_for / scanner 的 _get_data_dir）；
+#   ③ 读路径不得依赖任何一次写操作留下的全局状态；
+#   ④ 禁止「临时改全局再 finally 还原」传递参数（并发下会串项目）。
 
 
 def _load_registry(data_dir=None) -> dict:
@@ -782,7 +797,8 @@ def _save_candidates(c: dict, data_dir=None) -> bool:
         return False
 
 
-def _queue_candidate(name: str, file_name: str = "", sha: str = "", source: str = "") -> None:
+def _queue_candidate(name: str, file_name: str = "", sha: str = "", source: str = "",
+                     data_dir=None) -> None:
     """把自动推导出的车间名登记进待审批队列（v0.1.235）。
 
     只记「证据」不记「决定」：同一名字多次命中累加样本，供人工判断这是不是真车间。
@@ -791,9 +807,9 @@ def _queue_candidate(name: str, file_name: str = "", sha: str = "", source: str 
     name = (name or "").strip()
     if not name or name == "未归车间":
         return
-    if is_workshop_confirmed(name):
+    if is_workshop_confirmed(name, data_dir):
         return
-    c = _load_candidates()
+    c = _load_candidates(data_dir)
     rec = c.get(name) or {"name": name, "count": 0, "samples": [], "sources": [],
                           "first_ts": datetime.datetime.now().isoformat()}
     rec["count"] = int(rec.get("count", 0)) + 1
@@ -804,7 +820,7 @@ def _queue_candidate(name: str, file_name: str = "", sha: str = "", source: str 
         rec.setdefault("sources", []).append(source)
     rec["last_ts"] = datetime.datetime.now().isoformat()
     c[name] = rec
-    _save_candidates(c)
+    _save_candidates(c, data_dir)
 
 
 def is_workshop_confirmed(name: str, data_dir=None) -> bool:
@@ -824,7 +840,8 @@ def is_workshop_confirmed(name: str, data_dir=None) -> bool:
     return False
 
 
-def approve_workshop(name: str, approved_by: str = "", note: str = "") -> dict:
+def approve_workshop(name: str, approved_by: str = "", note: str = "",
+                     data_dir=None) -> dict:
     """人工确认车间存在 → 正式建立（v0.1.235）。
 
     确认后：① 写登记册；② 从待审批队列移除；③ 把此前**临时归入**该名字的文件
@@ -833,7 +850,7 @@ def approve_workshop(name: str, approved_by: str = "", note: str = "") -> dict:
     name = (name or "").strip()
     if not name or name == "未归车间":
         raise ValueError("车间名不能为空")
-    reg = _load_registry()
+    reg = _load_registry(data_dir)
     reg[name] = {
         "name": name,
         "confirmed": True,
@@ -841,23 +858,24 @@ def approve_workshop(name: str, approved_by: str = "", note: str = "") -> dict:
         "confirmed_ts": datetime.datetime.now().isoformat(),
         "note": note or "",
     }
-    ok_reg = _save_registry(reg)
-    c = _load_candidates()
+    ok_reg = _save_registry(reg, data_dir)
+    c = _load_candidates(data_dir)
     c.pop(name, None)
-    _save_candidates(c)
+    _save_candidates(c, data_dir)
     # 临时归入该名字的文件转正
-    m = _load()
+    m = _load(data_dir)
     n = 0
     for sha, rec in m.items():
         if (rec.get("workshop") or "").strip() == name and not rec.get("confirmed"):
             rec["confirmed"] = True
             n += 1
     if n:
-        _save(m)
+        _save(m, data_dir)
     return {"workshop": name, "registry_saved": ok_reg, "files_promoted": n}
 
 
-def reject_workshop(name: str, rejected_by: str = "", note: str = "") -> dict:
+def reject_workshop(name: str, rejected_by: str = "", note: str = "",
+                    data_dir=None) -> dict:
     """人工否决该车间不存在 → 不建立（v0.1.235）。
 
     否决后：① 名字从队列移除并记入黑名单，下次自动推导命中它直接当无效；
@@ -866,7 +884,7 @@ def reject_workshop(name: str, rejected_by: str = "", note: str = "") -> dict:
     name = (name or "").strip()
     if not name:
         raise ValueError("车间名不能为空")
-    reg = _load_registry()
+    reg = _load_registry(data_dir)
     reg[name] = {
         "name": name,
         "confirmed": False,
@@ -875,11 +893,11 @@ def reject_workshop(name: str, rejected_by: str = "", note: str = "") -> dict:
         "rejected_ts": datetime.datetime.now().isoformat(),
         "note": note or "",
     }
-    _save_registry(reg)
-    c = _load_candidates()
+    _save_registry(reg, data_dir)
+    c = _load_candidates(data_dir)
     c.pop(name, None)
-    _save_candidates(c)
-    m = _load()
+    _save_candidates(c, data_dir)
+    m = _load(data_dir)
     n = 0
     for sha, rec in m.items():
         if (rec.get("workshop") or "").strip() == name:
@@ -889,17 +907,17 @@ def reject_workshop(name: str, rejected_by: str = "", note: str = "") -> dict:
             rec["source"] = "rejected"
             n += 1
     if n:
-        _save(m)
+        _save(m, data_dir)
     return {"workshop": name, "files_released": n}
 
 
-def is_workshop_rejected(name: str) -> bool:
+def is_workshop_rejected(name: str, data_dir=None) -> bool:
     """人工已否决的名字（v0.1.235）：自动推导再次命中它应当直接无效。"""
-    rec = _load_registry().get((name or "").strip())
+    rec = _load_registry(data_dir).get((name or "").strip())
     return bool(isinstance(rec, dict) and rec.get("rejected"))
 
 
-def list_candidates() -> list:
+def list_candidates(data_dir=None) -> list:
     """待审批车间清单（v0.1.235）：按命中样本数降序，给界面用。
 
     v0.1.237（实测复现）：正式清单已按台账裁干净了，**待审批区还在挂「选矿厂」**
@@ -908,14 +926,15 @@ def list_candidates() -> list:
     必须跟正式清单用同一把尺子（`is_workshop_allowed`），否则只是把脏名字
     从左边挪到了右边。
     """
-    c = _load_candidates()
+    c = _load_candidates(data_dir)
     rows = []
     for name, rec in c.items():
-        if is_workshop_confirmed(name) or is_workshop_rejected(name):
+        if is_workshop_confirmed(name, data_dir) or is_workshop_rejected(name, data_dir):
             continue
         # 台账权威时，台账外的名字连「待审批」都不显示（人要审的是真的没定的事，
         # 不是审「这个猜出来的名字像不像车间」）
-        if _ledger_is_authoritative() and name not in ledger_workshop_names():
+        if (_ledger_is_authoritative(data_dir)
+                and name not in ledger_workshop_names(data_dir)):
             continue
         rows.append({"name": name,
                      "count": int(rec.get("count", 0)),
@@ -927,35 +946,37 @@ def list_candidates() -> list:
     return rows
 
 
-def list_registry() -> list:
+def list_registry(data_dir=None) -> list:
     """已人工确认的车间（v0.1.235）。"""
-    reg = _load_registry()
+    reg = _load_registry(data_dir)
     return [{"name": k, **v} for k, v in sorted(reg.items()) if isinstance(v, dict)
             and v.get("confirmed")]
 
 
-def manual_assign(sha: str, workshop: str, file_name: str = "") -> dict:
-    m = _load()
+def manual_assign(sha: str, workshop: str, file_name: str = "", data_dir=None) -> dict:
+    m = _load(data_dir)
     rec = m.get(sha, {})
     # v0.1.235：人工指定 = 人工确认该车间存在。必须同时写登记册，
     # 否则会出现「文件已人工指定、但车间在清单里仍是待审批」的自相矛盾。
     if workshop and workshop != "未归车间":
-        approve_workshop(workshop, approved_by="manual_assign", note="人工指定文件车间")
+        approve_workshop(workshop, approved_by="manual_assign", note="人工指定文件车间",
+                         data_dir=data_dir)
     rec.update({
         "sha256": sha, "file_name": file_name or rec.get("file_name", ""),
         "workshop": workshop, "source": "manual", "confidence": 1.0,
         "candidates": [workshop], "confirmed": bool(workshop), "ts": datetime.datetime.now().isoformat(),
     })
     m[sha] = rec
-    _save(m)
+    _save(m, data_dir)
     return rec
 
 
-def batch_assign(shas: list, workshop: str) -> int:
-    m = _load()
+def batch_assign(shas: list, workshop: str, data_dir=None) -> int:
+    m = _load(data_dir)
     # v0.1.235：批量人工指定同样是人工确认该车间存在
     if workshop and workshop != "未归车间":
-        approve_workshop(workshop, approved_by="batch_assign", note="批量指定文件车间")
+        approve_workshop(workshop, approved_by="batch_assign", note="批量指定文件车间",
+                         data_dir=data_dir)
     n = 0
     for sha in shas:
         rec = m.get(sha, {})
@@ -964,52 +985,53 @@ def batch_assign(shas: list, workshop: str) -> int:
                     "confirmed": bool(workshop), "ts": datetime.datetime.now().isoformat()})
         m[sha] = rec
         n += 1
-    _save(m)
+    _save(m, data_dir)
     return n
 
 
-def re_auto_unassigned() -> int:
+def re_auto_unassigned(data_dir=None) -> int:
     """重新自动识别：未归车间 + 低置信度（<0.6）的文件，人工登记跳过。
     v0.1.143：修复空转——此前调用 scanner._load_cache 但该函数不存在，
     hasattr 恒 False → 所有文件 continue，按钮永远返回 0。
     现在正确读取解析缓存，并用 index 里的路径（orig_path/绝对路径）作目录信号。"""
     from . import scanner
-    idx = scanner._load_index()
+    idx = scanner._load_index(data_dir)
     n = 0
     for sha, info in idx.items():
         if sha in scanner.INDEX_RESERVED_KEYS or not isinstance(info, dict):
             continue
-        rec = _load().get(sha, {})
+        rec = _load(data_dir).get(sha, {})
         if rec.get("source") == "manual":
             continue
         if rec.get("workshop") and float(rec.get("confidence", 0)) >= 0.6:
             continue
-        cache = scanner._load_cache(sha)
+        cache = scanner._load_cache(sha, data_dir)
         fname = (cache or {}).get("file_name") or info.get("file_name", "")
         text = (cache or {}).get("text", "") or ""
         structure = (cache or {}).get("structure") or {}
         fpath = info.get("orig_path") or info.get("file_path", "") or ""
-        new_rec = assign_workshop(sha, fname, text, structure, force=True, file_path=fpath)
+        new_rec = assign_workshop(sha, fname, text, structure, force=True, file_path=fpath,
+                                   data_dir=data_dir)
         if new_rec.get("workshop"):
             n += 1
     return n
 
 
-def list_pending_by_workshop() -> dict:
+def list_pending_by_workshop(data_dir=None) -> dict:
     """{候选车间名: [临时归入它的文件]}（v0.1.235）。
 
     用户要求「可以先将文件暂时归类进去」——所以文件不丢，但**分组归属在
     审批通过前不算正式车间**。界面用这份数据渲染「待审批车间」区，
     每条带确认/否决按钮。
     """
-    m = _load()
+    m = _load(data_dir)
     out = {}
-    led = ledger_workshop_names()
+    led = ledger_workshop_names(data_dir)
     for sha, rec in m.items():
         w = (rec.get("workshop") or "").strip()
-        if not w or is_workshop_confirmed(w):
+        if not w or is_workshop_confirmed(w, data_dir):
             continue
-        if is_workshop_rejected(w):
+        if is_workshop_rejected(w, data_dir):
             continue
         # v0.1.237：台账外名字不显示为「待审批车间」（口径同 list_candidates）
         if led and w not in led:
@@ -1020,17 +1042,19 @@ def list_pending_by_workshop() -> dict:
     return out
 
 
-def approve_all_candidates(approved_by: str = "batch_approve", note: str = "") -> dict:
+def approve_all_candidates(approved_by: str = "batch_approve", note: str = "",
+                            data_dir=None) -> dict:
     """把当前待审批队列**全部**确认为正式车间（v0.1.235）。
 
     仍然是人触发的动作（界面上一个按钮），不是自动确认——用途是升级后
     把历史项目已经对过的车间批量转正，免得一个个点。
     """
-    names = [c["name"] for c in list_candidates()]
+    names = [c["name"] for c in list_candidates(data_dir)]
     ok, promoted = 0, 0
     for name in names:
         try:
-            r = approve_workshop(name, approved_by=approved_by, note=note or "批量确认")
+            r = approve_workshop(name, approved_by=approved_by, note=note or "批量确认",
+                                  data_dir=data_dir)
             ok += 1 if r.get("registry_saved") else 0
             promoted += int(r.get("files_promoted") or 0)
         except Exception:  # noqa: BLE001
@@ -1038,7 +1062,7 @@ def approve_all_candidates(approved_by: str = "batch_approve", note: str = "") -
     return {"approved": ok, "files_promoted": promoted, "names": names}
 
 
-def list_by_workshop(include_candidates: bool = False) -> dict:
+def list_by_workshop(include_candidates: bool = False, data_dir=None) -> dict:
     """{workshop: [rec], "未归车间": [rec]} —— **只含已人工确认的车间**（v0.1.235）。
 
     自动推导出、还没审批的名字**不出现在这里**（否则它就成了正式车间，
@@ -1048,30 +1072,30 @@ def list_by_workshop(include_candidates: bool = False) -> dict:
     include_candidates=True 保留旧行为（把它们也当 key 返回），仅供需要
     「看文件暂时归在哪」的导出/排查场景，不用于对外车间清单。
     """
-    m = _load()
+    m = _load(data_dir)
     out = {}
     for sha, rec in m.items():
         w = (rec.get("workshop") or "").strip()
         if not w:
             out.setdefault("未归车间", []).append(rec)
             continue
-        if include_candidates or is_workshop_confirmed(w):
+        if include_candidates or is_workshop_confirmed(w, data_dir):
             out.setdefault(w, []).append(rec)
     for w in out:
         out[w].sort(key=lambda r: r.get("ts", ""), reverse=True)
     return out
 
 
-def get_workshop(sha: str) -> str:
+def get_workshop(sha: str, data_dir=None) -> str:
     """relations 用：取登记车间（人工优先），无则 None。
 
     v0.1.235：只返回**已确认**车间。候选名字（自动推导、未审批）返回 None ——
     否则关系图谱/按车间组卷会把「主减速机油站」当成真车间写进去，
     用户否决了也没用（下游已经把假车间固化了）。
     """
-    m = _load()
+    m = _load(data_dir)
     rec = m.get(sha)
     w = (rec or {}).get("workshop")
     if not w:
         return None
-    return w if is_workshop_confirmed(w) else None
+    return w if is_workshop_confirmed(w, data_dir) else None

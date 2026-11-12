@@ -35,6 +35,7 @@ import json
 import os
 import sys
 import tempfile
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -165,13 +166,47 @@ def main():
     print(f"        真实项目数据目录: {os.path.basename(real_dir)}")
     real_conf = em.identity_conflicts(real_dir)
     real_nl = em.devices_missing_name(real_dir)
-    check("N4a 真实项目身份冲突组数", 14, len(real_conf), len(real_conf) == 14,
+    # v0.1.246：原来这里写死「14 组」。平台要服务多个施工项目，写死数字等于
+    # 只对这一份资料成立。现在从同一份 index.json **独立复算**期望值再比对。
+    _ridx = os.path.join(real_dir, "index.json")
+    _rdev = {}
+    if os.path.isfile(_ridx):
+        _rdev = json.load(open(_ridx, encoding="utf-8")).get("devices") or {}
+
+    def _nz(x):
+        return " ".join(unicodedata.normalize("NFKC", str(x or ""))
+                        .replace("\u3000", " ").split()).strip()
+
+    _groups = {}
+    for _t, _d in _rdev.items():
+        if not isinstance(_d, dict):
+            continue
+        _nm = _nz(_d.get("name"))
+        if not _nm:
+            continue
+        _k = (_nz(_d.get("workshop")) + "|" + _nm + "|" + _nz(_d.get("model")).upper())
+        _groups.setdefault(_k, []).append(_t)
+    # 冲突定义：同车间+同名称+型号为空 且 多实例（与 identity_conflicts 同义）
+    _exp_conf = sum(1 for _k, _rows in _groups.items()
+                     if len(_rows) >= 2 and not _k.rsplit("|", 1)[-1])
+    check("N4a 身份冲突组数 == 独立复算值（不写死当前资料数字）",
+          _exp_conf, len(real_conf), len(real_conf) == _exp_conf,
+          f"台账 {len(_rdev)} 台 / 复算冲突 {_exp_conf} 组 / 实现给出 {len(real_conf)} 组；"
           f"涉及设备 {sum(len(c.get('tags') or []) for c in real_conf)} 台")
     # 数量合计必须分单位：混着加会把 kg 和台加成一个没有意义的数
+    # v0.1.246：原来这条断言「真实数据里没有跨单位组」是**对当前资料的快照**
+    # （别的项目有跨单位组就会假红）。改成平台级不变量：
+    #   跨单位组 → 绝不给单一合计；单单位组 → 合计必须等于该单位小计。
     mixed = [c for c in real_conf if len(c.get("qty_by_unit") or {}) > 1]
-    check("N4c 真实数据里没有跨单位冲突组（现状记录，非守卫）", 0, len(mixed), len(mixed) == 0,
-          "实测「水源取水/螺旋焊接钢管」数量 705901.5 + 526149 单位 kg，"
-          "与台数相加会得出 1232163 这种毫无意义的数字")
+    bad_mixed = [c.get("name") for c in mixed if c.get("total_qty") is not None]
+    bad_single = [c.get("name") for c in real_conf
+                  if len(c.get("qty_by_unit") or {}) == 1 and c.get("total_qty") is None]
+    check("N4c 跨单位冲突组不得给单一合计（台与 kg 不能相加）",
+          [], bad_mixed, not bad_mixed,
+          f"跨单位组 {len(mixed)} 个；把 kg 和台相加会得出 1232163 这种毫无意义的数字")
+    check("N4c2 单单位冲突组的合计必须存在（不得凭空丢数）",
+          [], bad_single, not bad_single,
+          f"单单位组里合计为空的={bad_single}")
 
     # 上面这条在真实数据上恒为真（样本里本来就没有跨单位组），是现状记录不是守卫。
     # 真正能测出「跨单位相加」的，是下面这条构造数据断言。
@@ -191,7 +226,10 @@ def main():
           mixed1.get("total_qty"), mixed1.get("total_qty") is None,
           f"实际 qty_by_unit={mixed1.get('qty_by_unit')}；"
           "若这里给出 123 就是把「台」和「kg」加在了一起")
-    check("N4b 真实项目空名行数", 13, len(real_nl), len(real_nl) == 13,
+    _exp_nl = sum(1 for _t, _d in _rdev.items()
+                  if isinstance(_d, dict) and not str(_d.get("name") or "").strip())
+    check("N4b 空名行数 == 台账里名称列为空的行数（现算，不写死 13）",
+          _exp_nl, len(real_nl), len(real_nl) == _exp_nl,
           "这些行在台账里就是空名，补名后身份键才算完整")
 
     # ---------- N7 layout 与 devices 必须是同一个答案 ----------

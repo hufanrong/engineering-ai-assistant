@@ -103,7 +103,10 @@ from app import device_workshop as dw  # noqa: E402
 # v0.2.19x 记录过的老坑，测试里必须显式重算。
 pm.PROJECTS_ROOT = os.path.join(_TMP, "projects")
 pm.CURRENT_PROJECT_FILE = os.path.join(_TMP, "current_project.json")
-wa._ISOLATED_DIR = _TMP
+# v0.1.246：模块级 _ISOLATED_DIR 已被平台化改造删除（它是被临时改写的可变全局，
+# 并发下会让 A 项目的读者读到 B 的落点）。隔离只剩两条正路：
+#   ① 显式传 data_dir；② 切当前项目。
+# 本文件的 R8 / R6d 已按这两条重写。
 
 RESULTS = []
 LEDGER_A = "粗碎站"
@@ -275,8 +278,8 @@ def main():
           {"P-301", "P-302"} <= pend_tags)
 
     # ---------- R4：人工登记是显式点头，台账外也放行 ----------
-    # 必须显式传 data_dir=d1：不传就会用 _ISOLATED_DIR（_TMP 根）里的 index.json，
-    # 那份没有台账 —— 闸门因"台账为空"而放行，这两条就成了假守卫。
+    # 必须显式传 data_dir=d1：不传就会落到「当前项目」的数据目录，那份没有台账 ——
+    # 闸门因"台账为空"而放行，这两条就成了假守卫。
     wa._LEDGER_CACHE.clear()
     dw.assign_device("X-999", "人工定的车间", source="manual", confidence=1.0, force=True,
                      data_dir=d1)
@@ -310,6 +313,16 @@ def main():
                            force=True, data_dir=d2)
     check("R5b 台账为空时自动登记仍可写入（不把一切判空）", True, ok5, ok5 is True)
 
+    # ---------- R6：无当前项目时数据目录必须跟随 config.DATA_DIR ----------
+    ddir_now = pm.get_project_data_dir()
+    check("R6 无当前项目时 get_project_data_dir 跟随 DATA_DIR", _TMP, ddir_now,
+          os.path.abspath(ddir_now) == os.path.abspath(_TMP),
+          "写成安装目录就说明又绕开了 config.DATA_DIR")
+    store = dw._store_path()
+    check("R6b device_workshop 落点也在 DATA_DIR 下（不写真实 data/）",
+          True, store, os.path.abspath(store).startswith(os.path.abspath(_TMP)),
+          f"实际 {store}")
+
     # ---------- R8：rebuild_from_excel 必须把 data_dir 接力给抽取器 ----------
     # 这条路径的缺陷方向与 R1/R2 相反：不是「脏名字漏进来」，而是**干净名字被别处
     # 的台账误裁**。实测（2026-11-12）：项目 A 的台账为空（按约定应退回旧逻辑、
@@ -319,23 +332,26 @@ def main():
     # 两种写法结果都是 0（下游 assign_device 闸门挡住了），所以**那种场景区分不出
     # 对错**，不能拿它当判据。
     d3 = os.path.join(_TMP, "p3")
-    d4 = os.path.join(_TMP, "p4")
     _write(os.path.join(d3, "index.json"), {
         "sha_relay": {"id": "sha_relay", "sha256": "sha_relay", "file_name": "A台账.xlsx",
                       "file_type": "xlsx", "status": "parsed", "ts": "2026-01-01"},
         "devices": {},
-    })
-    _write(os.path.join(d4, "index.json"), {
-        "devices": {"B-201": {"tag": "B-201", "name": "浮选机", "workshop": LEDGER_A,
-                              "source_file": "B台账.xlsx"}},
     })
     relay_cache = {"sha256": "sha_relay", "file_name": "A台账.xlsx", "parser": "excel",
                    "status": "parsed", "text": "",
                    "structure": {"sheets": [{"header": ["位号", "设备名称", "车间"],
                                              "rows": [{"位号": "P-301", "设备名称": "泵",
                                                        "车间": RELAY_WS}]}]}}
-    # 环境台账（不传 data_dir 时读到的那个）= d4
-    wa._ISOLATED_DIR = d4
+    # v0.1.246：环境台账不再靠模块级 _ISOLATED_DIR 伪造，而是**真建一个施工项目 B
+    # 并把它设为当前项目** —— 「环境」= 当前项目，这才是多施工项目平台上真实的
+    # 并发场景（用户正看着项目 B，手上在处理项目 A 的资料）。
+    _pb = pm.create_project("闸门测试-环境项目B")
+    _pid_b = _pb["project"]["id"]
+    pm.set_current_project(_pid_b, log=False)
+    _write(os.path.join(pm.get_project_data_dir(_pid_b), "index.json"), {
+        "devices": {"B-201": {"tag": "B-201", "name": "浮选机", "workshop": LEDGER_A,
+                              "source_file": "B台账.xlsx"}},
+    })
     wa._LEDGER_CACHE.clear()
     try:
         led_a = wa.ledger_workshop_names(d3)
@@ -354,35 +370,41 @@ def main():
               f"旧写法实测 n=0 / P-301=''（设备归属整条丢失），hint 被环境台账裁成 None；"
               f"现在 n={n_relay} / P-301={got!r}")
     finally:
-        wa._ISOLATED_DIR = _TMP
         wa._LEDGER_CACHE.clear()
 
-    # ---------- R6：无当前项目时数据目录必须跟随 config.DATA_DIR ----------
-    ddir_now = pm.get_project_data_dir()
-    check("R6 无当前项目时 get_project_data_dir 跟随 DATA_DIR", _TMP, ddir_now,
-          os.path.abspath(ddir_now) == os.path.abspath(_TMP),
-          "写成安装目录就说明又绕开了 config.DATA_DIR")
-    store = dw._store_path()
-    check("R6b device_workshop 落点也在 DATA_DIR 下（不写真实 data/）",
-          True, store, os.path.abspath(store).startswith(os.path.abspath(_TMP)),
-          f"实际 {store}")
-
+    # ---------- R6b/R6c/R6d：落点解析的三级优先级（显式 > 当前项目 > 全局） ----------
     # R6b 只证明「全局兜底跟了 DATA_DIR」，证明不了 _store_path 真的**认**调用方给的目录。
-    # 下面两条才是接力判据：显式 data_dir > 隔离目录。缺任一条，传了目录也会写回别处。
+    # 下面两条才是接力判据：显式 data_dir 优先。缺了它，传了目录也会写回别处。
     store_d1 = dw._store_path(d1)
     check("R6c 显式 data_dir 优先：落点就在调用方给的目录",
           os.path.join(d1, "device_workshop.json"), store_d1,
           os.path.abspath(store_d1) == os.path.abspath(os.path.join(d1, "device_workshop.json")),
           "传了目录却写到别处 = data_dir 没接力（EE/FF 同病）")
-    dw._ISOLATED_DIR = d1
-    try:
-        store_iso = dw._store_path()
-    finally:
-        dw._ISOLATED_DIR = None
-    check("R6d 隔离目录生效：不传 data_dir 时也落在隔离目录",
-          os.path.join(d1, "device_workshop.json"), store_iso,
-          os.path.abspath(store_iso) == os.path.abspath(os.path.join(d1, "device_workshop.json")),
-          "隔离目录被忽略 = 测试/离线场景会写进用户项目")
+
+    # R6d（v0.1.246 重写）：不传 data_dir 时，落点必须跟随**当前项目**。
+    # 老写法靠模块级 _ISOLATED_DIR 做隔离 —— 那是会被临时改写的可变全局，
+    # 并发下 A 项目的读者会读到 B 的落点（v0.1.245 已删除该机制）。
+    # 平台化之后「不传 data_dir」只有一个合法答案：跟着当前项目走。
+    _cur_dir = pm.get_project_data_dir()
+    store_cur = dw._store_path()
+    check("R6d 不传 data_dir 时落点跟随当前项目（不是全局目录）",
+          os.path.join(_cur_dir, "device_workshop.json"), store_cur,
+          os.path.abspath(store_cur) == os.path.abspath(os.path.join(_cur_dir, "device_workshop.json")),
+          "落点没跟当前项目 = 换个项目登记就串到上一个项目")
+    # 再建一个项目（create_project 会自动切过去）：落点必须换，
+    # 否则「跟随当前项目」只是一句空话。
+    _pc = pm.create_project("闸门测试-项目C")
+    _pid_c = _pc["project"]["id"]
+    store_c = dw._store_path()
+    check("R6d2 切换项目后落点跟着换（两个项目两个落点）",
+          "两个落点不同", store_c,
+          os.path.abspath(store_c) != os.path.abspath(store_cur)
+          and os.path.abspath(store_c).startswith(os.path.abspath(_TMP)),
+          "切换后落点没变 = 两个项目的设备登记写进同一个地方")
+    check("R6d3 切换后当前项目指针与落点一致",
+          _pid_c, (pm.get_current_project() or {}).get("id"),
+          (pm.get_current_project() or {}).get("id") == _pid_c,
+          "指针没切 = 界面显示的项目和实际落点对不上（同一件事两个答案）")
 
     # ---------- R7：本测试没有污染真实数据 ----------
     after_proj = _snap_dir(_REAL_PROJECTS)

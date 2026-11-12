@@ -15,8 +15,11 @@ import requests
 
 from . import config
 
-QUEUE_DIR = None          # 延迟初始化
-LOG_PATH = None
+# v0.1.245：这里原来有模块级 `QUEUE_DIR = None` / `LOG_PATH = None`，
+# 由 `_ensure()` 每次调用改写。它们是「多施工项目平台」的头号串味源：
+# 谁调用 _ensure() 谁就改了全局，于是 A 项目的入队会改掉 B 项目读到的落点。
+# 现在落点一律由 `_resolve_dir()` 现算，**模块里不存在任何可变落点全局**。
+# （旧测试里对 uq.QUEUE_DIR 的引用已同步改为 uq._queue_dir(...)。）
 
 
 def _get_data_dir():
@@ -31,38 +34,51 @@ def _get_data_dir():
     return config.DATA_DIR
 
 
-_ISOLATED_DIR = None   # v0.1.212：非 None 时所有落点都用这个目录（测试/离线隔离）
+def _resolve_dir(data_dir=None) -> str:
+    """队列落点目录（v0.1.245）：显式 data_dir > 当前项目。
+
+    v0.1.245 之前，落点解析的结果被写进**模块级** QUEUE_DIR/LOG_PATH，谁调用
+    `_ensure()` 谁就改了全局。多项目并行时这就是「同一件事两个答案」：
+      · 线程甲给项目 A 入队（临时把落点全局改成 A 的目录）
+      · 线程乙同一时刻读项目 B 的 pending_count()/list_pending()
+        → 解析到 A 的目录，A 的待上传包显示在 B 的界面上
+    多施工项目平台的第一号事故：项目之间互相串包。
+    修法：落点解析收敛到本函数，**每个调用自己算自己的目录**，
+    不依赖任何可变全局；隔离一律走显式 data_dir。
+    """
+    return data_dir or _get_data_dir()
+
+
+def _queue_dir(ddir: str) -> str:
+    return os.path.join(ddir, "upload_queue")
+
+
+def _log_path(ddir: str) -> str:
+    return os.path.join(ddir, "upload_log.jsonl")
 
 
 def _ensure(data_dir=None):
-    global QUEUE_DIR, LOG_PATH
-    # v0.1.212：允许显式指定数据目录。原来恒走「当前项目」，于是
-    # 任何在临时目录里跑的单测/重解析都会把包写进**用户真实项目**的队列 ——
-    # 实测事故：tools/test_source_path_fields.py 造的样本
-    # 直接进了 322fef90 的待上传队列（pending 变 4），界面上就是 4 个待上传的真文件。
-    #
-    # 为什么用模块级 _ISOLATED_DIR 而不是「临时改全局再还原」：
-    # 第一版就是这么写的（进 enqueue 时把 QUEUE_DIR 指到临时目录、finally 还原），
-    # 结果**索引进了临时目录、包文件却进了真实队列** —— 因为 _enqueue_locked
-    # 中间会调 _node_id()，而 _node_id() 内部又调了一次 _ensure()，
-    # 不带参数就把 QUEUE_DIR 重置回「当前项目」。同一份入队逻辑，
-    # 两个落点算出两个目录，又是「同一件事两个答案」。
-    # 所以覆盖必须放在 _ensure 这一层，任何内部调用都会尊重它。
-    ddir = data_dir or _ISOLATED_DIR or _get_data_dir()
-    QUEUE_DIR = os.path.join(ddir, "upload_queue")
-    LOG_PATH = os.path.join(ddir, "upload_log.jsonl")
+    """解析并确保队列目录存在，返回**数据目录**（不是队列子目录）。
+
+    v0.1.245：这里原来把结果写进模块级 QUEUE_DIR/LOG_PATH。可变全局是并发
+    串扰的根源（谁调用谁改），多项目并行时 A 的入队会改掉 B 读到的落点。
+    现在只返回算好的目录，调用方自己往下带；不再有任何模块级落点全局。
+    """
+    ddir = _resolve_dir(data_dir)
     # 目录可能被外部删除/移动（如整库迁移、导入合并后继续扫描），每次确保存在
-    os.makedirs(QUEUE_DIR, exist_ok=True)
+    os.makedirs(_queue_dir(ddir), exist_ok=True)
+    return ddir
 
 
 _IDX_FILE = "_sha_index.json"
 
 
-def _idx_path():
-    return os.path.join(QUEUE_DIR, _IDX_FILE)
+def _idx_path(ddir=None):
+    ddir = ddir or _resolve_dir()
+    return os.path.join(_queue_dir(ddir), _IDX_FILE)
 
 
-def _load_idx() -> dict:
+def _load_idx(ddir=None) -> dict:
     """队列内 sha256 索引 {sha: 包名}（v0.1.177）。
 
     实测事故：上传队列里已有 357 个包时，每上传 1 个文件都要把 357 个 JSON
@@ -72,7 +88,7 @@ def _load_idx() -> dict:
     索引损坏/不存在时自动退回全量扫描并重建，不会因为索引丢了就重复入队。
     """
     try:
-        with open(_idx_path(), encoding="utf-8") as f:
+        with open(_idx_path(ddir), encoding="utf-8") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:  # noqa: BLE001
@@ -88,10 +104,10 @@ def _load_idx() -> dict:
 _IDX_LOCK = threading.RLock()
 
 
-def _save_idx(idx: dict) -> None:
+def _save_idx(idx: dict, ddir=None) -> None:
     """原子写队列索引。临时文件名必须唯一，否则并发写互相踩踏（见上）。"""
     with _IDX_LOCK:
-        path = _idx_path()
+        path = _idx_path(ddir)
         tmp = f"{path}.{uuid.uuid4().hex[:8]}.tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as f:
@@ -112,15 +128,16 @@ def _save_idx(idx: dict) -> None:
                 pass
 
 
-def _rebuild_idx() -> dict:
+def _rebuild_idx(ddir=None) -> dict:
     """兜底：索引缺失时全量扫描一次并落盘（只在首次/索引损坏时发生）。"""
     idx = {}
+    qdir = _queue_dir(ddir or _resolve_dir())
     try:
-        for existing in os.listdir(QUEUE_DIR):
+        for existing in os.listdir(qdir):
             if not existing.endswith(".json") or existing == _IDX_FILE:
                 continue
             try:
-                with open(os.path.join(QUEUE_DIR, existing), encoding="utf-8") as ef:
+                with open(os.path.join(qdir, existing), encoding="utf-8") as ef:
                     ep = json.load(ef)
                 sha = (ep.get("payload") or {}).get("sha256")
                 if sha:
@@ -129,7 +146,7 @@ def _rebuild_idx() -> dict:
                 continue
     except Exception:  # noqa: BLE001
         pass
-    _save_idx(idx)
+    _save_idx(idx, ddir)
     return idx
 
 
@@ -137,19 +154,13 @@ def enqueue(parse_result, data_dir=None) -> str:
     """把一个解析结果打包进上传队列，返回包文件名（不含扩展）。
     v0.1.138：payload 附带 project_id/project_name，云端按项目合并（同项目合并，不同项目不合并）。
     v0.1.144：按 sha256 去重——队列中已有相同内容的包时跳过（重复解析不重复入队）。
-    v0.1.212：新增 data_dir，供临时目录场景（单测、离线重解析）隔离队列。"""
-    if data_dir:
-        global _ISOLATED_DIR
-        with _IDX_LOCK:
-            _prev = _ISOLATED_DIR
-            try:
-                _ISOLATED_DIR = data_dir
-                _ensure()
-                return _enqueue_locked(parse_result)
-            finally:
-                _ISOLATED_DIR = _prev
-                _ensure()      # 还原后重建真实目录，别留下指向临时目录的全局
-    _ensure()
+    v0.1.212：新增 data_dir，供临时目录场景（单测、离线重解析）隔离队列。
+    v0.1.245：落点解析不再改写模块级 _ISOLATED_DIR。原来在函数里临时改全局、
+    finally 还原，扫描线程与网页线程并发时会互相把对方的目录改掉 ——
+    项目 A 的包出现在项目 B 的待上传列表里。现在整条链路显式带 ddir 往下传。
+    """
+    ddir = _resolve_dir(data_dir)
+    os.makedirs(_queue_dir(ddir), exist_ok=True)
     # v0.1.198：整个「查去重 → 打包落盘 → 更新索引」必须在一把锁里。
     # 原来这三步裸奔，扫描线程与网页上传线程同时入队时：
     #   A 读到 idx（还没有 B 的 sha）→ 落盘 A 的包 → 写回 idx（只有 A）
@@ -158,18 +169,19 @@ def enqueue(parse_result, data_dir=None) -> str:
     # 下次再扫同一个文件又入队一次，队列无限膨胀。
     # 锁必须是可重入的：_save_idx 内部也要拿同一把锁。
     with _IDX_LOCK:
-        return _enqueue_locked(parse_result)
+        return _enqueue_locked(parse_result, ddir)
 
 
-def _enqueue_locked(parse_result) -> str:
+def _enqueue_locked(parse_result, ddir) -> str:
     """enqueue 的主体。**调用方必须已持有 _IDX_LOCK。**"""
+    qdir = _queue_dir(ddir)
     # v0.1.144 去重；v0.1.177 改为 O(1) 索引查表（原实现逐包打开读，队列到 357 个时整站假死）
-    idx = _load_idx()
-    if not idx and os.path.isdir(QUEUE_DIR):
-        idx = _rebuild_idx()
+    idx = _load_idx(ddir)
+    if not idx and os.path.isdir(qdir):
+        idx = _rebuild_idx(ddir)
     hit = idx.get(parse_result.sha256)
     if hit:
-        _log("enqueue_skip", hit, parse_result.file_name, "duplicate", "队列中已存在相同 sha256")
+        _log("enqueue_skip", hit, parse_result.file_name, "duplicate", "队列中已存在相同 sha256", ddir)
         return hit
     proj_id, proj_name = "", ""
     try:
@@ -184,7 +196,7 @@ def _enqueue_locked(parse_result) -> str:
     pkg = {
         "schema": "fangong-parse-payload-v1",
         "node_name": config.NODE_NAME,
-        "node_id": _node_id(),
+        "node_id": _node_id(ddir),
         "project_id": proj_id,
         "project_name": proj_name,
         "created_at": datetime.datetime.now().isoformat(),
@@ -202,17 +214,24 @@ def _enqueue_locked(parse_result) -> str:
             "chunks": parse_result.chunks,
         },
     }
-    _atomic_io.write_json(os.path.join(QUEUE_DIR, f"{key}.json"), pkg, indent=None)
+    _atomic_io.write_json(os.path.join(qdir, f"{key}.json"), pkg, indent=None)
     idx[parse_result.sha256] = key
-    _save_idx(idx)
-    _log("enqueue", key, parse_result.file_name, "ok", None)
+    _save_idx(idx, ddir)
+    _log("enqueue", key, parse_result.file_name, "ok", None, ddir)
     return key
 
 
-def _node_id() -> str:
-    """节点稳定 ID：基于 data/.node_id 持久化。"""
-    _ensure()
-    nf = os.path.join(_get_data_dir(), ".node_id")
+def _node_id(ddir=None) -> str:
+    """节点稳定 ID：基于 <数据目录>/.node_id 持久化。
+
+    v0.1.245：落点与队列目录同源。原来用 `_get_data_dir()`（当前项目），
+    于是给别的项目目录入队时 —— 包落在那个目录、.node_id 却写进**当前项目**，
+    同一件事算出两个落点（EE/FF 母题）。多项目平台下这会让 A 项目的包
+    带上 B 项目的节点身份。
+    """
+    ddir = ddir or _resolve_dir()
+    os.makedirs(ddir, exist_ok=True)
+    nf = os.path.join(ddir, ".node_id")
     if os.path.exists(nf):
         with open(nf) as f:
             return f.read().strip()
@@ -223,7 +242,7 @@ def _node_id() -> str:
     return nid
 
 
-def _queue_files() -> list:
+def _queue_files(ddir=None) -> list:
     """列出队列里真正的待上传包文件名（已排序）。
 
     v0.1.208：三个读取点（pending_count / list_pending / upload_all / clear_all）
@@ -239,24 +258,29 @@ def _queue_files() -> list:
     用户看到「1 成功 1 失败」，而失败的那一条根本不存在。
     clear_all 也会把索引一起删掉，索引丢失后下次入队全量重建。
     统一走这里，排除以 `_` 开头的内部文件。
+
+    v0.1.245：目录自己解析（不读模块级 QUEUE_DIR）—— 读路径必须与
+    任何一次入队无关，否则并发下项目之间互相串包。
     """
-    _ensure()
-    return sorted(f for f in os.listdir(QUEUE_DIR)
+    ddir = ddir or _resolve_dir()
+    qdir = _queue_dir(ddir)
+    os.makedirs(qdir, exist_ok=True)
+    return sorted(f for f in os.listdir(qdir)
                   if f.endswith(".json") and not f.startswith("_")
                   and f != _IDX_FILE)
 
 
 def pending_count() -> int:
-    _ensure()
     return len(_queue_files())
 
 
 def list_pending() -> list:
-    _ensure()
+    ddir = _resolve_dir()
+    qdir = _queue_dir(ddir)
     out = []
-    for f in _queue_files():
+    for f in _queue_files(ddir):
         try:
-            with open(os.path.join(QUEUE_DIR, f), encoding="utf-8") as fh:
+            with open(os.path.join(qdir, f), encoding="utf-8") as fh:
                 p = json.load(fh)
             out.append({
                 "package": f,
@@ -272,11 +296,11 @@ def list_pending() -> list:
 
 def tail_logs(n=3) -> list:
     """读取最近 n 条操作日志（含云端上传结果）。"""
-    _ensure()
-    if not os.path.isfile(LOG_PATH):
+    lp = _log_path(_resolve_dir())
+    if not os.path.isfile(lp):
         return []
     try:
-        with open(LOG_PATH, encoding="utf-8") as f:
+        with open(lp, encoding="utf-8") as f:
             lines = f.read().strip().splitlines()
         return [json.loads(x) for x in lines[-n:]]
     except Exception:  # noqa: BLE001
@@ -285,8 +309,10 @@ def tail_logs(n=3) -> list:
 
 def upload_all(packages: list = None, progress_cb=None) -> dict:
     """把队列上传到云端主库；返回 {ok, failed, skipped}。
-    packages：可选，指定要上传的包文件名列表（不含 .json），空/None 表示全部。"""
-    _ensure()
+    packages：可选，指定要上传的包文件名列表（不含 .json），空/None 表示全部。
+    v0.1.245：目录自己解析一次，整轮上传都用它（不再读模块级 QUEUE_DIR）。"""
+    ddir = _resolve_dir()
+    qdir = _queue_dir(ddir)
     if not config.CLOUD_ENDPOINT:
         return {"ok": 0, "failed": 0, "skipped": len(list_pending()),
                 "message": "未配置 CLOUD_ENDPOINT，仅保留在本地队列"}
@@ -296,7 +322,7 @@ def upload_all(packages: list = None, progress_cb=None) -> dict:
     headers = {}
     if config.CLOUD_API_KEY:
         headers["Authorization"] = f"Bearer {config.CLOUD_API_KEY}"
-    files = _queue_files()
+    files = _queue_files(ddir)
     if packages:
         want = {p if p.endswith(".json") else p + ".json" for p in packages}
         files = [f for f in files if f in want]
@@ -307,28 +333,30 @@ def upload_all(packages: list = None, progress_cb=None) -> dict:
     for i in range(0, len(files), batch):
         batch_files = files[i:i + batch]
         for fname in batch_files:
-            with open(os.path.join(QUEUE_DIR, fname), encoding="utf-8") as fh:
+            with open(os.path.join(qdir, fname), encoding="utf-8") as fh:
                 payload = json.load(fh)
             try:
                 r = requests.post(url, json=payload, headers=headers, timeout=60)
                 if r.status_code == 200 or r.status_code == 201:
-                    os.remove(os.path.join(QUEUE_DIR, fname))
+                    os.remove(os.path.join(qdir, fname))
                     ok += 1
-                    _log("upload", fname, payload["payload"]["file_name"], "ok", None)
+                    _log("upload", fname, payload["payload"]["file_name"], "ok", None, ddir)
                 else:
                     failed += 1
-                    _log("upload", fname, payload["payload"]["file_name"], "fail", f"HTTP {r.status_code}")
+                    _log("upload", fname, payload["payload"]["file_name"], "fail", f"HTTP {r.status_code}", ddir)
             except Exception as e:  # noqa: BLE001
                 failed += 1
-                _log("upload", fname, payload["payload"]["file_name"], "fail", str(e))
+                _log("upload", fname, payload["payload"]["file_name"], "fail", str(e), ddir)
             if progress_cb:
                 progress_cb(ok + failed, len(files))
     return {"ok": ok, "failed": failed, "skipped": 0, "message": "上传完成"}
 
 
-def _log(action: str, package: str, file_name: str, result: str, detail: str):
-    _ensure()
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
+def _log(action: str, package: str, file_name: str, result: str, detail: str, ddir=None):
+    """写操作日志。v0.1.245：落点跟随队列目录（不写当前项目）。"""
+    lp = _log_path(ddir or _resolve_dir())
+    os.makedirs(os.path.dirname(lp), exist_ok=True)
+    with open(lp, "a", encoding="utf-8") as f:
         f.write(json.dumps({
             "ts": datetime.datetime.now().isoformat(),
             "action": action, "package": package, "file_name": file_name,
@@ -344,28 +372,30 @@ def clear_all() -> dict:
     `_sha_index.json` 一起删掉。索引丢失虽能自动重建，但重建要全量扫队列，
     队列大时正是 v0.1.177 修过的那个 O(n²) 假死场景。改为只删真包。
     """
-    _ensure()
+    ddir = _resolve_dir()
+    qdir = _queue_dir(ddir)
     deleted = 0
-    for f in _queue_files():
+    for f in _queue_files(ddir):
         try:
-            os.remove(os.path.join(QUEUE_DIR, f))
+            os.remove(os.path.join(qdir, f))
             deleted += 1
         except Exception:  # noqa: BLE001
             pass
-    _log("clear_queue", "-", "-", "ok", f"清空 {deleted} 个队列包")
+    _log("clear_queue", "-", "-", "ok", f"清空 {deleted} 个队列包", ddir)
     return {"deleted": deleted, "message": f"已清空 {deleted} 个待上传包"}
 
 
 def remove_packages(packages: list) -> dict:
     """从队列中移除指定包（v0.1.144）。packages 为包文件名列表（不含 .json 也可）。"""
-    _ensure()
+    ddir = _resolve_dir()
+    qdir = _queue_dir(ddir)
     want = {p if p.endswith(".json") else p + ".json" for p in (packages or [])}
     want.discard(_IDX_FILE)
     removed = 0
-    for f in os.listdir(QUEUE_DIR):
+    for f in os.listdir(qdir):
         if f.endswith(".json") and not f.startswith("_") and f in want:
             try:
-                os.remove(os.path.join(QUEUE_DIR, f))
+                os.remove(os.path.join(qdir, f))
                 removed += 1
             except Exception:  # noqa: BLE001
                 pass

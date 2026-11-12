@@ -19,7 +19,11 @@ import datetime
 from . import config
 from . import project_scope as _scope
 
-RELATIONS_FILE = None
+# v0.1.246：这里原来有模块级落点全局 RELATIONS_FILE / CONFIRM_FILE，
+# 每次 _ensure() 都被改写。多项目并行时（扫描线程 + Web 线程同时跑），
+# 项目 A 的 _ensure() 把全局指向 A，项目 B 的 load_relations() 若在窗口内
+# 读全局，就读到了 A 的图谱 —— 跨项目串味 + 「同一件事两个答案」。
+# 现在落点一律由 _relations_file() / _confirm_file() 现算，不留任何全局。
 _WORKSHOP_RE = re.compile(r"(\d{1,2}|[一二三四五六七八九十]+)\s*号?\s*车间")
 _TAG_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{1,3}-\d{1,6}(?:[/-][A-Z]{0,3}\d{0,4})?)(?![A-Za-z0-9])")
 
@@ -48,39 +52,45 @@ def _get_data_dir(data_dir=None):
     return config.DATA_DIR
 
 
-def _ensure(data_dir=None):
-    global RELATIONS_FILE
+def _relations_file(data_dir=None) -> str:
+    """图谱落点：<数据目录>/relations.json。v0.1.246：单一落点解析函数。"""
     ddir = _get_data_dir(data_dir)
-    RELATIONS_FILE = os.path.join(ddir, "relations.json")
     os.makedirs(ddir, exist_ok=True)
+    return os.path.join(ddir, "relations.json")
 
 
-CONFIRM_FILE = None  # v0.1.23 人工确认持久化
+def _ensure(data_dir=None) -> str:
+    """确保数据目录存在并返回图谱文件路径（v0.1.246：不再改写模块级全局）。"""
+    return _relations_file(data_dir)
 
 
-def _ensure_confirm():
-    global CONFIRM_FILE
-    # v0.1.138：人工确认记录随项目隔离（与车间归属一致）
-    ddir = _get_data_dir()
-    CONFIRM_FILE = os.path.join(ddir, "confirmed_relations.json")
+def _confirm_file(data_dir=None) -> str:
+    """人工确认记录落点：<数据目录>/confirmed_relations.json。
+    v0.1.138：人工确认记录随项目隔离（与车间归属一致）；v0.1.246：不留全局。"""
+    ddir = _get_data_dir(data_dir)
     os.makedirs(ddir, exist_ok=True)
+    return os.path.join(ddir, "confirmed_relations.json")
 
 
-def _load_confirmed() -> dict:
+def _ensure_confirm(data_dir=None) -> str:
+    return _confirm_file(data_dir)
+
+
+def _load_confirmed(data_dir=None) -> dict:
     """人工确认记录：tag -> {workshop, note, ts}（v0.1.23）"""
-    _ensure_confirm()
-    if os.path.exists(CONFIRM_FILE):
+    path = _ensure_confirm(data_dir)
+    if os.path.exists(path):
         try:
-            with open(CONFIRM_FILE, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:  # noqa: BLE001
             return {}
     return {}
 
 
-def _save_confirmed(m: dict):
-    _ensure_confirm()
-    _atomic_io.write_json(CONFIRM_FILE, m, indent=1)
+def _save_confirmed(m: dict, data_dir=None):
+    path = _ensure_confirm(data_dir)
+    _atomic_io.write_json(path, m, indent=1)
 
 
 def confirm_candidate(tag: str, workshop: str, note: str = "") -> dict:
@@ -515,7 +525,10 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
         # v0.1.27：车间登记优先（人工 > CAD标题栏 > 文件名 > 正文）
         try:
             from . import workshop_assign
-            _assigned = workshop_assign.get_workshop(sha)
+            # v0.1.245：必须传 ddir —— 不传时读的是「当前项目」的人工登记，
+            # 而不是在构建的这个项目。给 A 项目重建图谱却按 B 的登记册判车间，
+            # 是 EE/FF 家族（参数传了、内部没接着传）在图谱链路上的实例。
+            _assigned = workshop_assign.get_workshop(sha, ddir)
             if _assigned:
                 ws = _assigned
         except Exception:  # noqa: BLE001
@@ -915,8 +928,8 @@ def _load_cache_by_name(fname: str, idx: dict):
 
 
 def _save(graph: dict, data_dir=None):
-    _ensure(data_dir)
-    _atomic_io.write_json(RELATIONS_FILE, graph, indent=1)
+    path = _ensure(data_dir)
+    _atomic_io.write_json(path, graph, indent=1)
 
 
 def _append_spatial_summary(graph: dict, docs: dict, idx: dict):
@@ -1164,30 +1177,31 @@ def _merge_index_devices(graph: dict, ledger: dict) -> dict:
     return graph
 
 
-def load_relations() -> dict:
+def load_relations(data_dir=None) -> dict:
     """读取关系图谱。
 
     v0.1.173：读的时候把台账设备并进来。只导入台账、未跑关系图谱的项目，
     原来在这里读到的是空设备列表，导致下游全线「无设备数据」。
+    v0.1.246：支持显式 data_dir（多项目平台化），落点现算，不再依赖模块级全局。
     """
-    _ensure()
+    path = _ensure(data_dir)
     graph = None
-    if os.path.exists(RELATIONS_FILE):
+    if os.path.exists(path):
         try:
-            with open(RELATIONS_FILE, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 graph = json.load(f)
         except Exception:  # noqa: BLE001
             graph = None
     if not isinstance(graph, dict):
         graph = _blank_graph()
     try:
-        ledger = _load_index().get("devices") or {}
+        ledger = _load_index(data_dir).get("devices") or {}
     except Exception:  # noqa: BLE001
         ledger = {}
     return _merge_index_devices(graph, ledger)
 
 
-def save_relations(relations: dict):
-    """v0.1.63：保存关系图谱到文件。"""
-    _ensure()
-    _atomic_io.write_json(RELATIONS_FILE, relations, indent=2)
+def save_relations(relations: dict, data_dir=None):
+    """v0.1.63：保存关系图谱到文件。v0.1.246：落点跟随 data_dir。"""
+    path = _ensure(data_dir)
+    _atomic_io.write_json(path, relations, indent=2)

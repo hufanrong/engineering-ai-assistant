@@ -19,7 +19,7 @@ from . import config
 # 换项目后上一项目的设备车间登记仍然生效并覆盖新项目同名位号（如 T-301 被
 # 上一项目推成 3号车间，而本项目台账明确写的是配电室），属于跨项目串味。
 def _store_path(data_dir=None) -> str:
-    """登记表落点：显式 data_dir > 隔离目录 > 当前项目 > config.DATA_DIR。
+    """登记表落点：显式 data_dir > 当前项目 > config.DATA_DIR。
 
     v0.1.238：加上前两级。没有它们时，凡是「传 data_dir 重建关系图谱」的场景
     （离线脚本、临时目录重解析、隔离测试）都会把登记写进当前项目/全局目录 ——
@@ -28,9 +28,6 @@ def _store_path(data_dir=None) -> str:
     if data_dir:
         os.makedirs(data_dir, exist_ok=True)
         return os.path.join(data_dir, "device_workshop.json")
-    if _ISOLATED_DIR:
-        os.makedirs(_ISOLATED_DIR, exist_ok=True)
-        return os.path.join(_ISOLATED_DIR, "device_workshop.json")
     try:
         from . import project_manager as _pm
         return os.path.join(_pm.get_project_data_dir(), "device_workshop.json")
@@ -43,10 +40,11 @@ _STORE_PATH = os.path.join(config.DATA_DIR, "device_workshop.json")  # 兼容旧
 # 位号前缀→车间的可配置映射（如 P-1xx→1号车间）；默认空，由人工/台账积累
 _TAG_PREFIX_MAP = {}
 
-# v0.1.238：与 workshop_assign._ISOLATED_DIR 同一条教训 —— 隔离必须放在
-# **目录解析函数内部**，不能靠调用方「临时改全局再 finally 还原」，
-# 因为中间任何一次内部调用都会把它重置回去。
-_ISOLATED_DIR = None
+# v0.1.238 这里是 `_ISOLATED_DIR`（隔离目录开关）。
+# v0.1.245：**已删除**。与 workshop_assign / upload_queue 同一条教训 ——
+# 隔离必须落在**目录解析函数内部**并由调用方显式传 data_dir，
+# 不能靠「临时改全局再 finally 还原」（中间任何一次内部调用都会把它重置回去，
+# 且并发下会让 A 项目的读者读到 B 的落点）。
 
 
 def _load(data_dir=None) -> dict:

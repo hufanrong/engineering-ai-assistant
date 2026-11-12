@@ -76,15 +76,36 @@ def main():
 
         # S4：写进隔离目录，不落真实项目
         ck("S4 空间模型落在隔离目录", os.path.exists(sp_path), sp_path.replace(ddir, "<tmp>"))
-        real = os.path.join(ROOT, "data", "projects", "322fef90", "spatial_model.json")
-        real_mtime = os.stat(real).st_mtime if os.path.exists(real) else None
-        before = json.load(open(real, encoding="utf-8")) if real_mtime else {}
+        # v0.1.246：原来写死 projects/322fef90/spatial_model.json —— 平台要服务
+        # 多个施工项目，写死项目 id 等于只对这一份资料成立。改成**扫描全部项目**。
+        _proot = os.path.join(ROOT, "data", "projects")
+        _real_files = []
+        if os.path.isdir(_proot):
+            for _pid in sorted(os.listdir(_proot)):
+                _p = os.path.join(_proot, _pid, "spatial_model.json")
+                if os.path.isfile(_p):
+                    _real_files.append(_p)
+        _before_all = {}
+        for _p in _real_files:
+            try:
+                _before_all[_p] = json.dumps(json.load(open(_p, encoding="utf-8")),
+                                             sort_keys=True)
+            except Exception:  # noqa: BLE001
+                _before_all[_p] = ""
         # 触发一次再比对，确认没被隔离运行写坏
         R.build_relations(force=True, data_dir=ddir)
-        after = json.load(open(real, encoding="utf-8")) if os.path.exists(real) else {}
-        ck("S4b 真实项目空间模型未被隔离运行改写",
-           json.dumps(after, sort_keys=True) == json.dumps(before, sort_keys=True),
-           f"real_devices={(after.get('stats') or {}).get('total_devices')}")
+        _changed = []
+        for _p, _b in _before_all.items():
+            _a = ""
+            if os.path.exists(_p):
+                try:
+                    _a = json.dumps(json.load(open(_p, encoding="utf-8")), sort_keys=True)
+                except Exception:  # noqa: BLE001
+                    _a = "<unreadable>"
+            if _a != _b:
+                _changed.append(os.path.basename(os.path.dirname(_p)))
+        ck("S4b 全部真实项目的空间模型都未被隔离运行改写",
+           not _changed, f"扫描 {len(_real_files)} 个项目，被改写={_changed}")
 
         # S5：台账设备不得假装有图纸坐标
         idx_all = sp.get("device_index") or {}

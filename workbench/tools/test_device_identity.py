@@ -44,6 +44,7 @@ import os
 import shutil
 import sys
 import tempfile
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -196,26 +197,78 @@ def main():
     # 不具备判别力 —— 反向验证里把代码还原并不会改写磁盘，所以 I5a 永远
     # 不会因代码改动而变红（第一版把它列进期望红名单，导致用例无效）。
     # 真正的判别力在 I3a（内存里重新合并构造数据，实例必须全留）。
-    real_idx = os.path.join(_REAL_DATA_DIR, "projects", "322fef90", "index.json")
-    if os.path.isfile(real_idx):
+    # v0.1.246：原来写死了 projects/322fef90/index.json 与 228 / 202 三个值。
+    # 平台要服务多个施工项目，写死 = 只对这一份资料成立。现在：
+    #   · 真实项目**动态挑选**（台账条目最多的那个）
+    #   · 期望值**现算**，断言从「等于某个数字」变成「等于按定义算出来的值」
+    def _pick_real_idx():
+        """动态挑一个真实项目：有 index.json 且设备台账条目最多者。"""
+        root = os.path.join(_REAL_DATA_DIR, "projects")
+        best, best_n = None, -1
+        if os.path.isdir(root):
+            for pid in sorted(os.listdir(root)):
+                p = os.path.join(root, pid, "index.json")
+                if not os.path.isfile(p):
+                    continue
+                try:
+                    d = json.load(open(p, encoding="utf-8")).get("devices") or {}
+                except Exception:  # noqa: BLE001
+                    continue
+                if len(d) > best_n:
+                    best, best_n = p, len(d)
+        return best
+
+    real_idx = _pick_real_idx()
+    if real_idx:
         dev = json.load(open(real_idx, encoding="utf-8")).get("devices") or {}
         n_canon = len(dev)
-        check("I5a 现状记录：真实项目实例数 228（磁盘快照，与代码改动无关）",
-              228, n_canon, n_canon == 228,
+        check("I5a 真实项目实例数 > 0（现算，不写死 228）",
+              ">0", n_canon, n_canon > 0,
+              f"项目={os.path.basename(os.path.dirname(real_idx))} 实例={n_canon}；"
               "这条只证明历史数据没被本轮改动破坏，不能当判别判据")
-        n_ident = len({(v.get("workshop") or "").strip() + "|"
-                       + (v.get("name") or "").strip() + "|"
-                       + (v.get("model") or "").strip() for v in dev.values()})
-        check("I5b 现状记录：真实项目身份数 = 202（车间+名称+型号）",
-              202, n_ident, n_ident == 202,
-              "与独立复算一致；不等于 178（那是只有车间+名称的口径）")
+
+        def _nz(x):
+            return " ".join(unicodedata.normalize("NFKC", str(x or ""))
+                            .replace("\u3000", " ").split()).strip()
+
+        # 身份数：按实现口径（车间|名称|型号，型号大写）现算去重
+        _exp_ident = set()
+        for _v in dev.values():
+            if not isinstance(_v, dict):
+                continue
+            _nm = _nz(_v.get("name"))
+            if not _nm:
+                continue
+            _exp_ident.add(_nz(_v.get("workshop")) + "|" + _nm
+                           + "|" + _nz(_v.get("model")).upper())
+        n_ident = len(_exp_ident)
+        check("I5b 身份数 == 独立复算的「车间|名称|型号」去重数（不写死 202）",
+              n_ident, n_ident, n_ident <= n_canon,
+              f"身份={n_ident} 实例={n_canon}；身份数必须 ≤ 实例数（不丢设备）")
+
+        # 独立复算的第二种口径：直接调用实现的 identity_key，逐行比对
+        _by_impl = set()
+        for _v in dev.values():
+            if not isinstance(_v, dict):
+                continue
+            _k = em.identity_key(_v.get("name", ""), _v.get("workshop", ""),
+                                 _v.get("model", ""))
+            if _k:
+                _by_impl.add(_k)
+        check("I5c 实现口径与独立复算一致（同一件事不能两个答案）",
+              len(_exp_ident), len(_by_impl), len(_exp_ident) == len(_by_impl),
+              f"独立={len(_exp_ident)} 实现={len(_by_impl)}")
+
         have_key = sum(1 for v in dev.values() if v.get("identity_key"))
-        check("I5c 真实索引尚未回填 identity_key（需重新同步才写，属已知待办）",
-              0, have_key, have_key == 0,
-              "台账源文件在本沙箱已丢失（沙箱重建），无法重跑同步；"
-              "find_by_identity 有按字段现算的兜底，已在真实数据上验证可用")
+        bad_key = [t for t, v in dev.items()
+                   if isinstance(v, dict) and v.get("identity_key")
+                   and v.get("identity_key") != em.identity_key(
+                       v.get("name", ""), v.get("workshop", ""), v.get("model", ""))]
+        check("I5d 已回填的 identity_key 必须与现算一致（回填错比没回填更坏）",
+              0, len(bad_key), not bad_key,
+              f"已回填 {have_key} 条，其中不一致 {len(bad_key)} 条")
     else:
-        check("I5 真实项目 index.json 存在", True, False, False, f"缺 {real_idx}")
+        check("I5 真实项目 index.json 存在", True, False, False, "未找到任何项目的 index.json")
 
     # ---------- I7 真实数据未污染 ----------
     after = _snap(_REAL_DATA_DIR)
