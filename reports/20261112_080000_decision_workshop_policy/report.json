@@ -1,0 +1,36 @@
+{
+  "run_id": "20261112_080000_decision_workshop_policy",
+  "started": "2026-11-12 07:37:00",
+  "finished": "2026-11-12 07:50:00",
+  "status": "failed",
+  "kind": "product_decision",
+  "note": "老板 2026-11-12 拍板两项口径，本条为决策书与实现规格：①车间归类口径『自动归类到已确定的车间，不确认留存让人工确认』；②台账验收口径（≥600 台 / ≥8 车间 / 位号≥90% / 熟料粉磨≥60 台）已认可。本报告不是新一轮自测，是给开发端的实现依据。",
+  "steps": [
+    {"step": "决策 1：车间归类口径", "rc": 0, "out": "老板原话：『自动归类到已确定的车间，不确认留存让人工确认』。含义：已确定车间（台账来的 + 人工确认过的）可直接自动归类；匹配不上或拿不准的一律进待确认队列留存，等人工签，不得自动进正式车间清单"},
+    {"step": "决策 2：台账验收口径", "rc": 0, "out": "老板答『认』。四条门槛全部认可：设备 ≥600 台、识别车间 ≥8 个、位号非空率 ≥90%、熟料粉磨装置单车间 ≥60 台；四条同时满足才算通过"},
+    {"step": "推导出执行顺序", "rc": 0, "out": "台账必须先导 → 用台账『子项名称』建立正式车间白名单 → 再用白名单自动归类文件 → 剩余推待确认。台账没入库则白名单为空，自动归类必然全推待确认（当前状态正是如此：devices=24、workshops=2、候选=0）"},
+    {"step": "对 D27 的直接约束", "rc": 0, "out": "from_ledger=false 且未经人工确认的名字，不得出现在正式车间清单。现『粗碎车间』(from_ledger=false) 仍在正式清单并同时出现在候选队列，按新口径应降级为待确认"},
+    {"step": "对 D29 的直接约束", "rc": 0, "out": "火法表 10 个 sheet 的『子项名称』（锂辉石库/烘干/计量、回转窑尾/中/头装置、熟料送存仓、熟料粉磨装置）就是天然的正式车间来源，应作为 from_ledger=true 的白名单基底"},
+    {"step": "边界情况留待确认", "rc": 1, "out": "规格中列出 3 处老板口述未覆盖的边界（一个文件命中多个已确定车间、台账新车间是否免人工、后缀规范化是否放宽匹配），未擅自定，列选项等开发端或老板裁定"},
+    {"step": "落地", "rc": 0, "out": "决策已写入项目长期记忆 MEMORY.md；本报告与 spec_workshop_policy.md 一并回传仓库 main"}
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 1,
+    "skipped": 0,
+    "by_phase": {
+      "DECISION-1": {"passed": 1, "failed": 0, "skipped": 0},
+      "DECISION-2": {"passed": 1, "failed": 0, "skipped": 0},
+      "SPEC": {"passed": 1, "failed": 0, "skipped": 0},
+      "D27-CONSTRAINT": {"passed": 1, "failed": 0, "skipped": 0},
+      "D29-CONSTRAINT": {"passed": 1, "failed": 0, "skipped": 0},
+      "OPEN-EDGES": {"passed": 0, "failed": 1, "skipped": 0}
+    }
+  },
+  "error": "非缺陷。OPEN-EDGES 计 1 项未决：老板口述覆盖不到的 3 处边界（多命中、台账新车间是否免签、后缀规范化）已列出但未裁定，需开发端或老板一句话，我不擅自定产品行为。",
+  "commit_before": "6bc205a",
+  "commit_after": "6bc205a",
+  "detail_doc": "spec_workshop_policy.md",
+  "evidence": "evidence_workshop_policy.json",
+  "attachments": ["spec_workshop_policy.md"]
+}

@@ -1,0 +1,89 @@
+{
+  "decision_id": "20261112_080000_decision_workshop_policy",
+  "decided_at": "2026-11-12 07:37",
+  "decided_by": "老板 (owner)",
+  "decision_1": {
+    "verbatim": "自动归类到已确定的车间，不确认留存让人工确认。",
+    "rules": {
+      "R1": "只有已确定的车间才允许自动归类；已确定 = 设备台账来的 + 人工确认过的，仅此两个来源",
+      "R2": "匹配不上或拿不准的一律推待确认队列留存，不得自动进正式车间清单",
+      "R3": "待确认必须有显眼入口（待确认 N 个），不能埋在二级页面",
+      "R4": "人工签一次即转正（含别名绑定），此后同类文件自动归类，不得重复询问"
+    },
+    "derived_order": "先导设备台账 -> 用台账子项名建白名单 -> 自动归类文件 -> 剩余推待确认",
+    "order_rationale": "台账未入库则白名单为空，自动归类会把所有文件推成待确认；现状 24 台设备/2 个车间/候选 0 正是此状态，根因 D29"
+  },
+  "decision_2": {
+    "verbatim": "认",
+    "acceptance": {
+      "devices_min": 600,
+      "workshops_min": 8,
+      "tag_fill_rate_min": "90%",
+      "liaohua_fengmu_min": 60,
+      "baseline_file": "火法部分工艺设备表（0430).xlsx",
+      "baseline_structure": "10 sheets / 3709 rows / header on row 6 in every sheet",
+      "rule": "四条同时满足才算通过，任一不达标即判失败，不接受部分通过"
+    }
+  },
+  "constraints_on_defects": {
+    "D27": {
+      "requirement": "from_ledger=false 且 confirmed_by 为空的名字不得出现在正式车间清单，必须降级为待确认",
+      "current_violation": "粗碎车间 from_ledger=false 仍在正式清单，且同时在待审批候选队列",
+      "acceptance_judge": "该类条目数必须为 0"
+    },
+    "D29": {
+      "requirement": "火法表 10 个 sheet 的子项名称作为 from_ledger=true 白名单基底",
+      "whitelist_seed": ["锂辉石库", "锂辉石烘干", "锂辉石计量", "回转窑尾装置", "回转窑中装置", "回转窑头装置", "熟料送存仓", "熟料粉磨装置"],
+      "note": "0201-尘硝一体 / 0201-脱硫脱氟 两个 sheet 子项名称为空，需回退文件名或转待确认"
+    }
+  },
+  "extra_acceptance": {
+    "C1": "遍历 /api/workshops，from_ledger=false && confirmed_by=null 的条目数必须为 0",
+    "C2": "每个候选可查出现次数/首末时间/来源文件样本；人工签完必须从候选消失并出现在正式清单"
+  },
+  "open_edges": [
+    {
+      "id": "E1",
+      "case": "一个文件命中多个已确定车间",
+      "option_a": "取台账子项名优先的那个，其余忽略",
+      "option_b": "整份进待确认，让人工指",
+      "my_lean": "B",
+      "lean_reason": "老板规则的本质是拿不准就别猜，多命中即拿不准",
+      "decided": false
+    },
+    {
+      "id": "E2",
+      "case": "台账自身带来的新车间名是否免人工签",
+      "option_a": "直接进正式清单 (from_ledger=true)，免人工",
+      "option_b": "也要人工签一次",
+      "my_lean": "A",
+      "lean_reason": "台账是权威骨架；若台账都要签，8 个车间手工签 8 次，违背 R4 初衷",
+      "decided": false,
+      "impact": "最高：决定导入台账后是否需要 8~10 次人工确认"
+    },
+    {
+      "id": "E3",
+      "case": "匹配是否放宽到去后缀/去空格后相同（熟料粉磨 约等于 熟料粉磨装置）",
+      "option_a": "放宽，减少待确认量",
+      "option_b": "只认精确匹配 + 人工绑定的别名",
+      "my_lean": "B",
+      "lean_reason": "放宽会重新引入猜名字的老毛病",
+      "decided": false
+    }
+  ],
+  "regression_cases": [
+    "空项目无台账：扫 62 文件 -> 正式车间数必须 0，候选 >= 1，一个文件都不得被归类",
+    "先导台账再扫：正式车间 >= 8 且全 from_ledger=true，C1 通过",
+    "人工签一个候选：候选消失、进正式清单、名下文件归类、重启后签名不丢",
+    "反向：手工塞一条 from_ledger=false 进 registry -> C1 必须报红，证明闸门在拦"
+  ],
+  "persisted_to": "D:\\hufanrong\\Documents\\workBudd\\工程\\.workbuddy\\memory\\MEMORY.md",
+  "current_project_snapshot": {
+    "project": "马诺诺",
+    "files": 62,
+    "devices": 24,
+    "workshops": 2,
+    "candidates": 0,
+    "ledger_skipped": 200
+  }
+}
