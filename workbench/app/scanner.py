@@ -638,6 +638,19 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                                                     data_dir=ddir)
                 except Exception:  # noqa: BLE001
                     pass
+                # v0.1.248（D36）：**文件夹名/文件名 → 设备**的联系在这里建立。
+                # 用户原始需求：「当输入文件夹时,如果文件夹以车间命名,或者设备命名时：
+                # 该文件夹内资料极有可能全部和该设备或车间有关系,可以归在一起,或者建立联系」。
+                # 车间那一路 v0.1.143 就有了（file_path 0.85），设备这一路此前只有
+                # equipment_merge.find_by_identity() 这个查询入口、**没有任何调用方** ——
+                # 「有入口没接线」等于没做。
+                # 必须带 ddir：链接台账只能落本项目（EE/FF 同母题）。
+                try:
+                    from . import device_link
+                    device_link.link_file(res.sha256, res.file_name,
+                                          file_path=path, data_dir=ddir)
+                except Exception:  # noqa: BLE001
+                    pass
                 # v0.1.32：登记文件版本（多版本对照+最新版判断）
                 # v0.1.245：版本台账跟车间归属同理，只能落在本项目。
                 try:
@@ -686,6 +699,14 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     workshop_assign.assign_workshop(res.sha256, res.file_name,
                                                     res.text or "", res.structure or {},
                                                     file_path=path, data_dir=ddir)
+                except Exception:  # noqa: BLE001
+                    pass
+                # v0.1.248（D36）：解析失败/跳过的文件同样按目录名建立设备联系 ——
+                # 「这台设备的图纸 DWG 打不开」不代表它不属于这台设备。
+                try:
+                    from . import device_link
+                    device_link.link_file(res.sha256, res.file_name,
+                                          file_path=path, data_dir=ddir)
                 except Exception:  # noqa: BLE001
                     pass
 

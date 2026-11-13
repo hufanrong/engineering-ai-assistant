@@ -781,6 +781,15 @@ def _upload_process_one(saved: str, name: str, sha: str, nbytes: int,
                              data_dir=ddir)
     except Exception:  # noqa: BLE001
         pass
+    # v0.1.248（D36）：**文件夹名/文件名 → 设备**的联系。
+    # 网页上传支持「文件夹上传」（paths 参数保留目录结构），所以手机端传一整个
+    # 设备文件夹上来时，同样应当自动建立「这些资料 ↔ 这台设备」的联系。
+    # 与扫描路径同一套匹配逻辑（app/device_link.py），两个入口不能各写一套。
+    try:
+        from . import device_link as _dl2
+        _dl2.link_file(res.sha256, name, file_path=rel_path, data_dir=ddir)
+    except Exception:  # noqa: BLE001
+        pass
     # v0.1.152：上传自动归集到整编 C 类归集目录（图纸/厂家资料/检测报告等）
     try:
         from . import supervision_integration as _si2
@@ -4281,6 +4290,77 @@ def workshop_devices(workshop: str = ""):
         pass
 
     return {"ok": True, "workshop": ws, "devices": out, "total": len(out)}
+
+
+# ---------------------------------------------------------------- v0.1.248（D36）
+# 「文件夹名/文件名 → 设备」的联系。
+# 用户原始需求（2026-11-12）：
+#   「当输入文件夹时,如果文件夹以车间命名,或者设备命名时：该文件夹内资料极有可能
+#     全部和该设备或车间有关系,可以归在一起,或者建立联系」
+# 车间那一路 v0.1.143 就有（file_path 0.85）；设备这一路此前**只有查询入口、
+# 没有接线**（app/device_link.py），等于没做。
+class DeviceLinkConfirmReq(BaseModel):
+    sha256: str = ""
+    identity_key: str = ""
+
+
+class DeviceLinkRejectReq(BaseModel):
+    sha256: str = ""
+    reason: str = ""
+
+
+@app.get("/api/device-links")
+def get_device_links():
+    """当前项目的「文件 ↔ 设备身份」联系清单 + 待人工确认项。
+
+    与 /api/workshops 是**两个维度**：车间回答「这份资料属于哪个车间」，
+    设备回答「这份资料讲的是哪台设备」。一个设备目录下的资料可能同时属于
+    某个车间，也可能跨车间（同一台泵组的资料在两个车间都有）。
+    """
+    from . import device_link as _dl
+    from . import project_manager as _pm
+
+    current = _pm.get_current_project()
+    if not current:
+        return {"ok": True, "links": [], "pending": [],
+                "stats": {}, "message": "未选择项目"}
+    ddir = _pm.get_project_data_dir(current["id"])
+    return {"ok": True,
+            "links": _dl.list_links(ddir),
+            "pending": _dl.list_pending(ddir),
+            "stats": _dl.stats(ddir)}
+
+
+@app.post("/api/device-links/confirm")
+def confirm_device_link(req: DeviceLinkConfirmReq):
+    """人工裁定一个待定的设备联系（同名设备跨车间时的仲裁）。"""
+    from . import device_link as _dl
+    from . import project_manager as _pm
+
+    current = _pm.get_current_project()
+    if not current:
+        raise HTTPException(400, "未选择项目")
+    ddir = _pm.get_project_data_dir(current["id"])
+    r = _dl.confirm_link(req.sha256, req.identity_key, data_dir=ddir)
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("msg") or "确认失败")
+    return r
+
+
+@app.post("/api/device-links/reject")
+def reject_device_link(req: DeviceLinkRejectReq):
+    """人工否决一个设备联系：不再自动建立。"""
+    from . import device_link as _dl
+    from . import project_manager as _pm
+
+    current = _pm.get_current_project()
+    if not current:
+        raise HTTPException(400, "未选择项目")
+    ddir = _pm.get_project_data_dir(current["id"])
+    r = _dl.reject_link(req.sha256, req.reason, data_dir=ddir)
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("msg") or "否决失败")
+    return r
 
 
 @app.get("/api/workshops")

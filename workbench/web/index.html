@@ -746,6 +746,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       <div class="quick-item" onclick="showPlatformLib()"><div class="icon">📖</div><div class="name">平台规范库</div></div>
       <div class="quick-item" onclick="showCloudMerge()"><div class="icon">☁️</div><div class="name">云端合并</div></div>
       <div class="quick-item" onclick="showProjectBackup()"><div class="icon">💾</div><div class="name">项目备份</div></div>
+      <div class="quick-item" onclick="showDeviceLinks()"><div class="icon">🔗</div><div class="name">设备联系</div></div>
     </div>
   </div>
 
@@ -3434,6 +3435,118 @@ function exportProjectNow() {
         if (d && d.ok === false) { quickResultError('项目备份', d.error || d.message || '备份失败'); return; }
         showProjectBackup();
     }).catch(function (e) { quickResultError('项目备份', '备份失败：' + e.message); });
+}
+
+// ===== v0.1.248（D36）：设备联系（文件夹名/文件名 → 设备身份）=====
+// 后端 GET /api/device-links、POST /api/device-links/confirm|reject 在此之前
+// 没有任何前端入口（grep "device-links" = 0 处）—— 用户原始需求里
+// 「以设备命名的文件夹里的资料自动归到那台设备」在界面上根本点不到，
+// 等于「后端有能力、前端没入口」的半交付。这里把它接到「智能窗口 → 快捷功能」。
+window.__dlPending = [];
+
+function showDeviceLinks() {
+    openQuickResult('设备联系', '<div style="text-align:center;color:#999;padding:20px">加载中…</div>', '');
+    fetch('/api/device-links').then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function (d) {
+        var stats = d.stats || {};
+        var bySrc = stats.by_source || {};
+        var pending = d.pending || [];
+        var links = d.links || [];
+        window.__dlPending = pending;
+        var html = '';
+        if (d.message) {
+            html += '<div style="font-size:13px;color:#8B8B8B;margin-bottom:10px">' +
+                chatEscape(d.message) + '</div>';
+        }
+        html += '<div style="font-size:13px;color:#555;margin-bottom:6px">' +
+            '已关联 <b>' + (stats.links || 0) + '</b> 条（目录名命中 ' + (bySrc.dir || 0) +
+            ' / 文件名命中 ' + (bySrc.filename || 0) + '，人工确认 ' + (stats.confirmed || 0) +
+            '），涉及设备 <b>' + (stats.devices_linked || 0) + '</b> 台；' +
+            '待人工确认 <b>' + (stats.pending || 0) + '</b> 条。</div>';
+        html += '<div style="font-size:12px;color:#8B8B8B;margin-bottom:10px">' +
+            '规则：以设备命名的文件夹 / 文件名命中设备台账即建立联系；同名设备跨车间无法区分时不自动关联，需在此人工裁定。</div>';
+
+        html += '<div style="font-size:13px;font-weight:600;margin:14px 0 8px">待人工确认</div>';
+        if (!pending.length) {
+            html += '<div style="font-size:12px;color:#999;padding:6px 0">暂无</div>';
+        } else {
+            pending.forEach(function (p, i) {
+                var cands = p.candidates || [];
+                var opts = cands.map(function (c) {
+                    var label = (c.workshop || '未分车间') + ' / ' + (c.name || '未命名') +
+                        (c.model ? ' / ' + c.model : '');
+                    return '<option value="' + chatEscape(c.identity_key || '') + '">' +
+                        chatEscape(label) + '</option>';
+                }).join('');
+                html += '<div style="border:1px solid #eee;border-radius:6px;padding:10px;margin-bottom:8px">' +
+                    '<div style="font-size:13px"><b>' + chatEscape(p.file_name || '') + '</b>' +
+                    '<span style="font-size:11px;color:#999;margin-left:6px">' +
+                    chatEscape(p.source === 'dir' ? '目录名命中' : '文件名命中') +
+                    ' 置信度 ' + chatEscape(p.confidence == null ? '?' : p.confidence) + '</span></div>' +
+                    '<div style="font-size:11px;color:#999;word-break:break-all;margin:2px 0 6px">' +
+                    chatEscape(p.file_path || '') + '</div>' +
+                    '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+                    '<select id="dlcSel_' + i + '" style="font-size:12px;padding:4px 6px;' +
+                    'border:1px solid #ddd;border-radius:4px;max-width:320px">' + opts + '</select>' +
+                    '<button class="btn btn-primary btn-sm" onclick="confirmDeviceLink(' + i + ')">✓ 确认关联</button>' +
+                    '<button class="btn btn-default btn-sm" onclick="rejectDeviceLink(' + i + ')">✕ 否决</button>' +
+                    '</div></div>';
+            });
+        }
+
+        html += '<div style="font-size:13px;font-weight:600;margin:16px 0 8px">已关联</div>';
+        html += quickTable(['资料', '设备', '型号', '车间', '来源', '置信度', '人工确认'],
+            links.map(function (x) {
+                return [
+                    x.file_name || '',
+                    x.name || '',
+                    x.model || '',
+                    x.workshop || '',
+                    x.source === 'dir' ? '目录名' : (x.source === 'filename' ? '文件名' : (x.source || '')),
+                    x.confidence == null ? '' : String(x.confidence),
+                    x.confirmed ? '是' : '否'
+                ];
+            }));
+        openQuickResult('设备联系', html, '数据来自当前项目的设备台账与扫描/上传时的文件路径');
+    }).catch(function (e) { quickResultError('设备联系', '加载失败：' + e.message); });
+}
+
+// 人工裁定：必须把后端真实结果反馈到界面上，不许假装成功
+function confirmDeviceLink(i) {
+    var p = window.__dlPending[i];
+    if (!p) { alert('待确认项已刷新，请重新打开设备联系'); return; }
+    var sel = document.getElementById('dlcSel_' + i);
+    var ikey = sel ? sel.value : '';
+    fetch('/api/device-links/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sha256: p.sha256, identity_key: ikey })
+    }).then(function (r) {
+        return r.json().then(function (d) {
+            if (!r.ok || d.ok === false) throw new Error((d && (d.detail || d.msg)) || ('HTTP ' + r.status));
+            return d;
+        });
+    }).then(function () {
+        showDeviceLinks();
+    }).catch(function (e) { alert('确认失败：' + e.message); });
+}
+
+function rejectDeviceLink(i) {
+    var p = window.__dlPending[i];
+    if (!p) { alert('待确认项已刷新，请重新打开设备联系'); return; }
+    if (!confirm('确定否决这条设备联系吗？\n\n否决后平台不再为该资料自动建立设备关联。')) return;
+    fetch('/api/device-links/reject', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sha256: p.sha256, reason: '人工否决' })
+    }).then(function (r) {
+        return r.json().then(function (d) {
+            if (!r.ok || d.ok === false) throw new Error((d && (d.detail || d.msg)) || ('HTTP ' + r.status));
+            return d;
+        });
+    }).then(function () {
+        showDeviceLinks();
+    }).catch(function (e) { alert('否决失败：' + e.message); });
 }
 
 // ===== 版本更新 =====

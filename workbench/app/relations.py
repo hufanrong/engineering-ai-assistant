@@ -900,6 +900,10 @@ def build_relations(force: bool = False, data_dir=None) -> dict:
     # 修法：建模型这一处也走 _merge_index_devices —— 与 load_relations 同一个函数、
     # 同一份台账、同一个出口，不再自己算一遍。
     graph = _merge_index_devices(graph, ledger or {})
+    # v0.1.248（D36）：并入「文件夹名/文件名 → 设备」的联系。
+    # 与读路径（load_relations）同一个函数 —— 建与读必须给同一个答案，
+    # 否则「建图后看得到、重新打开就没了」又是一条两个答案。
+    graph = _merge_device_links(graph, ddir)
     try:
         from . import spatial_model
         spatial = spatial_model.build_spatial_model(graph)
@@ -1177,12 +1181,57 @@ def _merge_index_devices(graph: dict, ledger: dict) -> dict:
     return graph
 
 
+def _merge_device_links(graph: dict, data_dir=None) -> dict:
+    """把「文件夹名/文件名 → 设备」的联系并进图谱（v0.1.248 / D36）。
+
+    图谱里设备的资料来源本来只有两类：图纸解析出来的（in_files）和台账行。
+    以设备命名的文件夹里的资料**两类都不是** —— 用户自己按设备整理的资料，
+    既没有图纸坐标，也没进台账。不并进来，这些资料在图谱上等于不存在。
+
+    **建图与读图走同一个函数**：读路径（load_relations）与建图路径（build_relations）
+    都调用它，避免出现「建的时候有、读的时候没有」的两个答案。
+    """
+    try:
+        from . import device_link as _dl
+        fmap = _dl.device_file_map(data_dir)
+        links = _dl.list_links(data_dir)
+    except Exception:  # noqa: BLE001
+        return graph
+    if not fmap and not links:
+        return graph
+    devs = graph.get("devices")
+    if not isinstance(devs, list):
+        devs = []
+    by_tag = {d.get("tag"): d for d in devs if isinstance(d, dict)}
+    added = 0
+    for tag, files in fmap.items():
+        d = by_tag.get(tag)
+        if not d:
+            continue
+        cur = d.get("files")
+        if not isinstance(cur, list):
+            cur = []
+        for f in files:
+            if f not in cur:
+                cur.append(f)
+                added += 1
+        d["files"] = cur
+    graph["devices"] = devs
+    graph["device_links"] = links
+    st = graph.get("stats")
+    if isinstance(st, dict):
+        st["device_links"] = len(links)
+        st["device_link_files"] = added
+    return graph
+
+
 def load_relations(data_dir=None) -> dict:
     """读取关系图谱。
 
     v0.1.173：读的时候把台账设备并进来。只导入台账、未跑关系图谱的项目，
     原来在这里读到的是空设备列表，导致下游全线「无设备数据」。
     v0.1.246：支持显式 data_dir（多项目平台化），落点现算，不再依赖模块级全局。
+    v0.1.248：并入「文件夹名 → 设备」的联系（与建图路径同一函数）。
     """
     path = _ensure(data_dir)
     graph = None
@@ -1198,7 +1247,8 @@ def load_relations(data_dir=None) -> dict:
         ledger = _load_index(data_dir).get("devices") or {}
     except Exception:  # noqa: BLE001
         ledger = {}
-    return _merge_index_devices(graph, ledger)
+    graph = _merge_index_devices(graph, ledger)
+    return _merge_device_links(graph, data_dir)
 
 
 def save_relations(relations: dict, data_dir=None):

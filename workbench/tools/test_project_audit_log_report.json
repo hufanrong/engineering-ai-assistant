@@ -81,12 +81,12 @@
     {
       "label": "E2 日志含项目名",
       "passed": true,
-      "detail": "content=删除项目：审计_待删项目（id=82f669a4，含项目资料）"
+      "detail": "content=删除项目：审计_待删项目（id=2aa8a564，含项目资料）"
     },
     {
       "label": "E3 日志含项目 id（可事后定位）",
       "passed": true,
-      "detail": "content=删除项目：审计_待删项目（id=82f669a4，含项目资料）"
+      "detail": "content=删除项目：审计_待删项目（id=2aa8a564，含项目资料）"
     },
     {
       "label": "F1 返回体 log_written=True",
