@@ -14,6 +14,7 @@ import uuid
 import requests
 
 from . import config
+from . import tombstone as _tombstone
 
 # v0.1.245：这里原来有模块级 `QUEUE_DIR = None` / `LOG_PATH = None`，
 # 由 `_ensure()` 每次调用改写。它们是「多施工项目平台」的头号串味源：
@@ -159,6 +160,11 @@ def enqueue(parse_result, data_dir=None) -> str:
     finally 还原，扫描线程与网页线程并发时会互相把对方的目录改掉 ——
     项目 A 的包出现在项目 B 的待上传列表里。现在整条链路显式带 ddir 往下传。
     """
+    # v0.1.247（D35）：**落点已被删除 → 不再入队**。
+    # 原来这里无条件 makedirs + 打包落盘 —— 项目被删后，正在跑的扫描线程
+    # 下一个文件就把它写回来（实测 D35：接口说 data_deleted:true，磁盘上目录还在）。
+    if data_dir and _tombstone.is_deleted(data_dir):
+        return ""
     ddir = _resolve_dir(data_dir)
     os.makedirs(_queue_dir(ddir), exist_ok=True)
     # v0.1.198：整个「查去重 → 打包落盘 → 更新索引」必须在一把锁里。

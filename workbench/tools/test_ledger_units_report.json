@@ -1,0 +1,48 @@
+{
+ "summary": {
+  "passed": 8,
+  "failed": 0
+ },
+ "items": [
+  {
+   "name": "T1 单位进入合并条目",
+   "passed": true,
+   "detail": "units={'HDPE土工膜': 'm2', '渣浆泵': '台'}"
+  },
+  {
+   "name": "T2 通用表承接未声明类型",
+   "passed": true,
+   "detail": "filled_count=2 fallback=2"
+  },
+  {
+   "name": "T3 每台设备只出一份",
+   "passed": true,
+   "detail": "filled_count=3（应为 3，重复出表会到 9/18）"
+  },
+  {
+   "name": "T4 尾矿库判为材料车间",
+   "passed": true,
+   "detail": "4 行全为 m2/米"
+  },
+  {
+   "name": "T4 总图不判为材料车间",
+   "passed": true,
+   "detail": "8 台设备单位=台"
+  },
+  {
+   "name": "T5 登记表按项目隔离",
+   "passed": true,
+   "detail": "A=2条/首条=设备开箱检验记录 B=1条/首条=设备开箱检查记录"
+  },
+  {
+   "name": "T6 待办标注使用通用表",
+   "passed": true,
+   "detail": "含「使用通用表」=True 含设备名=True"
+  },
+  {
+   "name": "T7 同类型在场仍承接",
+   "passed": true,
+   "detail": "filled=3 覆盖=['1#胶带输送机', '2#胶带输送机', '卧式离心泵'] 未覆盖=0"
+  }
+ ]
+}

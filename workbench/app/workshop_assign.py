@@ -9,6 +9,7 @@ import re
 import threading
 
 from . import config
+from . import tombstone as _tombstone
 
 _LEGACY_FILE = None      # 全局旧文件路径（迁移用）
 _MIGRATED = False
@@ -643,6 +644,11 @@ def assign_workshop(sha: str, file_name: str = "", text: str = "", structure: di
     v0.1.214：新增 data_dir —— 临时目录场景（单测 / 离线重解析）必须能指定落点。
     不传时行为不变（写当前项目）。
     """
+    # v0.1.247（D35）：**落点已被删除 → 不再写归属**。
+    # 车间归属台账是项目目录里的一份 JSON；项目删掉后它被写回来，
+    # 目录就"复活"了（实测 D35）。
+    if data_dir and _tombstone.is_deleted(data_dir):
+        return {"sha": sha, "workshop": "", "skipped": "project_deleted"}
     # v0.1.245：**不再临时改写模块级 _ISOLATED_DIR**。
     # 原来靠「改全局 → 调 → finally 还原」把 data_dir 传下去，代价是并发串味：
     # 线程甲在给项目 A 归车间（全局=_A），线程乙此刻读「当前项目 B」的归属

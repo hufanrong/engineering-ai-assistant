@@ -69,8 +69,8 @@ def _mkproj(tmp, pid):
         json.dump({"id": pid, "name": pid}, f, ensure_ascii=False)
     with open(pm.CURRENT_PROJECT_FILE, "w", encoding="utf-8") as f:
         json.dump({"project_id": pid}, f, ensure_ascii=False)
-    uq.QUEUE_DIR = None
-    uq.LOG_PATH = None
+    # v0.1.245：upload_queue 已删除模块级落点全局（可变全局 = 多项目串味），
+    # 队列目录一律由 uq._queue_dir(解析结果) 现算。
     return d
 
 
@@ -215,13 +215,14 @@ def part_c_queue_unique(tmp):
     [t.join() for t in ths]
 
     idx = uq._load_idx()
-    pkgs = [f for f in os.listdir(uq.QUEUE_DIR)
+    _qdir = uq._queue_dir(uq._ensure())
+    pkgs = [f for f in os.listdir(_qdir)
             if f.endswith(".json") and f != uq._IDX_FILE]
     check(f"{n} 路并发入队：0 错误", not errs, f"错误 {errs[:3]}")
     check(f"去重索引 {n} 条一条不少", len(idx) == n, f"实得 {len(idx)} 条")
     check(f"队列包 {n} 个一个不少", len(pkgs) == n, f"实得 {len(pkgs)} 个")
-    check("并发入队后无残留 .tmp", _tmp_left(uq.QUEUE_DIR) == [],
-          f"残留 {_tmp_left(uq.QUEUE_DIR)}")
+    check("并发入队后无残留 .tmp", _tmp_left(_qdir) == [],
+          f"残留 {_tmp_left(_qdir)}")
 
 
 def part_d_queue_dedup(tmp):
@@ -232,7 +233,8 @@ def part_d_queue_dedup(tmp):
     base = 20
     for i in range(base):
         uq.enqueue(_R(f"sha{i:04d}", i))
-    pkg_before = len([f for f in os.listdir(uq.QUEUE_DIR)
+    _qdir = uq._queue_dir(uq._ensure())
+    pkg_before = len([f for f in os.listdir(_qdir)
                       if f.endswith(".json") and f != uq._IDX_FILE])
 
     n = 20
@@ -251,7 +253,7 @@ def part_d_queue_dedup(tmp):
     [t.start() for t in ths]
     [t.join() for t in ths]
 
-    pkg_after = len([f for f in os.listdir(uq.QUEUE_DIR)
+    pkg_after = len([f for f in os.listdir(_qdir)
                      if f.endswith(".json") and f != uq._IDX_FILE])
     idx = uq._load_idx()
     check(f"重复 {n} 路并发：0 错误", not errs, f"错误 {errs[:3]}")
@@ -288,8 +290,10 @@ def part_e_queue_logged(tmp):
     out = buf.getvalue()
     check("写盘失败时打印了留痕信息", "索引写盘失败" in out, f"实得输出 {out!r}")
     check("留痕里带上了原始错误原因", "模拟磁盘写满" in out, f"实得输出 {out!r}")
-    check("失败后没有残留 .tmp", _tmp_left(uq.QUEUE_DIR) == [],
-          f"残留 {_tmp_left(uq.QUEUE_DIR)}")
+    # v0.1.245：落点现算，不再读模块级 QUEUE_DIR 全局
+    _qdir = uq._queue_dir(uq._ensure())
+    check("失败后没有残留 .tmp", _tmp_left(_qdir) == [],
+          f"残留 {_tmp_left(_qdir)}")
 
 
 def main():
@@ -306,8 +310,6 @@ def main():
         part_e_queue_logged(tmp)
     finally:
         pm.PROJECTS_ROOT, pm.CURRENT_PROJECT_FILE = _root, _cur
-        uq.QUEUE_DIR = None
-        uq.LOG_PATH = None
         shutil.rmtree(tmp, ignore_errors=True)
 
     print("\n" + "-" * 62)

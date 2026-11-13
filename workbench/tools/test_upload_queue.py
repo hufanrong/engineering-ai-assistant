@@ -20,7 +20,7 @@ v0.1.209 修的是这个测试自己：
     2) 只要中途抛异常（断言失败不会，但 IO/JSON 异常会），恢复代码就执行不到，
        真实排队包被清空。WORKbuddy 本机队列里当时有 3 个包，跑一次测试就没了。
   改为全程在临时目录里跑：monkeypatch uq._get_data_dir 指向 tempdir，
-  _ensure() 每次重算 QUEUE_DIR / LOG_PATH 就都落在临时目录，真实数据零接触。
+  落点一律由 uq._queue_dir(uq._ensure()) 现算，都落在临时目录，真实数据零接触。
 
 断言分组：
   [A] 计数口径：pending_count == list_pending 条数 == 真包数
@@ -84,12 +84,12 @@ def main():
     tmp_log = os.path.join(tmp, "upload_log.jsonl")
     os.makedirs(tmp_q, exist_ok=True)
 
-    # 把模块的目录解析指向临时目录；_ensure() 每次都重算，于是全程落在 tmp
+    # 把模块的目录解析指向临时目录；落点一律现算（v0.1.245 起模块里没有
+    # 可变的落点全局，隔离不再依赖「改全局再还原」）。
     uq._get_data_dir = lambda: tmp
-    uq._ensure()
-    qdir = uq.QUEUE_DIR
+    qdir = uq._queue_dir(uq._ensure())
     assert os.path.abspath(qdir) == os.path.abspath(tmp_q), \
-        f"隔离失败：QUEUE_DIR 仍是 {qdir}"
+        f"隔离失败：队列目录仍是 {qdir}"
     print(f"队列目录（临时）: {qdir}")
 
     try:

@@ -141,6 +141,20 @@ _store = VectorStore()
 _store_cache = {}
 
 
+def _vector_ready() -> bool:
+    """语义模型是否已预热（v0.1.247 / D33）。
+
+    真机实测每个文件向量化都要重新加载一次模型（单次 75.8 秒），
+    期间扫描线程被同步阻塞、心跳停摆、界面像死了。启动时预热 + 对外
+    暴露这个字段，前端才能说清"正在准备语义模型"而不是假装卡死。
+    """
+    try:
+        from . import vector_store as _vs_r
+        return bool(_vs_r.model_ready())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _get_store():
     """按当前项目取向量库；未选项目时用全局库。"""
     try:
@@ -182,6 +196,10 @@ def status():
             "project": config.PARSE_PROJECT,
         },
         "vector_count": _get_store().stats().get("count", 0),
+        # v0.1.247（D33）：语义模型是否已预热就绪。
+        # 现场实测每轮扫描都有一个 75.8 秒的 "Loading weights" 空档 ——
+        # 那不是卡死，是模型在同步加载。没有这个字段，前端只能显示"没反应"。
+        "vector_ready": _vector_ready(),
         "queue_pending": upload_queue.pending_count(),
         # v0.1.209：这里原来是 len(scanner._load_index())，数的是索引顶层键数
         # （files/devices/workshops/一个sha/ledger_skipped_rows/updated_at → 6），
@@ -260,6 +278,9 @@ def start_scan(req: ScanReq):
     if not _claim_scan_slot():
         raise HTTPException(409, "已有扫描任务在运行")
     
+    # v0.1.245：请求时就把项目目录定下来，扫描线程只用这一个值。
+    ddir = _pm.get_project_data_dir(current["id"])
+
     def _scan_with_stats(folders, force, status):
         """扫描完成后自动更新项目统计。
         v0.1.144：_refresh_project_stats 挪到 finally——扫描异常时也保证统计刷新，
@@ -283,7 +304,10 @@ def start_scan(req: ScanReq):
         status["heartbeat"] = time.time()
         status["error"] = ""
         try:
-            scanner.background_scan(folders, force, status, progress_cb=lambda *_: _hb())
+            # v0.1.245：落点在**请求时**定死（ddir 由外层算好传进来），
+            # 不在子线程里现查「当前项目」——扫描途中用户切项目就会串味。
+            scanner.background_scan(folders, force, status, progress_cb=lambda *_: _hb(),
+                                    data_dir=ddir)
         except BaseException as e:  # noqa: BLE001  见上面关于 SystemExit 的说明
             status["error"] = f"{type(e).__name__}: {e}"[:500]
             try:
@@ -336,6 +360,18 @@ def scan_status():
         "stats": SCAN_STATUS.get("stats"),
         "heartbeat": SCAN_STATUS.get("heartbeat"),
         "error": SCAN_STATUS.get("error", ""),
+        # v0.1.247（D33）：**心跳与"业务真进展"必须分开报**。
+        # 原来 heartbeat 挂在扫描线程自己的回调上，线程被同步步骤
+        # （加载 embedding 模型 ≈ 75 秒、OCR、DWG 转换）卡住时心跳就停了，
+        # 实测出现"75.8 秒零心跳"，用户和监控都判成程序死了。
+        # 现在：heartbeat 由独立守护线程每 2 秒刷新（服务活着），
+        # last_progress / in_flight_file / in_flight_seconds 说明业务停在哪。
+        "stage": SCAN_STATUS.get("stage", ""),
+        "in_flight_file": SCAN_STATUS.get("in_flight_file", ""),
+        "in_flight_seconds": SCAN_STATUS.get("in_flight_seconds", 0),
+        "last_progress": SCAN_STATUS.get("last_progress"),
+        "heartbeat_gap": round(time.time() - (SCAN_STATUS.get("heartbeat") or 0), 1),
+        "progress_gap": round(time.time() - (SCAN_STATUS.get("last_progress") or 0), 1),
     }
 
 
@@ -386,7 +422,8 @@ def cancel_scan():
 @app.get("/api/scan/failed-list")
 def scan_failed_list():
     """失败 + 待处理文件清单（v0.1.21）。"""
-    return {"items": scanner.list_failed()}
+    from . import project_manager as _pm
+    return {"items": scanner.list_failed(_pm.get_project_data_dir())}
 
 
 class RetryOneReq(BaseModel):
@@ -404,7 +441,8 @@ class DeleteFailedReq(BaseModel):
 @app.post("/api/scan/retry-failed/{sha}")
 def retry_failed_one(sha: str):
     """重试单个失败文件（同步执行，返回该文件结果）。"""
-    st = scanner.retry_failed_files(shas=[sha])
+    from . import project_manager as _pm
+    st = scanner.retry_failed_files(shas=[sha], data_dir=_pm.get_project_data_dir())
     return {"stats": st, "target": sha}
 
 
@@ -412,7 +450,8 @@ def retry_failed_one(sha: str):
 def delete_failed(req: DeleteFailedReq):
     if SCAN_STATUS.get("running"):
         raise HTTPException(409, "扫描/重试正在进行中，请稍候再删除")
-    return scanner.delete_failed(req.shas)
+    from . import project_manager as _pm
+    return scanner.delete_failed(req.shas, data_dir=_pm.get_project_data_dir())
 
 
 @app.post("/api/scan/failed/clear")
@@ -420,8 +459,10 @@ def clear_failed():
     """清空全部失败/待处理登记。"""
     if SCAN_STATUS.get("running"):
         raise HTTPException(409, "扫描/重试正在进行中，请稍候再清空")
-    items = scanner.list_failed()
-    return scanner.delete_failed([it["sha256"] for it in items])
+    from . import project_manager as _pm
+    ddir = _pm.get_project_data_dir()
+    items = scanner.list_failed(ddir)
+    return scanner.delete_failed([it["sha256"] for it in items], data_dir=ddir)
 
 
 @app.post("/api/scan/retry-failed")
@@ -431,12 +472,15 @@ def retry_failed(req: RetryFailedReq | None = None):
     if SCAN_STATUS.get("running"):
         raise HTTPException(409, "已有任务在运行")
     shas = req.shas if req and req.shas else None
+    # v0.1.245：重试后台线程的落点在**请求时**定死。
+    from . import project_manager as _pm
+    ddir = _pm.get_project_data_dir()
     SCAN_STATUS.update({"running": True, "done": 0, "total": 0, "msg": "",
                         "stats": None, "start_ts": time.time(), "heartbeat": time.time()})
 
     def _run():
         try:
-            scanner.retry_failed_files(SCAN_STATUS, shas=shas)
+            scanner.retry_failed_files(SCAN_STATUS, shas=shas, data_dir=ddir)
         except Exception as e:  # noqa: BLE001
             SCAN_STATUS.update({"running": False, "msg": f"重试异常: {e}"})
 
@@ -674,7 +718,8 @@ def upload_log(limit: int = 100):
 
 
 def _upload_process_one(saved: str, name: str, sha: str, nbytes: int,
-                        idx: dict, rel_path: str, uploader: str) -> dict:
+                        idx: dict, rel_path: str, uploader: str,
+                        ddir: str = "") -> dict:
     """单个上传文件的**同步**处理（v0.1.177）。
 
     为什么必须放到线程池里：`upload_files` 是 `async def`，原来直接在里面
@@ -708,8 +753,12 @@ def _upload_process_one(saved: str, name: str, sha: str, nbytes: int,
         except Exception as _vec_err:  # noqa: BLE001
             res.error = (res.error or "") + f"; 向量化失败: {_vec_err}"
             out["error"] = res.error
-        upload_queue.enqueue(res)
-        scanner._save_parsed_cache(res)
+        # v0.1.247：落点必须跟着 ddir —— 网页上传是异步的，
+        # 一个批次跑几分钟，途中用户完全可能切到别的项目。
+        # 原来这三处都在"处理文件那一刻"现查当前项目 → 前半批落 A、
+        # 后半批落 B，同一批资料被劈成两半（EE/FF 同母题）。
+        upload_queue.enqueue(res, data_dir=ddir)
+        scanner._save_parsed_cache(res, ddir)
         # v0.1.137：网页上传也登记文件版本（多版本对照+最新版，与扫描路径一致）
         # 注意：必须用原始文件名 name（res.file_name 是带 sha 前缀的落盘名，
         # 否则同名不同版本永远无法匹配成组）
@@ -719,7 +768,8 @@ def _upload_process_one(saved: str, name: str, sha: str, nbytes: int,
             version_manager.record_version(name, res.sha256,
                                            ts=datetime.datetime.now().isoformat(),
                                            size=nbytes, status=res.status,
-                                           doc_version=_dv, doc_date=_dd, mtime=_mt)
+                                           doc_version=_dv, doc_date=_dd, mtime=_mt,
+                                           data_dir=ddir)
         except Exception:  # noqa: BLE001
             pass
     # v0.1.139/0.1.143：网页上传同样自动归车间，传 rel_path 目录信号
@@ -727,7 +777,8 @@ def _upload_process_one(saved: str, name: str, sha: str, nbytes: int,
     try:
         from . import workshop_assign as _wa2
         _wa2.assign_workshop(res.sha256, name, res.text or "",
-                             res.structure or {}, file_path=rel_path)
+                             res.structure or {}, file_path=rel_path,
+                             data_dir=ddir)
     except Exception:  # noqa: BLE001
         pass
     # v0.1.152：上传自动归集到整编 C 类归集目录（图纸/厂家资料/检测报告等）
@@ -776,6 +827,15 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     # 事实没做，两条路径给出两个答案。改为统计真正落盘的数量再记。
     save_dir = os.path.join(config.DATA_DIR, "uploads")
     os.makedirs(save_dir, exist_ok=True)
+    # v0.1.247：**请求时就把落点定死**（有当前项目就落到该项目目录）。
+    # 不定死的话，这一批文件会在"处理到哪一个"的时候落到当时的当前项目，
+    # 同一批被劈成两个项目 —— 多项目平台上这是最隐蔽的一种串味。
+    try:
+        from . import project_manager as _pm_u
+        _cur_u = _pm_u.get_current_project()
+        _ddir_u = _pm_u.get_project_data_dir(_cur_u["id"]) if _cur_u else ""
+    except Exception:  # noqa: BLE001
+        _ddir_u = ""
     results = []
     # v0.1.177：索引**整批只读写一次**。
     # 原实现每个文件都调一次 _load_index()+_save_index()，而 _save_index 是
@@ -797,7 +857,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
     # 原来一句 `set(_load_index().keys())`，把「上次用坏掉的解析器解析的结果」
     # 也算成已入库 —— 用户重新上传同一份 DWG 只会得到「已入库，自动跳过」，
     # 永远刷不出正文。修好解析器之后必须让重传能真的重新解析。
-    _idx_now = scanner._load_index()
+    _idx_now = scanner._load_index(_ddir_u)
     seen = {k for k, v in _idx_now.items()
             if not isinstance(v, dict)
             or v.get("parser_version") == scanner.PARSER_VERSION}
@@ -813,7 +873,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
         if not force and len(pending) < 5 and (time.time() - last_flush) < 5:
             return
         try:
-            n_flushed += scanner.merge_index_entries(pending)
+            n_flushed += scanner.merge_index_entries(pending, _ddir_u)
             seen.update(pending.keys())
         except Exception as _fe:  # noqa: BLE001
             print(f"[upload] 索引合并失败（下次再试）：{_fe}")
@@ -852,7 +912,7 @@ async def upload_files(files: list[UploadFile] = File(...), uploader: str = Form
             # 不这么改，几百个文件的上传会把 / 和 /api/status 一起堵死 30s 以上。
             out = await run_in_threadpool(
                 _upload_process_one, saved, name, sha, len(raw), pending,
-                rel_paths[fi] if fi < len(rel_paths) else "", uploader)
+                rel_paths[fi] if fi < len(rel_paths) else "", uploader, _ddir_u)
             results.append(out)
             _flush_index()
         except Exception as e:  # noqa: BLE001
@@ -5308,6 +5368,16 @@ def _start_guardian():
 
 def run():
     import uvicorn
+    # v0.1.247（D34）：**先装日志，再干别的**。
+    # 原来全部是裸 print()：写进重定向文件后一行时间戳都没有，
+    # 而 uvicorn.run(log_level="warning") 又把带时间戳的访问日志关掉了 ——
+    # 真机实测 reports/service.log 有 2.4 MB 内容，`grep -c "2026-11-13"` 是 0。
+    # 服务死掉时日志**没有能力回答"什么时候死的、怎么死的"**。
+    from . import logsetup as _logsetup
+    _logsetup.setup_logging()
+    _logsetup.install_exit_hooks()
+    _lg = _logsetup.get_logger()
+    _logsetup.log_startup(_lg, {"host": config.HOST, "port": config.PORT})
     print("=" * 56)
     print("  繁工AI 本地解析工作台 (MVP)")
     print(f"  访问地址: http://{config.HOST}:{config.PORT}")
@@ -5358,7 +5428,28 @@ def run():
     # （MAX_RETRY 只有几次，本来还能自动恢复的文件会被提前打成 pending_manual）。
     # 守护线程一个就够。
     _start_guardian()
-    uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="warning")
+
+    # v0.1.247（D33）：**启动即预热语义模型**（后台线程，不拖慢启动）。
+    # 真机实测每个文件向量化都要重新加载一次模型，单次 75.8 秒，
+    # 期间扫描线程被同步阻塞、心跳停摆、界面像死了。
+    def _warmup():
+        try:
+            from . import vector_store as _vs_w
+            ok = _vs_w.warmup_model()
+            _lg.info("语义模型预热：%s", "就绪" if ok else "失败（将回退关键词检索）")
+        except Exception as _e:  # noqa: BLE001
+            _lg.warning("语义模型预热异常：%s", _e)
+
+    try:
+        import threading as _th_w
+        _th_w.Thread(target=_warmup, daemon=True, name="fg-warmup").start()
+    except Exception as _e:  # noqa: BLE001
+        _lg.warning("语义模型预热线程启动失败：%s", _e)
+
+    # v0.1.247（D34）：访问日志**开着**（原来 warning 级别全关了），
+    # 且与业务日志同一套格式（时间戳 + 级别 + pid）。
+    uvicorn.run(app, host=config.HOST, port=config.PORT,
+                log_level="info", log_config=_logsetup.uvicorn_log_config("INFO"))
 
 # v0.1.188：这里原来紧跟 `if __name__ == "__main__": run()`。
 # 但下方还有一个 v0.1.125 前端兼容 API 层（_log_op / 36 条 @app 路由 / 82 个定义）。

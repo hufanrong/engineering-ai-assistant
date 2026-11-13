@@ -18,28 +18,47 @@ import datetime
 
 from . import config
 from . import project_scope as _scope
+from . import tombstone as _tombstone
 
 _VERSION_NAME = "version_map.json"
 
 
-def _version_file() -> str:
+def _version_file(data_dir=None) -> str:
     """v0.1.199：文件版本记录随项目隔离。
 
     原实现写死 data/version_map.json（模块级常量），实测里那个全局文件已经
     攒了 12 个文件名、198 条版本记录，却不属于 projects/ 下任何一个项目——
-    换项目后看到的还是上一批文件的版本历史。"""
+    换项目后看到的还是上一批文件的版本历史。
+
+    v0.1.245：新增 data_dir —— 扫描/重解析某个项目时，版本记录必须落在
+    **那个项目**的目录里。落点跟走 data_dir 之后，「哪个项目」不再取决于
+    「当前恰好选中了谁」。
+    """
+    if data_dir:
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, _VERSION_NAME)
     return _scope.path(_VERSION_NAME)
 
 
-def _load() -> dict:
+def _load(data_dir=None) -> dict:
+    if data_dir:
+        p = _version_file(data_dir)
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    d = json.load(f)
+                return d if isinstance(d, dict) else {}
+            except Exception:  # noqa: BLE001
+                return {}
+        return {}
     data, _src = _scope.load_with_migration(_VERSION_NAME)
     if isinstance(data, dict) and data:
         return data
     return {}
 
 
-def _save(m: dict):
-    _atomic_io.write_json(_version_file(), m, indent=2)
+def _save(m: dict, data_dir=None):
+    _atomic_io.write_json(_version_file(data_dir), m, indent=2)
 
 
 def _norm_name(name: str) -> str:
@@ -50,18 +69,24 @@ def record_version(file_name: str, sha256: str, ts: str = "",
                     source_node: str = "", size: int = 0,
                     status: str = "parsed", note: str = "",
                     doc_version: str = "", doc_date: str = "",
-                    mtime: str = "") -> dict:
+                    mtime: str = "", data_dir: str = "") -> dict:
     """登记一个文件版本。同一文件名不同 SHA256 → 多版本；同 SHA256 更新元数据。
     v0.1.138：最新版判定优先级 = CAD 标题栏/命名版本号 > 标题栏/命名日期 > 文件修改时间 > 入库时间；
     不再以入库时间为准。关键维度相同才标记 conflict 待人工确认。
+    v0.1.245：新增 data_dir —— 扫描某个项目时，版本记录落在那个项目里。
     返回 {action: added|updated|duplicate, is_latest, conflict}。"""
+    # v0.1.247（D35）：**落点已被删除 → 不再登记版本**。
+    # 版本台账也是项目目录里的一份 JSON，写回去目录就复活了（实测 D35）。
+    if data_dir and _tombstone.is_deleted(data_dir):
+        return {"action": "skipped", "is_latest": False, "conflict": False,
+                "reason": "project_deleted"}
     fname = _norm_name(file_name)
     if not fname or not sha256:
         return {"action": "error", "is_latest": False, "conflict": False}
     dv = _parse_doc_version(doc_version)
     dd = _parse_doc_date(doc_date) or _parse_name_date(fname)
     mt = _parse_ts(mtime)
-    m = _load()
+    m = _load(data_dir)
     versions = m.setdefault(fname, [])
     existing = next((v for v in versions if v["sha256"] == sha256), None)
     if existing:
@@ -81,7 +106,7 @@ def record_version(file_name: str, sha256: str, ts: str = "",
         existing["mtime_ts"] = mt
         if note:
             existing["note"] = note
-        _save(m)
+        _save(m, data_dir)
         _recompute_latest(fname, m)
         return {"action": "updated", "is_latest": existing.get("is_latest", False), "conflict": False}
 
@@ -103,7 +128,7 @@ def record_version(file_name: str, sha256: str, ts: str = "",
     }
     versions.append(entry)
     conflict = _recompute_latest(fname, m)
-    _save(m)
+    _save(m, data_dir)
     return {"action": "added", "is_latest": entry.get("is_latest", False), "conflict": conflict}
 
 

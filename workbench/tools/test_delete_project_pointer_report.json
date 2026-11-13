@@ -1,0 +1,167 @@
+{
+  "total": 32,
+  "passed": 32,
+  "failed": 0,
+  "results": [
+    {
+      "label": "A0 前置：当前项目=C",
+      "passed": true,
+      "detail": "实际=3f758bdc"
+    },
+    {
+      "label": "A1 删除返回 ok",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "label": "A2 指针不悬空：指向 B（有资料的那个）",
+      "passed": true,
+      "detail": "实际=13eb7c09(B_有资料) 期望=13eb7c09"
+    },
+    {
+      "label": "A3 不跳到只有空壳的 A",
+      "passed": true,
+      "detail": "实际=13eb7c09"
+    },
+    {
+      "label": "A4 返回体记录 switched_to",
+      "passed": true,
+      "detail": "switched_to={'id': '13eb7c09', 'name': 'B_有资料'}"
+    },
+    {
+      "label": "A5 message 写明已切换到哪个项目",
+      "passed": true,
+      "detail": "message=项目「C_当前」已删除（含项目资料）（已自动切换为项目「B_有资料」）"
+    },
+    {
+      "label": "B1 删掉当前项目后仍有当前项目",
+      "passed": true,
+      "detail": "实际=f3a87c3d"
+    },
+    {
+      "label": "B2 指针指向 A_空壳",
+      "passed": true,
+      "detail": "实际=f3a87c3d"
+    },
+    {
+      "label": "C1 当前项目为空",
+      "passed": true,
+      "detail": "实际=空"
+    },
+    {
+      "label": "C2 指针文件已移除",
+      "passed": true,
+      "detail": "存在=False"
+    },
+    {
+      "label": "C3 项目列表确实为空",
+      "passed": true,
+      "detail": "剩 0 个"
+    },
+    {
+      "label": "D1 返回 ok",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "label": "D2 指针仍是 D1",
+      "passed": true,
+      "detail": "实际=3cc4c124 之前=3cc4c124"
+    },
+    {
+      "label": "D3 未误报 switched_to",
+      "passed": true,
+      "detail": "switched_to=None"
+    },
+    {
+      "label": "E1 返回 ok（资料已保留）",
+      "passed": true,
+      "detail": "False"
+    },
+    {
+      "label": "E2 指针跳到 E2",
+      "passed": true,
+      "detail": "实际=7401c447"
+    },
+    {
+      "label": "E3 资料进了回收站（没被真删）",
+      "passed": true,
+      "detail": "recycled_to=/tmp/fgdelptr_uleh0vuv/recycled_projects/399a1163"
+    },
+    {
+      "label": "F1 get_current_project() 返回真实项目（不是指向已删 id 的空壳）",
+      "passed": true,
+      "detail": "实际=7401c447"
+    },
+    {
+      "label": "F2 该项目的目录真实存在",
+      "passed": true,
+      "detail": "/tmp/fgdelptr_uleh0vuv/projects/7401c447"
+    },
+    {
+      "label": "H1 指针正常时不误改",
+      "passed": true,
+      "detail": "healed=False project=7401c447"
+    },
+    {
+      "label": "H2 前置：指针已丢",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "label": "H3 指针丢失 → 自动指回一个有资料的项目",
+      "passed": true,
+      "detail": "healed=True project=7401c447"
+    },
+    {
+      "label": "H4 自愈后指针文件真实写回",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "label": "H5 自愈后读当前项目可用",
+      "passed": true,
+      "detail": "实际=7401c447"
+    },
+    {
+      "label": "H6 自愈幂等（第二次不重复动作）",
+      "passed": true,
+      "detail": "healed=False"
+    },
+    {
+      "label": "H7 前置：指针指向已不存在项目",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "label": "H8 指针指向已删项目 → 自动改指有效项目",
+      "passed": true,
+      "detail": "healed=True project=7401c447"
+    },
+    {
+      "label": "H9 前置：项目列表为空",
+      "passed": true,
+      "detail": "剩 0 个"
+    },
+    {
+      "label": "H10 无项目时不动作（未选择是真实状态）",
+      "passed": true,
+      "detail": "healed=False project=None"
+    },
+    {
+      "label": "H11 无项目时不伪造指针文件",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "label": "G1 真实项目目录清单未变",
+      "passed": true,
+      "detail": "前 10 个 / 后 10 个"
+    },
+    {
+      "label": "G2 真实 current_project.json 内容未变",
+      "passed": true,
+      "detail": ""
+    }
+  ]
+}

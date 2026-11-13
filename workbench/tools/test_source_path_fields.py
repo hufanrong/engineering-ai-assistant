@@ -175,7 +175,8 @@ def main():
         # ---------- [C5] 测试不得污染用户的真实待上传队列 ----------
         print("\n[C5] 临时目录里重解析不得写进真实项目队列")
         from app import upload_queue as UQ
-        old_q, old_l = UQ.QUEUE_DIR, UQ.LOG_PATH
+        # v0.1.245：upload_queue 已删除模块级落点全局（可变全局 = 多项目串味），
+        # 这里不再需要保存/还原它们。
         try:
             real_q = os.path.join(os.path.abspath(C.DATA_DIR), "uploads")
             # 真实队列目录 = 当前项目 upload_queue（不存在也算 0）
@@ -258,7 +259,7 @@ def main():
                       f"{len(_tmpy)} 条", len(_tmpy) == 0,
                       "这些是单测写进用户项目的记录，会导致界面出现没上传过的待确认文件")
         finally:
-            UQ.QUEUE_DIR, UQ.LOG_PATH = old_q, old_l
+            pass
 
         # ---------- [D] 源码里不许再调不存在的函数 ----------
         print("\n[D] 源码里不得再调用不存在的 index_result")

@@ -13,6 +13,7 @@ from . import config
 from parsers.engines import parse_file, ParseResult
 from .vector_store import VectorStore
 from . import upload_queue
+from . import tombstone as _tombstone
 
 INDEX_FILE = None  # 兼容旧引用（main.py 仅判断存在性）；实际读写不再依赖此全局变量
 
@@ -34,21 +35,80 @@ PARSER_VERSION = config.PARSER_VERSION
 
 
 def _get_data_dir(data_dir=None):
-    """获取数据目录：优先传入的data_dir，其次当前项目目录，最后全局目录。"""
+    """获取数据目录：优先传入的data_dir，其次当前项目目录，最后全局目录。
+
+    v0.1.247（D35）：**落点被墓碑挡住时不建目录**。
+    原来这里无条件 os.makedirs(data_dir) —— 项目被删之后，扫描线程再走
+    一步就把刚删掉的目录重新建出来。实测事故：接口如实返回
+    data_deleted:true，磁盘上 data/projects/<pid>/ 又出现了。
+    """
     if data_dir:
-        os.makedirs(data_dir, exist_ok=True)
+        if not _tomb_blocked(data_dir):
+            os.makedirs(data_dir, exist_ok=True)
         return data_dir
     try:
         from . import project_manager as _pm
         current = _pm.get_current_project()
         if current:
             pdir = _pm.get_project_data_dir(current["id"])
-            os.makedirs(pdir, exist_ok=True)
+            if not _tomb_blocked(pdir):
+                os.makedirs(pdir, exist_ok=True)
             return pdir
     except Exception:
         pass
     os.makedirs(config.DATA_DIR, exist_ok=True)
     return config.DATA_DIR
+
+
+# v0.1.247（D35）：**落点被墓碑挡住**时的一票否决。
+#
+# 事故现场（真机 2026-11-13，WORKbuddy D35）：删掉的项目目录被正在跑的
+# 扫描线程**写了回来** —— 接口如实返回 data_deleted:true，磁盘上目录却还在。
+# 根因是 `_get_data_dir()` 里那行 os.makedirs(data_dir)：它会把刚删掉的
+# 目录重新建出来，于是后面每一次写盘都落在一个"复活"的目录里。
+#
+# 所以判定必须放在**任何 mkdir 之前**。
+def _tomb_blocked(data_dir) -> bool:
+    """该落点是否已被删除（项目墓碑命中）。永不抛异常。"""
+    try:
+        return bool(data_dir) and _tombstone.is_deleted(data_dir)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# v0.1.247（D35）：**在跑的扫描登记表**。
+#
+# 删除项目时必须先让该目录上的扫描收手，否则它会一边被删一边继续写。
+# 多项目平台下这里按 data_dir 索引：A 项目扫描不影响 B 项目。
+_ACTIVE_SCANS = {}
+_ACTIVE_SCANS_LOCK = threading.Lock()
+
+
+def cancel_scans_for(data_dir: str) -> int:
+    """取消正在指定目录上跑的扫描，返回被取消的扫描数。
+
+    v0.1.247（D35）：删除项目前调用。扫描线程在下一个文件边界就会退出，
+    不再往一个已经被删掉的目录里写。
+    """
+    if not data_dir:
+        return 0
+    key = os.path.abspath(data_dir)
+    with _ACTIVE_SCANS_LOCK:
+        items = [(k, v) for k, v in _ACTIVE_SCANS.items() if k == key]
+    n = 0
+    for _k, ev in items:
+        try:
+            ev.set()
+            n += 1
+        except Exception:  # noqa: BLE001
+            pass
+    return n
+
+
+def active_scans() -> list:
+    """当前在跑的扫描清单（自测/运维用）。"""
+    with _ACTIVE_SCANS_LOCK:
+        return [{"data_dir": k, "running": True} for k in _ACTIVE_SCANS]
 
 
 def _ensure(data_dir=None) -> str:
@@ -59,6 +119,10 @@ def _ensure(data_dir=None) -> str:
 
 
 def _load_index(data_dir=None) -> dict:
+    # v0.1.247（D35）：落点已被删除 → 直接返回空索引，**不碰磁盘**。
+    # 原来这里会先 _ensure() 建出目录，再去读一个不存在的 index.json。
+    if data_dir and _tomb_blocked(data_dir):
+        return {}
     idx_file = _ensure(data_dir)
     if os.path.exists(idx_file):
         try:
@@ -97,7 +161,13 @@ def _save_index(idx: dict, data_dir=None):
 
     v0.1.198：直接覆盖写在写到一半崩溃时会留下半截 JSON，
     _load_index 静默返回 {} → 用户整个资料库索引全部丢失（实测复现见上方注释）。
+
+    v0.1.247（D35）：**落点被删（墓碑命中）时直接不写**。
+    原来这里先 `_ensure(data_dir)`，而 `_ensure` 内部会 os.makedirs(data_dir)
+    —— 刚被删掉的项目目录就这样被"复活"，index.json 重新出现（0 条）。
     """
+    if data_dir and _tomb_blocked(data_dir):
+        return False
     idx_file = _ensure(data_dir)
     with _INDEX_LOCK:
         tmp = f"{idx_file}.{uuid.uuid4().hex[:8]}.tmp"
@@ -424,7 +494,8 @@ def _parse_with_ticks(path, timeout=None, on_tick=None, tick_sec=2.0):
     return out.get("res"), False, ""
 
 
-def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None, data_dir=None) -> dict:
+def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None,
+                data_dir=None, stage_cb=None) -> dict:
     """扫描一个或多个文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
     folder 可为字符串或字符串列表。data_dir 指定数据目录（为None时自动使用当前项目目录）。返回统计。"""
     folders = [folder] if isinstance(folder, str) else list(folder)
@@ -446,6 +517,24 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     file_list.append(os.path.join(root, fn))
     stats["found"] = len(file_list)
     _n_since_save = 0  # v0.1.177：索引分批落盘计数
+    # v0.1.247（D33）：索引**按时间**落盘，不只按条数。
+    # 原实现每 50 个文件才落一次盘 —— 真机 63 个文件的一轮扫描，
+    # 前 12 个文件解析完了 index.json 都不存在（用户看到的是「资料库 0 条」），
+    # 中途一断就全丢。改为「满 50 条 **或** 距上次落盘满 10 秒」就写。
+    _last_save_at = time.time()
+    _INDEX_SAVE_EVERY_SEC = 10
+
+    def _set_stage(stage, fname=""):
+        """阶段级进度（v0.1.247 / D33）。
+
+        用户看到的进度必须能区分「在解析」「在向量化」「在归类」「在入库」——
+        只给一个 done/total，用户分不清是慢还是死了。
+        """
+        if stage_cb is not None:
+            try:
+                stage_cb(stage, fname)
+            except Exception:  # noqa: BLE001
+                pass
 
     # v0.1.234（D23）：**枚举完立刻报一次进度**。
     # 原来 total 只在「某个文件解析完之后」的 cb 里才有值，于是扫描刚启动的
@@ -463,11 +552,16 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
         # v0.1.234（D23）：**解析开始前**打心跳，不是解析完之后。
         # 首个文件可能是 100MB 的 DWG（ODA 转换）或几十页扫描件（OCR），
         # 单它就上百秒；只在「解析完」回调，这段时间正好是心跳盲区。
+        # v0.1.247（D35）：扫描途中项目被删 → 立刻收手，不再往墓碑目录写。
+        if _tomb_blocked(ddir):
+            stats["aborted_deleted_project"] = True
+            break
         if progress_cb:
             try:
                 progress_cb(i, len(file_list), f"解析中 {os.path.basename(path)}")
             except Exception:  # noqa: BLE001
                 pass
+        _set_stage("解析", os.path.basename(path))
         try:
             if not force:
                 import hashlib
@@ -516,6 +610,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 # 向量化失败不得影响已解析文件的入库（原实现中 index_file 抛异常
                 # 会被外层 except 捕获并把整个文件判为 failed，导致解析成功的文件
                 # 全部无法进入资料库；embedding 模型缺失时这是必然触发路径）
+                _set_stage("向量化", os.path.basename(path))
                 try:
                     n = store.index_file(res)
                 except Exception as _ve:  # noqa: BLE001
@@ -525,19 +620,26 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 if n:
                     stats["vectorized"] += 1
                 # 无论是否成功向量化都进上传队列（云端合并保留原文+解析）
-                upload_queue.enqueue(res)
+                _set_stage("归类入库", os.path.basename(path))
+                # v0.1.245：必须带 ddir —— 不带时包落「当前项目」队列。
+                # 多项目平台下，用户扫的是项目 A 的资料、当前选中的却是 B，
+                # A 的包就出现在 B 的待上传列表里（项目之间互相串包）。
+                upload_queue.enqueue(res, data_dir=ddir)
                 # v0.1.27：解析后自动归车间（人工登记不覆盖）
                 # v0.1.177：**必须传 file_path** —— 用户是按车间/工艺单元分文件夹的，
                 # 目录名是最强归属信号（detect_workshop 里 file_path 优先级 0.85，仅次于 CAD 图名）。
                 # 实测事故：这里一直只传了文件名，file_path 恒为空 → 目录信号从未进入检测，
                 # 237 个明确放在「重介质」目录的资料 96% 归不到车间。
+                # v0.1.245：同时必须传 data_dir —— 车间归属同样只能落在本项目。
                 try:
                     from . import workshop_assign
                     workshop_assign.assign_workshop(res.sha256, res.file_name, res.text or "",
-                                                    res.structure or {}, file_path=path)
+                                                    res.structure or {}, file_path=path,
+                                                    data_dir=ddir)
                 except Exception:  # noqa: BLE001
                     pass
                 # v0.1.32：登记文件版本（多版本对照+最新版判断）
+                # v0.1.245：版本台账跟车间归属同理，只能落在本项目。
                 try:
                     from . import version_manager
                     import os as _os
@@ -546,7 +648,8 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     version_manager.record_version(res.file_name, res.sha256,
                                                     ts=datetime.datetime.now().isoformat(),
                                                     size=_fsize, status=res.status,
-                                                    doc_version=_dv, doc_date=_dd, mtime=_mt)
+                                                    doc_version=_dv, doc_date=_dd, mtime=_mt,
+                                                    data_dir=ddir)
                 except Exception:  # noqa: BLE001
                     pass
                 # v0.1.34：群聊文件自动解析关联（检测到聊天记录则解析消息+提取位号/车间/事项）
@@ -571,7 +674,9 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 except Exception:  # noqa: BLE001
                     pass
                 # 所有后处理完成后保存解析缓存（含群聊/车间等 enrichment）
-                _save_parsed_cache(res)
+                # v0.1.245：必须带 ddir —— 不带时缓存落「当前项目」，
+                # 扫项目 A 的资料却把缓存写进项目 B，B 的资料库会出现 A 的文件。
+                _save_parsed_cache(res, ddir)
             else:
                 stats["skipped" if res.status == "skipped" else "failed"] += 1
                 # v0.1.143：解析失败/跳过的文件也按文件名+目录路径自动归车间
@@ -580,7 +685,7 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                     from . import workshop_assign
                     workshop_assign.assign_workshop(res.sha256, res.file_name,
                                                     res.text or "", res.structure or {},
-                                                    file_path=path)
+                                                    file_path=path, data_dir=ddir)
                 except Exception:  # noqa: BLE001
                     pass
 
@@ -601,9 +706,11 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
             # 重新序列化写盘，扫描进度越来越慢，大目录扫到一半整站卡死。
             # 每 50 个落一次盘，既保证崩溃时可恢复，又把写盘次数降了 98%。
             _n_since_save += 1
-            if _n_since_save >= 50:
+            if (_n_since_save >= 50
+                    or (time.time() - _last_save_at) >= _INDEX_SAVE_EVERY_SEC):
                 _save_index(idx, ddir)
                 _n_since_save = 0
+                _last_save_at = time.time()
             if progress_cb:
                 progress_cb(i + 1, len(file_list), f"{res.status}: {res.file_name}")
         except Exception as e:  # noqa: BLE001
@@ -612,11 +719,15 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 progress_cb(i + 1, len(file_list), f"异常 {os.path.basename(path)}: {e}")
 
     # v0.1.177：收尾补一次落盘（不足 50 个的尾巴）
+    # v0.1.247（D33b）：**异常路径也必须落盘**。
+    # 原来只有"正常走完"才写；扫描中途被 Ctrl-C / 进程被杀 / 抛异常，
+    # 已解析的几百个文件的索引全丢，用户重扫一遍（实测一轮 20 分钟）。
     try:
         if _n_since_save:
             _save_index(idx, ddir)
     except Exception:  # noqa: BLE001
         pass
+    _set_stage("完成", "")
 
     # v0.1.172：扫描结束把设备台账行写进 index.json["devices"]
     # （原来该字段无人写入，导致监理确认表按车间出设备行时恒为空）
@@ -704,6 +815,8 @@ def sync_devices(data_dir=None) -> dict:
 def _save_parsed_cache(res: ParseResult, data_dir=None):
     """把解析结果缓存到 data/parsed_cache/{sha256}.json，供详情页读取。
     v0.1.129：修复 BUG-0 —— data_dir 缺省时自行解析当前数据目录（原来引用 scan_folder 局部变量 ddir 导致 NameError）。"""
+    if data_dir and _tomb_blocked(data_dir):
+        return False
     ddir = _get_data_dir(data_dir)
     cache_dir = os.path.join(ddir, "parsed_cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -738,11 +851,21 @@ def _load_cache(sha: str, data_dir=None) -> dict:
 MAX_RETRY = 3   # 单个文件失败重试上限（v0.1.21）
 
 
-def retry_failed_files(status: dict = None, shas: list = None) -> dict:
+def retry_failed_files(status: dict = None, shas: list = None, data_dir=None) -> dict:
     """重试失败文件（v0.1.21）：可全部重试或指定 sha；每次失败 retry_count+1，
-    达到 MAX_RETRY 后转 pending_manual（待处理，人工介入）。"""
-    idx = _load_index()
-    store = VectorStore()
+    达到 MAX_RETRY 后转 pending_manual（待处理，人工介入）。
+
+    v0.1.245：补 data_dir，并把**四个落点对齐到同一目录**。
+    实测事故：原来这里 `store = VectorStore()`（落全局 data/vectordb），
+    而 scan_folder / reparse_file 都落「项目目录/vector_db」——
+    同一个文件**扫描**进项目向量库、**重试**进全局向量库，两条路两个答案。
+    平台化之后一个进程要同时服务多个施工项目，全局向量库会把所有项目的资料
+    混在一起，检索时根本分不清命中的是哪个项目。现在 index / 向量库 / 队列包 /
+    解析缓存四个落点都跟随 data_dir。
+    """
+    ddir = _get_data_dir(data_dir)
+    idx = _load_index(ddir)
+    store = VectorStore(db_path=os.path.join(ddir, "vector_db"))
     if shas:
         targets = [(sha, info) for sha, info in idx.items()
                    if sha in set(shas) and sha not in INDEX_RESERVED_KEYS
@@ -769,7 +892,7 @@ def retry_failed_files(status: dict = None, shas: list = None) -> dict:
                                               "error": info.get("error", "")})
             else:
                 idx[sha] = {**info, "retry_count": rc, "ts": datetime.datetime.now().isoformat()}
-            _save_index(idx)
+            _save_index(idx, ddir)
             stats["retried"] += 1
             if status is not None:
                 status.update({"msg": f"文件已不在原位置: {info.get('file_name')}"})
@@ -777,8 +900,8 @@ def retry_failed_files(status: dict = None, shas: list = None) -> dict:
         res = parse_file(path)
         if res.status == "parsed" or res.status == "partial":
             store.index_file(res)
-            upload_queue.enqueue(res)
-            _save_parsed_cache(res)
+            upload_queue.enqueue(res, data_dir=ddir)
+            _save_parsed_cache(res, ddir)
             stats["recovered"] += 1
             idx[sha] = {
                 "file_name": res.file_name, "file_path": path,
@@ -801,7 +924,7 @@ def retry_failed_files(status: dict = None, shas: list = None) -> dict:
                             "ts": datetime.datetime.now().isoformat()}
             stats["still_failed"] += 1
         stats["retried"] += 1
-        _save_index(idx)
+        _save_index(idx, ddir)
         if status is not None:
             status.update({"done": i + 1, "total": len(targets), "msg": f"重试: {info.get('file_name')}"})
     if status is not None:
@@ -809,9 +932,9 @@ def retry_failed_files(status: dict = None, shas: list = None) -> dict:
     return stats
 
 
-def list_failed() -> list:
+def list_failed(data_dir=None) -> list:
     """失败 + 待处理文件清单（供①页展示/重试/删除）。"""
-    idx = _load_index()
+    idx = _load_index(data_dir)
     out = []
     for sha, info in idx.items():
         if sha in INDEX_RESERVED_KEYS or not isinstance(info, dict):
@@ -831,9 +954,9 @@ def list_failed() -> list:
     return out
 
 
-def delete_failed(shas: list) -> dict:
+def delete_failed(shas: list, data_dir=None) -> dict:
     """删除失败/待处理登记（保留磁盘原文件）。"""
-    idx = _load_index()
+    idx = _load_index(data_dir)
     n = 0
     for sha in shas:
         info = idx.get(sha)
@@ -841,28 +964,83 @@ def delete_failed(shas: list) -> dict:
                 and info.get("status") in ("failed", "pending_manual"):
             del idx[sha]
             n += 1
-    _save_index(idx)
+    _save_index(idx, data_dir)
     return {"deleted": n}
 
 
-def background_scan(folder, force: bool = False, status: dict = None, progress_cb=None):
+def background_scan(folder, force: bool = False, status: dict = None, progress_cb=None,
+                    data_dir=None):
     """后台线程执行扫描（任务线程，不阻塞 API）。status: 共享 dict 用于轮询进度。
     v0.1.144：修复致命 Bug——main.py 调用时传 progress_cb=... 但本函数签名缺失该参数，
     导致每次扫描启动即抛 TypeError 被吞掉，上传文件永不入库。
-    同时异常时也写入 stats（此前异常分支 stats 为 null，前端误判为"没数据"）。"""
+    同时异常时也写入 stats（此前异常分支 stats 为 null，前端误判为"没数据"）。
+
+    v0.1.245：新增 data_dir。落点必须在**请求时**定死并传进来，
+    不能在子线程里现查「当前项目」——用户在扫描途中切了项目，
+    文件就落进另一个项目（多项目平台上的串味）。"""
+    ddir = _get_data_dir(data_dir)
     cancel = threading.Event()
     if status is not None:
         status["running"] = True
         status["cancel"] = cancel
+        # v0.1.247（D33）：状态字段补全 —— 界面要能区分「在跑」「卡住」「在哪个文件」。
+        status["stage"] = "准备中"
+        status["in_flight_file"] = ""
+        status["in_flight_seconds"] = 0
+        status["last_progress"] = time.time()
+        status["in_flight_started"] = 0
         # v0.1.234（D26）：**在后台线程接手的第一时间就把 running 钉成 True**。
         # 原来 /api/scan 先把 running 置 False、过一会儿才由本线程置 True，
         # 这个窗口里来的第二个 POST /api/scan 不会被 409 拦住，会起第二个
         # 扫描线程，两个线程共写同一份 SCAN_STATUS 与同一个 index.json。
         status["heartbeat"] = time.time()
 
+    # v0.1.247（D35）：登记到「在跑扫描表」，删除项目时可以把它取消掉。
+    _akey = os.path.abspath(ddir)
+    with _ACTIVE_SCANS_LOCK:
+        _ACTIVE_SCANS[_akey] = cancel
+
+    # v0.1.247（D33）：**独立心跳守护线程**。
+    #
+    # 原来的心跳挂在扫描线程自己的 progress_cb 上，扫描线程被同步步骤
+    # （加载 embedding 模型 ≈ 75 秒、OCR、DWG 转换）卡住时心跳跟着停 ——
+    # 实测「75.8 秒没有任何心跳」，用户和监控都以为程序死了。
+    #
+    # 现在把两个概念拆开：
+    #   · heartbeat      —— **服务还活着**（守护线程每 2 秒刷一次，与业务无关）
+    #   · last_progress  —— **业务真有进展**的最后时刻（长时间不动才是真卡）
+    #   · in_flight_file / in_flight_seconds —— 卡在哪个文件、卡了多久
+    #
+    # 三个字段一起给，界面才能区分「在啃大文件」和「真的死了」。
+    _hb_stop = threading.Event()
+
+    def _hb_loop():
+        while not _hb_stop.wait(2.0):
+            try:
+                if status is not None:
+                    status["heartbeat"] = time.time()
+                    started = status.get("in_flight_started") or 0
+                    if started:
+                        status["in_flight_seconds"] = round(time.time() - started, 1)
+            except Exception:  # noqa: BLE001
+                pass
+
+    _hb_thread = threading.Thread(target=_hb_loop, daemon=True,
+                                  name="fg-scan-heartbeat")
+    _hb_thread.start()
+
     def cb(done, total, msg):
         if status is not None:
             status.update({"done": done, "total": total, "msg": msg})
+            status["last_progress"] = time.time()
+
+    def stage_cb(stage, fname=""):
+        """阶段进度（v0.1.247 / D33）。"""
+        if status is not None:
+            status["stage"] = stage
+            status["in_flight_file"] = fname or ""
+            status["in_flight_started"] = time.time() if fname else 0
+            status["last_progress"] = time.time()
 
     # 组合回调：内部 cb 更新 status，外部 progress_cb（如心跳）同步调用
     def combined_cb(done, total, msg):
@@ -874,9 +1052,20 @@ def background_scan(folder, force: bool = False, status: dict = None, progress_c
                 pass
 
     try:
-        stats = scan_folder(folder, force=force, progress_cb=combined_cb, cancel_event=cancel)
+        stats = scan_folder(folder, force=force, progress_cb=combined_cb,
+                            cancel_event=cancel, data_dir=ddir, stage_cb=stage_cb)
         if status is not None:
             status.update({"running": False, "done": stats.get("found", 0), "stats": stats, "msg": "完成"})
+            status["stage"] = "已结束"
+            status["in_flight_file"] = ""
     except Exception as e:  # noqa: BLE001
         if status is not None:
             status.update({"running": False, "stats": {"error": str(e)}, "msg": f"扫描异常: {e}"})
+            status["stage"] = "异常结束"
+    finally:
+        _hb_stop.set()
+        with _ACTIVE_SCANS_LOCK:
+            if _ACTIVE_SCANS.get(_akey) is cancel:
+                _ACTIVE_SCANS.pop(_akey, None)
+        if status is not None:
+            status["heartbeat"] = time.time()

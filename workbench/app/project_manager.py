@@ -75,6 +75,15 @@ def create_project(name: str, description: str = "", client: str = "",
     
     project_id = str(uuid.uuid4())[:8]
     project_dir = _get_project_dir(project_id)
+
+    # v0.1.247（D35）：显式清掉同路径的历史墓碑。
+    # 项目目录名是 uuid，实际不会复用；但"同名项目重建"这类路径
+    # 不能因为一条过期墓碑被永久挡写（挡住 = 写入静默失败）。
+    try:
+        from . import tombstone as _tomb_new
+        _tomb_new.clear(project_dir)
+    except Exception:  # noqa: BLE001
+        pass
     
     # 创建项目目录结构
     os.makedirs(os.path.join(project_dir, "parsed_cache"), exist_ok=True)
@@ -510,6 +519,16 @@ def _safe_rmtree(path: str, retries: int = 3, delay: float = 0.5) -> tuple:
     for i in range(max(1, retries)):
         try:
             shutil.rmtree(path)
+            # v0.1.247（D35）：**rmtree 没抛异常 ≠ 目录真的没了**。
+            # 正在跑的扫描线程会在下一步把目录又建出来（实测：接口返回
+            # data_deleted:true，而目录连同 vector_db/ 又出现在磁盘上）。
+            # 所以删完必须回读一次，目录还在就当没删干净，继续重试。
+            if os.path.exists(path):
+                last = "rmtree 未抛异常但目录仍存在（疑似被其它线程重建）"
+                if i < retries - 1:
+                    time.sleep(delay * (i + 1))
+                    continue
+                break
             return True, ""
         except BaseException as e:  # noqa: BLE001 —— 有意连 SystemExit 一起收
             last = f"{type(e).__name__}: {e}"
@@ -572,6 +591,18 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
             _vs0.close_stores_under(project_dir)
         except Exception:  # noqa: BLE001
             pass
+        # v0.1.247（D35）：移走之前先立墓碑 —— 目录一旦离开原位，
+        # 正在跑的扫描线程下一行 os.makedirs 就会把它原地"复活"。
+        try:
+            from . import tombstone as _tomb0
+            _tomb0.mark_deleted(project_dir, project_id, reason="recycle")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from . import scanner as _sc0
+            _sc0.cancel_scans_for(project_dir)
+        except Exception:  # noqa: BLE001
+            pass
         if os.path.exists(project_dir):
             shutil.move(project_dir, dest)
         _settle = _settle_current_after_delete(_successor) if _is_current else {}
@@ -615,6 +646,29 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
         _closed_stores = _vs.close_stores_under(project_dir)
     except Exception as _ce:  # noqa: BLE001
         _closed_stores = 0
+
+    # v0.1.247（D35）：**删除前立墓碑 + 停掉这个目录上在跑的扫描**。
+    #
+    # 实测事故（真机 2026-11-13，WORKbuddy D35）：接口返回 data_deleted:true，
+    # 而 data/projects/<pid>/ 又出现了（project_meta.json 没了、index.json 0 条、
+    # vector_db/ 在）。根因不是"删不干净"，是**正在跑的扫描线程把目录写了回来**：
+    #   扫描线程还在这个目录里跑 → 删除把它 rmtree 掉 → 扫描线程下一步
+    #   `_save_index(idx, ddir)` 里的 os.makedirs(ddir) 又把目录建了出来。
+    #
+    # 两道闸：
+    #   ① 墓碑（app/tombstone.py）—— 删除后任何落盘写都被拒绝
+    #   ② 取消扫描（scanner.cancel_scans_for）—— 让扫描尽快收手，不再空转
+    try:
+        from . import tombstone as _tomb
+        _tomb.mark_deleted(project_dir, project_id, reason="delete_project")
+    except Exception:  # noqa: BLE001
+        pass
+    _cancelled_scans = 0
+    try:
+        from . import scanner as _sc
+        _cancelled_scans = _sc.cancel_scans_for(project_dir)
+    except Exception:  # noqa: BLE001
+        _cancelled_scans = 0
 
     # 删除项目目录
     _rm_ok, _rm_err = _safe_rmtree(project_dir)
@@ -687,11 +741,53 @@ def delete_project(project_id: str, force: bool = False, backup: bool = True,
                        f"删除项目失败：{project['name']}（id={project_id}）：{_rm_err}")
         return result
 
+    # v0.1.247（D35）：**删完必须回读磁盘**。
+    # 接口说"删干净了"而目录还在，是这个项目里最伤人的一种错 ——
+    # 用户按接口的答复以为资料已经没了，其实还躺在盘上。
+    # 这里以磁盘为准：目录还在就如实报 data_deleted:false + residual，
+    # 并登记待续删（下次启动再清一遍）。
+    _residual = []
+    if os.path.exists(project_dir):
+        _rm_ok = False
+        _rm_err = _rm_err or "删除后目录仍存在"
+        try:
+            _residual = sorted(os.listdir(project_dir))[:20]
+        except Exception:  # noqa: BLE001
+            _residual = []
+        try:
+            from . import project_manager as _self
+            _self._queue_sweep(project_id, project_dir, _rm_err)
+        except Exception:  # noqa: BLE001
+            pass
+        result = {
+            "ok": True,
+            "message": f"项目「{project['name']}」已从列表移除；"
+                       f"资料目录仍存在（{_rm_err}），已登记为待清理，"
+                       f"下次启动自动删除干净",
+            "deleted_id": project_id,
+            "data_deleted": False,
+            "pending_sweep": True,
+            "residual": _residual,
+            "cancelled_scans": _cancelled_scans,
+        }
+        if _is_current:
+            _settle = _settle_current_after_delete(_successor)
+            result["switched_to"] = _settle.get("switched_to")
+            if _settle.get("switch_message"):
+                result["message"] += f"（{_settle['switch_message']}）"
+        result["log_written"] = _op_log.log_op(
+            "delete",
+            f"删除项目：{project['name']}（id={project_id}，"
+            f"已从列表移除，资料目录仍存在：{_rm_err[:120]}）")
+        return result
+
     result = {
         "ok": True,
         "message": f"项目「{project['name']}」已删除（含项目资料）",
         "deleted_id": project_id,
         "data_deleted": True,
+        "residual": [],
+        "cancelled_scans": _cancelled_scans,
     }
     # v0.1.215：目录删完再切指针 —— 反过来会在「指针指着还没删的目录」那一瞬间
     # 被并发的 /api/projects/current 读到，统计刷新会把已删项目的数带出来。

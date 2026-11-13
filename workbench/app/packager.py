@@ -100,12 +100,16 @@ def import_library(raw: bytes) -> dict:
             # v0.1.32：登记版本（同名不同 sha → 多版本对照，按时间戳最新版为准）
             try:
                 from . import version_manager
+                # v0.1.247：**必须带 data_dir** —— 这里 ddir 已经是本项目目录
+                # （多电脑并库导入时按包归属项目），不带就落到"当前项目"，
+                # 于是导入到 B 项目的资料，版本台账却记在 A 项目名下。
                 version_manager.record_version(
                     info.get("file_name", ""), sha,
                     ts=info.get("ts", "") or datetime.datetime.now().isoformat(),
                     source_node=manifest.get("node", "imported"),
                     size=info.get("size", 0),
-                    status=info.get("status", "parsed"))
+                    status=info.get("status", "parsed"),
+                    data_dir=ddir)
             except Exception:  # noqa: BLE001
                 pass
             if sha in idx:

@@ -5,8 +5,11 @@
 import os
 import json
 import datetime
+import threading
 
 from . import config
+# v0.1.247（D35）：项目删除墓碑 —— 落点被删后向量库不得再被写回。
+from . import tombstone as _tombstone
 
 # v0.1.234（D19）：**所有被创建过的 VectorStore 实例都要能被找到并关掉**。
 #
@@ -109,6 +112,38 @@ def last_close_report() -> dict:
     return dict(_LAST_CLOSE_REPORT)
 
 
+# v0.1.247（D33）：**embedding 模型预热状态**。
+#
+# 实测：真机一轮扫描 63 个文件要 20 分钟，最大的一段空档是 75.8 秒，
+# 日志里写的是 "Loading weights" —— 每个文件的向量化都在**重新加载模型**。
+# 模型加载是同步的，75 秒里扫描线程**完全不能发心跳**，界面看到的就是
+# "程序死了"。
+#
+# 修法：服务启动时在后台线程把模型预热好，状态接口对外暴露 vector_ready，
+# 前端据此提示"正在准备语义模型"而不是假装卡死。
+_MODEL_READY = False
+_MODEL_READY_LOCK = threading.Lock()
+
+
+def model_ready() -> bool:
+    """语义模型是否已预热就绪。"""
+    return bool(_MODEL_READY)
+
+
+def warmup_model() -> bool:
+    """预热语义模型（应在后台线程调用，避免拖慢启动）。返回是否就绪。"""
+    global _MODEL_READY
+    try:
+        st = VectorStore(db_path=os.path.join(config.DATA_DIR, "vectordb"))
+        st._get_model()  # noqa: SLF001 —— 就是要触发懒加载
+        ok = True
+    except Exception:  # noqa: BLE001
+        ok = False
+    with _MODEL_READY_LOCK:
+        _MODEL_READY = ok
+    return ok
+
+
 class VectorStore:
     def __init__(self, db_path: str = None):
         self._model = None
@@ -181,9 +216,23 @@ class VectorStore:
                 self._model = SentenceTransformer(config.EMBED_MODEL)
         return self._model
 
+    def _project_deleted(self) -> bool:
+        """本向量库所属的项目目录是否已被删除（D35 墓碑）。"""
+        try:
+            parent = os.path.dirname(self._db_path.rstrip("/\\"))
+            if not parent:
+                return False
+            return _tombstone.is_deleted(parent)
+        except Exception:  # noqa: BLE001
+            return False
+
     def _get_collection(self):
         if self._collection is None:
             import chromadb
+            # v0.1.247（D35）：项目已删除 → 不再创建 vector_db/。
+            # 实测事故里 vector_db/ 就是在项目被删之后又出现的。
+            if self._project_deleted():
+                raise RuntimeError("项目已删除，向量库不再创建")
             os.makedirs(self._db_path, exist_ok=True)
             self._client = chromadb.PersistentClient(path=self._db_path)
             self._collection = self._client.get_or_create_collection(
@@ -211,6 +260,9 @@ class VectorStore:
     # ---------- 入库 ----------
     def index_file(self, parse_result) -> int:
         """对一个解析结果做分块 + 向量化 + 入库，返回块数。"""
+        # v0.1.247（D35）：落点项目已删除 → 不再向量化入库（返回 0 块）。
+        if self._project_deleted():
+            return 0
         chunks = self.chunk_text(parse_result.text)
         if not chunks:
             return 0
