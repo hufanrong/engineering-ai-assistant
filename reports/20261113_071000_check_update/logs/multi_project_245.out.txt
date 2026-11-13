@@ -1,0 +1,42 @@
+D:\fangong-workbench\workbench\venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.7.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+[PASS] M1[P1] 统计车间数 == 正式车间清单数  统计=1 清单=1 ['P11号车间']...
+[PASS] M2[P1] 统计设备数 == 台账设备数  统计=2 台账=2
+[PASS] M3[P1] 正式车间不含自动推导名（用户指令：未审批不建车间）  泄漏=[]
+[PASS] M4[P1] 图谱设备数 == 台账设备数  图谱=2 台账=2
+[PASS] M4b[P1] 无车间名的设备不落任何车间  有车间=2 应为=2
+[PASS] M1[P2] 统计车间数 == 正式车间清单数  统计=5 清单=5 ['P21号车间', 'P22号车间', 'P23号车间', 'P24号车间']...
+[PASS] M2[P2] 统计设备数 == 台账设备数  统计=16 台账=16
+[PASS] M3[P2] 正式车间不含自动推导名（用户指令：未审批不建车间）  泄漏=[]
+[PASS] M4[P2] 图谱设备数 == 台账设备数  图谱=16 台账=16
+[PASS] M4b[P2] 无车间名的设备不落任何车间  有车间=15 应为=15
+[PASS] M1[P3] 统计车间数 == 正式车间清单数  统计=12 清单=12 ['P310号车间', 'P311号车间', 'P312号车间', 'P31号车间']...
+[PASS] M2[P3] 统计设备数 == 台账设备数  统计=68 台账=68
+[PASS] M3[P3] 正式车间不含自动推导名（用户指令：未审批不建车间）  泄漏=[]
+[PASS] M4[P3] 图谱设备数 == 台账设备数  图谱=68 台账=68
+[PASS] M4b[P3] 无车间名的设备不落任何车间  有车间=65 应为=65
+[PASS] M5 落点解析是纯函数：两个项目各自返回自己的路径  A=C:\Users\HUFANR~1\AppData\Local\Temp\fg245_t8jot6ox\projects\3617b59e\relations.json B=C:\Users\HUFANR~1\AppData\Local\Temp\fg245_t8jot6ox\projects\7d6a94bf\relations.json
+[PASS] M5b 解析过 B 之后再读 A，A 仍是 A（不串味）  A 图谱设备=2
+[PASS] M6 每个项目的图谱只落在自己的目录  A=True B=True
+[PASS] M6b A 的图谱不含 B 的位号  交集=[]
+[PASS] M6c B 的图谱不含 A 的位号  交集=[]
+[PASS] M5c 交错后 A 读到的仍是 A 的设备（落点不依赖模块级全局）  读到=['P1-D001', 'P1-D002'] 期望=['P1-D001', 'P1-D002']
+[PASS] M7[P1] 车间登记册只含本项目的内容
+[PASS] M7[P2] 车间登记册只含本项目的内容
+[PASS] M7[P3] 车间登记册只含本项目的内容
+[PASS] M7b[P1] 车间归属记录只含本项目的位号  串=[]
+[PASS] M7b[P2] 车间归属记录只含本项目的位号  串=[]
+[PASS] M7b[P3] 车间归属记录只含本项目的位号  串=[]
+[PASS] M8 并发建图谱无异常  []
+[PASS] M8b 并发后 A 仍只含 A 的设备  A=2 期望=2
+[PASS] M8c 并发后 B 仍只含 B 的设备  B=16 期望=16
+[PASS] M9 隔离目录扫描成功  None
+[FAIL] M9b 当前项目的索引/归属/队列/版本台账一个字节都没变  被改动=['assign', 'queue_idx', 'version']
+[FAIL] M9c 当前项目的上传队列没有多出包  前=0 后=2
+[FAIL] M9d 隔离目录里确实落了解析缓存/索引/队列包（说明扫描真跑了）  iso=C:\Users\HUFANR~1\AppData\Local\Temp\fg245_iso_1u9i7vq3
+[PASS] M9e 向量库落点也跟随 ddir  iso/vector_db=True
+[PASS] M9f 隔离目录的归属记录没有落到任何项目里  泄漏=[]
+[PASS] M10 真实审计流水未被污染  前=43 后=43
+[PASS] M10b 真实项目目录未被污染  前=5 后=5
+========================================================
+失败 3 条  ['M9b 当前项目的索引/归属/队列/版本台账一个字节都没变', 'M9c 当前项目的上传队列没有多出包', 'M9d 隔离目录里确实落了解析缓存/索引/队列包（说明扫描真跑了）']

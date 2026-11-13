@@ -1,0 +1,142 @@
+{
+  "run_id": "20261113_071000_check_update",
+  "kind": "manual_defect_report",
+  "generated": "2026-11-13 07:14",
+  "version_tested": "0.1.246",
+  "head": "45a80ff",
+  "environment": {
+    "os": "Windows",
+    "data": "真实工程资料 马诺诺 / 65 个文件 / 10 类格式（含 DWG + 扫描件 OCR）",
+    "port": 8756,
+    "note": "shell 带 http_proxy=http://127.0.0.1:34427，访问本机必须 --noproxy '*'"
+  },
+
+  "evidence": [
+    {
+      "id": "E1",
+      "claim": "检查更新开始时服务实际已停止（端口仍 LISTENING 但 PID 已不存在）",
+      "observed": "GET /api/status 连续 3 次返回 HTTP=000；netstat 显示 127.0.0.1:8756 LISTENING PID 6520，但该 PID 在任务管理器中不存在",
+      "conclusion": "服务进程已死，端口句柄残留"
+    },
+    {
+      "id": "E2",
+      "claim": "用计划任务 FangongAI-StartWorkbench 恢复服务，30 秒内就绪",
+      "observed": "启动后 v0.1.246 / PID 24380；三次采样 HTTP=200，耗时 8ms / 33ms / 9ms",
+      "conclusion": "服务本身可正常启动，问题是「死了没人发现、没有自愈」"
+    },
+    {
+      "id": "E3",
+      "claim": "上次服务退出未走重启接口，属无痕消失",
+      "observed": "workbench/updates/restart_result.json 内容仍是 2026-11-11T07:59:22 / version 0.1.233 / old_pid 15668 → new_pid 6092；文件 mtime 11-11 07:59",
+      "conclusion": "不是 /api/update/restart 杀的；restart_canary.log / restart_helper.log 同为 11-11 07:59"
+    },
+    {
+      "id": "E4",
+      "claim": "service.log 无时间戳、无启动/退出埋点，事后无法复盘",
+      "observed": "grep -c \"2026-11-13\" reports/service.log → 0；grep 启动/Uvicorn 埋点 → 0 命中；文件 mtime 04:29:01，末尾无 traceback，只有正常解析输出",
+      "conclusion": "无法确定退出时刻与原因；只能靠 version_map.json 的 04:29:03 反推同一分钟"
+    },
+    {
+      "id": "E5",
+      "claim": "本轮自测 P57/F12/S3",
+      "observed": "reports/20261113_040421/selftest_report.json summary = {1:{P8,F6},2:{P9,F0},3:{P7,F6,S1},5:{P9,F0},6:{P24,F0,S1},4:{S1}}；coverage.complete=true；coverage.skipped_by_decision=[4]",
+      "conclusion": "11-12 23:04 轮为 P74/F1/S2，本轮失败数 12"
+    },
+    {
+      "id": "E6",
+      "claim": "12 条失败里 11 条是「扫描空转」的下游（同源扇出）",
+      "observed": "阶段1：扫描完成 {} 耗时356.8s / 扫描按时结束 心跳停止301s done=0/63 / 资料库条目数0 / 车间自动分类 正式[] 候选[] / 检索 hits=0 模式None；索引与解析缓存一致 index=0 cache=0 孤儿文件=65；vector_count=0。阶段3 六条全部 total_devices=0 / 无设备数据",
+      "conclusion": "6+6 条断言共用同一根因，不应当作 12 个独立缺陷修"
+    },
+    {
+      "id": "E7",
+      "claim": "D31 隔离失效：scan_folder 主链路 3 处落点未跟随 data_dir",
+      "observed": "python tools/test_multi_project_245.py → M9b 被改动=['assign','queue_idx','version']；M9c 前=0 后=2；M9d 隔离目录无 index/queue；M9e iso/vector_db=True（向量库正确跟随）",
+      "conclusion": "恰好 3 个业务文件绕过 data_dir，index.json 与向量库正常 → 不是全盘失效"
+    },
+    {
+      "id": "E8",
+      "claim": "D31 代码位置（app/scanner.py::scan_folder 427-627 行）",
+      "observed": "528 行 upload_queue.enqueue(res) ｜ 536 行 workshop_assign.assign_workshop(..., file_path=path) ｜ 546 行 version_manager.record_version(...)；对照 reparse_file 630-691 行 657/666 均已带 data_dir=ddir",
+      "conclusion": "同仓已有正确写法，照抄即可修 2/3"
+    },
+    {
+      "id": "E9",
+      "claim": "D31 第 3 处是接口缺维度，不是漏传",
+      "observed": "app/version_manager.py:49 record_version(...) 无 data_dir 形参；落点 _version_file() → project_scope.path(_VERSION_NAME)；app/project_scope.py:63 path(filename, project_id=None, legacy_fallback=True) 只有 project_id/None，没有 data_dir",
+      "conclusion": "即使 scan_folder 想传也传不进去，需补接口"
+    },
+    {
+      "id": "E10",
+      "claim": "D31 已造成真实现场污染",
+      "observed": "data/projects/<马诺诺>/workshop_assign.json mtime 04:28:33；version_map.json mtime 04:29:03；两者均落在 test_source_path_fields 运行窗口（04:26:01→04:31:47）内",
+      "conclusion": "测试在临时目录解析，写进了用户真实项目"
+    },
+    {
+      "id": "E11",
+      "claim": "D32 假红①：test_upload_queue.py 一条断言都没跑",
+      "observed": "AttributeError: module 'app.upload_queue' has no attribute 'QUEUE_DIR'（tools/test_upload_queue.py:90 qdir = uq.QUEUE_DIR）",
+      "conclusion": "测试崩溃，rc=1 但产品无问题"
+    },
+    {
+      "id": "E12",
+      "claim": "D32 假红②：test_source_path_fields.py 在 [C5] 段崩溃",
+      "observed": "套件耗时 346.0s，tail 只剩标题 '[C5] 临时目录里重解析不得写进真实项目队列'；对应 178 行 old_q, old_l = UQ.QUEUE_DIR, UQ.LOG_PATH",
+      "conclusion": "同上，引用已被 v0.1.245 删除的模块级常量"
+    },
+    {
+      "id": "E13",
+      "claim": "D32 假红③：test_atomic_io.py 的「队列包 20 个实得 1 个」是在数错目录",
+      "observed": "tools/test_atomic_io.py:72 uq.QUEUE_DIR = None；:218 os.listdir(uq.QUEUE_DIR) → os.listdir(None)；python -c \"import os; print([f for f in os.listdir(None) if f.endswith('.json')])\" → ['PACKAGE_MANIFEST.json']；同段其余 3 条（索引 20 条齐全 / 无残留 .tmp / 0 错误）全 PASS",
+      "conclusion": "v0.1.246 没有丢队列包，断言在数 CWD"
+    },
+    {
+      "id": "E14",
+      "claim": "D33 隔离复现：单文件解析/向量化期间 tick 会长时间停摆",
+      "observed": "tools/probe_scan_hang.py（FANGONG_DATA_DIR=临时目录，源目录只读）：0.3s 开始；14.6s 后出现 'Loading weights: 199/199'；下一次回调在 90.4s，距上次回调 75.8s，期间零 tick；最长空档 TOP5 = [75.8s, 16.8s, 12.7s, 4.9s, 3.1s]；首个 PDF 约 90s，DWG 约 19s；结尾 '源目录前后一致=True' 证明未动真实资料",
+      "conclusion": "心跳挂在「扫描线程的 progress_cb」上，而向量化/模型加载发生在同一线程的同步调用里 → 只要有一步卡住，心跳一起停"
+    },
+    {
+      "id": "E15",
+      "claim": "D33 规模：65 个真实文件一轮约 20 分钟，自测只等 356.8s",
+      "observed": "探针 240s 内完成 12/63（约 20s/文件）；自测在 356.8s 判失败时 done 仍为 0（服务内首文件更慢或更早卡住）",
+      "conclusion": "进度粒度只有「每文件完成」，导致无法区分「慢」与「死」"
+    },
+    {
+      "id": "E15b",
+      "claim": "D33b 索引 50 个才落盘，中断即全丢",
+      "observed": "app/scanner.py:448 _n_since_save=0；:604 if _n_since_save >= 50 才 _save_index。探针在 12/63 被打断后：parsed_cache 有 12 份、upload_queue 有包、workshop_assign.json / version_map.json / vector_db 均已写，而 index.json 存在=False",
+      "conclusion": "最坏组合——解析结果全在，资料库索引 0 条；异常路径不会走到 616 行的收尾落盘"
+    },
+    {
+      "id": "E16",
+      "claim": "D23 测试盲区：套件绿而产品红",
+      "observed": "test_scan_heartbeat.py 本轮 rc=0 通过 29/29，耗时 496.7s；同轮真实扫描段落判红（心跳停 301s）",
+      "conclusion": "套件用造出来的小样本，碰不到大 PDF / DWG / OCR 场景"
+    },
+    {
+      "id": "E17",
+      "claim": "D29/D30 未动",
+      "observed": "GET /api/projects → 马诺诺 file_count=62 device_count=24 workshop_count=2（中矿堆 from_ledger=true、粗碎车间 from_ledger=false）",
+      "conclusion": "火法部分工艺设备表 3709 行仍未入库，台账白名单仍为空"
+    },
+    {
+      "id": "E18",
+      "claim": "无回归的专项套件（本轮全绿）",
+      "observed": "test_restart_really 48/0（56.0s）｜test_delete_sweep 15/0（7.6s）｜test_ledger_authority 15/0｜test_device_identity 14/0｜test_device_identity_242 21/0｜test_spatial_ledger_243 ALL｜test_workshop_count_244 ALL｜test_phase_coverage 28/0｜test_gb_fallback 193/0｜test_project_audit_log 24/0｜test_archive_concurrency 13/0｜test_atomic_write 29/0｜test_readonly_no_write 17/0｜test_relations_gate 22/0｜test_wb_loop_git 21/0｜test_workshop_approval 23/0",
+      "conclusion": "D18/D19 修复稳定，未因本轮重构回退"
+    },
+    {
+      "id": "E19",
+      "claim": "残留自测项目（待老板点头才删）",
+      "observed": "自测_20261111_120419 / 自测_20261111_170448 / 自测_20261111_220503，各 file_count=60 device_count=24",
+      "conclusion": "共 180 文件 / 72 设备占用"
+    },
+    {
+      "id": "E20",
+      "claim": "环境差异：服务是否带沙箱 shim 取决于是谁启动的",
+      "observed": "service.log 内含 [safe-delete][SAFE_DELETE_FAIL_CLOSED] / [SAFE_DELETE_BULK_CONFIRM_REQUIRED] 记录（WorkBuddy 会话注入的 sitecustomize.py）；用户级/机器级 PYTHONPATH 均为空 → 计划任务启动的进程不带该 shim",
+      "conclusion": "同一条代码两种行为，排障时极易误判；建议启动埋点里明确写 sandbox_shim=on/off"
+    }
+  ]
+}

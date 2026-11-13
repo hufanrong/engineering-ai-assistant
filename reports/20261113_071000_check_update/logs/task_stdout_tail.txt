@@ -1,0 +1,60 @@
+[2026-11-12 23:16:25]   套件 test_readonly_no_write.py rc=0 7.2s | 结果：17 passed, 0 failed
+[2026-11-12 23:16:26]   套件 test_relations_gate.py rc=0 0.4s | ===== 通过 22 / 失败 0 =====
+[2026-11-12 23:16:26]   套件 test_relations_workshops.py rc=0 0.1s | ===== 通过 10 / 失败 0 =====
+[2026-11-12 23:17:21]   套件 test_restart_really.py rc=0 55.6s | ===== 通过 48 / 失败 0 =====
+[2026-11-12 23:17:22]   套件 test_restore_target.py rc=0 0.3s | ===== 通过 9 / 失败 0 =====
+[2026-11-12 23:19:20]   套件 test_scan_heartbeat.py rc=0 118.4s | ===== 通过 29 / 失败 0 =====
+[2026-11-12 23:19:22]   套件 test_smart_doc_persist.py rc=0 2.3s | 合计：111 PASS / 0 FAIL
+[2026-11-12 23:19:31]   套件 test_source_path_fields.py rc=1 8.8s | [C5] 临时目录里重解析不得写进真实项目队列
+[2026-11-12 23:19:31]   套件 test_spatial_ledger_243.py rc=0 0.1s | 通过 ALL / 失败 0
+[2026-11-12 23:19:32]   套件 test_template_concurrency.py rc=0 0.6s | 通过 9 项，失败 0 项
+[2026-11-12 23:19:32]   套件 test_upload_queue.py rc=1 0.2s | 
+[2026-11-12 23:19:40]   套件 test_volume_no_overwrite.py rc=0 7.5s | 合计：27 PASS / 0 FAIL
+[2026-11-12 23:19:42]   套件 test_wb_loop_git.py rc=0 2.3s | ===== 通过 21 / 失败 0 =====
+[2026-11-12 23:19:43]   套件 test_workshop_approval.py rc=0 0.8s | 结果：通过 23 / 失败 0
+[2026-11-12 23:19:43]   套件 test_workshop_count_244.py rc=0 0.7s | 通过 ALL / 失败 0
+[2026-11-12 23:19:44]   套件 test_workshop_source.py rc=0 0.8s | 结果：通过 10 / 失败 0
+[2026-11-12 23:19:53] 本轮结束 status=failed 报告在 reports/20261112_230413/
+===== boot end 2026-11-12 23:19:53 code=1 =====
+
+===== boot start 2026-11-13 04:04:15 argv=['--once', '--phases', '1,2,3,5,6'] =====
+[2026-11-13 04:04:17] 启动：pid=6124 python=D:\fangong-workbench\workbench\venv\Scripts\pythonw.exe cwd=D:\fangong-workbench\workbench repo=D:\fangong-workbench once=True phases=1,2,3,5,6
+[2026-11-13 04:04:17] git 发现：找到 git：C:\Users\hufanrong\.workbuddy\binaries\PortableGit\versions\1.3.0\cmd\git.EXE
+[2026-11-13 04:04:23] ===== 本轮开始 20261113_040421，本地 c4226ea184a6 =====
+[2026-11-13 04:04:31] 远端没有新提交（本地领先 0 个未推送提交），跳过拉取
+[2026-11-13 04:15:36]   套件 test_archive_concurrency.py rc=0 2.4s | 结果：通过 13 / 失败 0 / 共 13
+[2026-11-13 04:15:38]   套件 test_atomic_io.py rc=1 2.4s | FAIL: 队列包 20 个一个不少  实得 1 个
+[2026-11-13 04:15:40]   套件 test_atomic_write.py rc=0 1.1s | 结果：通过 29 / 失败 0 / 共 29
+[2026-11-13 04:15:46]   套件 test_delete_project_pointer.py rc=0 6.5s | 结果：通过 32 / 失败 0
+[2026-11-13 04:15:54]   套件 test_delete_sweep.py rc=0 7.6s | 结果：通过 15 / 失败 0（共 15 条）
+[2026-11-13 04:15:54]   套件 test_device_identity.py rc=0 0.7s | 结果：通过 14 / 失败 0（共 14 条）
+[2026-11-13 04:15:55]   套件 test_device_identity_242.py rc=0 0.5s | 结果：通过 21 / 失败 0（共 21 条）
+[2026-11-13 04:16:05]   套件 test_gb_fallback.py rc=0 10.1s | 结果：193 passed, 0 failed
+[2026-11-13 04:16:06]   套件 test_index_count.py rc=0 0.6s | 结果：通过 10 / 失败 0
+[2026-11-13 04:16:08]   套件 test_ledger_authority.py rc=0 1.9s | 结果：通过 15 / 失败 0
+[2026-11-13 04:16:09]   套件 test_ledger_units.py rc=0 1.5s | 结果：通过 8 / 失败 0 / 共 8
+[2026-11-13 04:16:09]   套件 test_merge_agg.py rc=0 0.2s | 通过 33 项，失败 0 项
+[2026-11-13 04:16:11]   套件 test_multi_project_245.py rc=1 1.7s | 失败 3 条  ['M9b 当前项目的索引/归属/队列/版本台账一个字节都没变', 'M9c 当前项目的上传队列没有多出包', 'M9d 隔离目录里确实落了解析
+[2026-11-13 04:16:12]   套件 test_parsed_cache_path.py rc=0 1.0s | 结果：通过 12 / 失败 0
+[2026-11-13 04:16:15]   套件 test_phase_coverage.py rc=0 3.0s | ===== 通过 28 / 失败 0 =====
+[2026-11-13 04:16:25]   套件 test_project_audit_log.py rc=0 10.1s | 结果：通过 24 / 失败 0
+[2026-11-13 04:16:28]   套件 test_project_backup_complete.py rc=0 2.8s | 汇总：通过 19 / 失败 0
+[2026-11-13 04:16:28]   套件 test_project_scope.py rc=0 0.4s | 全部通过
+[2026-11-13 04:16:41]   套件 test_readonly_no_write.py rc=0 12.7s | 结果：17 passed, 0 failed
+[2026-11-13 04:16:41]   套件 test_relations_gate.py rc=0 0.4s | ===== 通过 22 / 失败 0 =====
+[2026-11-13 04:16:42]   套件 test_relations_workshops.py rc=0 0.1s | ===== 通过 10 / 失败 0 =====
+[2026-11-13 04:17:38]   套件 test_restart_really.py rc=0 56.0s | ===== 通过 48 / 失败 0 =====
+[2026-11-13 04:17:38]   套件 test_restore_target.py rc=0 0.2s | ===== 通过 9 / 失败 0 =====
+[2026-11-13 04:25:55]   套件 test_scan_heartbeat.py rc=0 496.7s | ===== 通过 29 / 失败 0 =====
+[2026-11-13 04:26:01]   套件 test_smart_doc_persist.py rc=0 6.1s | 合计：111 PASS / 0 FAIL
+[2026-11-13 04:31:47]   套件 test_source_path_fields.py rc=1 346.0s | [C5] 临时目录里重解析不得写进真实项目队列
+[2026-11-13 04:31:50]   套件 test_spatial_ledger_243.py rc=0 2.9s | 通过 ALL / 失败 0
+[2026-11-13 04:31:57]   套件 test_template_concurrency.py rc=0 7.4s | 通过 9 项，失败 0 项
+[2026-11-13 04:32:04]   套件 test_upload_queue.py rc=1 6.5s | 
+[2026-11-13 04:32:35]   套件 test_volume_no_overwrite.py rc=0 31.0s | 合计：27 PASS / 0 FAIL
+[2026-11-13 04:32:38]   套件 test_wb_loop_git.py rc=0 3.1s | ===== 通过 21 / 失败 0 =====
+[2026-11-13 04:32:49]   套件 test_workshop_approval.py rc=0 11.3s | 结果：通过 23 / 失败 0
+[2026-11-13 04:32:50]   套件 test_workshop_count_244.py rc=0 0.6s | 通过 ALL / 失败 0
+[2026-11-13 04:32:51]   套件 test_workshop_source.py rc=0 1.4s | 结果：通过 10 / 失败 0
+[2026-11-13 04:33:23] 本轮结束 status=failed 报告在 reports/20261113_040421/
+===== boot end 2026-11-13 04:33:23 code=1 =====
