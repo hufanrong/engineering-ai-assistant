@@ -1,0 +1,45 @@
+{
+  "run_id": "20261113_073500_cleanup_residue",
+  "started": "2026-11-13 07:35:00",
+  "finished": "2026-11-13 07:40:00",
+  "status": "failed",
+  "kind": "manual_cleanup_with_defect",
+  "note": "按老板指令清理自测残留项目。清理本身完成；但过程中实证新缺陷 D35：删除项目时 vector_db 目录会漏删，接口仍返回 data_deleted=true（静默漏删，用户看不到 15M 残留）。",
+
+  "steps": [
+    {"step": "列清单（删除前）", "rc": 0, "out": "删除前 4 个项目：自测_20261111_220503(ebf7bfbd)、自测_20261111_170448(0a0bd124)、自测_20261111_120419(1f4e9819)，各 60 文件/24 设备/15M；马诺诺(0c9a4b2d) 62 文件/24 设备/2 车间，当前项目，保留"},
+    {"step": "逐条删除三个自测项目", "rc": 0, "out": "POST /api/projects/delete {backup:false, delete_data:true} → 三条均返回 ok=true / data_deleted=true / log_written=true"},
+    {"step": "核对项目列表", "rc": 0, "out": "项目总数 4 → 1，仅剩马诺诺；当前项目指针未悬空，仍为马诺诺"},
+    {"step": "核对磁盘（发现残留）", "rc": 1, "out": "projects/ 下除 0c9a4b2d 外还有一个 f95c1a30 目录（15M），但项目列表里已无此项目"},
+    {"step": "定位 f95c1a30 身份", "rc": 1, "out": "无 project_meta.json（元数据已清）；index.json 0 条目；只剩 vector_db/ 一个子目录；目录 mtime 2026-11-13 04:29 —— 与本轮自测（自测_20261113_040635）及服务死亡时刻同一分钟"},
+    {"step": "判定为 D35（静默漏删）", "rc": 1, "out": "删除流程把记录、索引都清了，唯独 vector_db 留下；而删除接口返回的是 data_deleted=true。对照：本次通过 API 删的三个项目在服务空闲时整目录删净、无残留 → 漏删与『删除当时是否持有 chroma 句柄』直接相关，即 D19 未修完的部分"},
+    {"step": "清理孤儿目录", "rc": 0, "out": "shutil.rmtree(f95c1a30) 成功，删除后 exists=False（15M 释放）"},
+    {"step": "清理历史自测备份", "rc": 0, "out": "data/backups/deleted_自测_20261109_072445_20261110_073256.fgbak（236K，11-10 生成，对应项目早已不存在）已删除；backups 目录现为空"},
+    {"step": "最终验收", "rc": 0, "out": "v0.1.246 服务正常；项目总数=1（马诺诺）；马诺诺 62 文件/24 设备/2 车间，updated_at 仍为 2026-11-12 13:04:49（未被本次操作改动）；vector_count=1669；projects=32M、backups=0"}
+  ],
+
+  "summary": {
+    "passed": 7,
+    "failed": 2,
+    "skipped": 0,
+    "by_phase": {
+      "LIST-BEFORE": {"passed": 1, "failed": 0, "skipped": 0},
+      "DELETE-VIA-API": {"passed": 1, "failed": 0, "skipped": 0},
+      "VERIFY-LIST": {"passed": 1, "failed": 0, "skipped": 0},
+      "VERIFY-DISK": {"passed": 0, "failed": 1, "skipped": 0},
+      "D35-DIAGNOSIS": {"passed": 0, "failed": 1, "skipped": 0},
+      "CLEANUP-ORPHAN": {"passed": 1, "failed": 0, "skipped": 0},
+      "CLEANUP-BACKUP": {"passed": 1, "failed": 0, "skipped": 0},
+      "FINAL-VERIFY": {"passed": 1, "failed": 0, "skipped": 0},
+      "REAL-DATA-INTACT": {"passed": 1, "failed": 0, "skipped": 0}
+    }
+  },
+
+  "error": "清理完成，但过程中实证 D35：删除项目时 vector_db 漏删且接口谎报 data_deleted=true。证据 f95c1a30：无 project_meta.json、index.json 0 条、仅剩 vector_db 15M、mtime 与 04:29 服务死亡同刻。对照本次 API 删除三项目（服务空闲、不持句柄）整目录删净无残留 → 说明漏删发生在『删除时 chroma 仍持有 data_level0.bin』的场景，即 D19 的根因未在删除路径上彻底兜住。建议：删除前显式 dispose/close chroma client；删除后 os.path.exists 校验，未删净则 data_deleted=false 并返回残留清单；同时把残留写进 operation_log。",
+
+  "commit_before": "c5a31a0",
+  "commit_after": "c5a31a0",
+  "detail_doc": "defects_D35.md",
+  "evidence": "evidence_cleanup.json",
+  "attachments": []
+}

@@ -1,0 +1,61 @@
+{
+  "run_id": "20261113_073500_cleanup_residue",
+  "generated": "2026-11-13 07:40",
+  "version": "0.1.246",
+  "evidence": [
+    {
+      "id": "C1",
+      "claim": "删除前有 4 个项目，其中 3 个是自测残留",
+      "observed": "GET /api/projects → ebf7bfbd 自测_20261111_220503(60/24/0)、0a0bd124 自测_20261111_170448(60/24/0)、1f4e9819 自测_20261111_120419(60/24/0)、0c9a4b2d 马诺诺(62/24/2，当前)",
+      "conclusion": "删除范围明确，马诺诺不在范围内"
+    },
+    {
+      "id": "C2",
+      "claim": "三个自测项目通过正规接口删除成功",
+      "observed": "POST /api/projects/delete {backup:false,delete_data:true} × 3 → 均返回 {\"ok\":true,\"data_deleted\":true,\"log_written\":true}",
+      "conclusion": "接口层面无报错"
+    },
+    {
+      "id": "C3",
+      "claim": "项目列表正确收缩到 1 个",
+      "observed": "GET /api/projects → projects 长度=1，仅 0c9a4b2d；current_project 仍为马诺诺（指针未悬空）",
+      "conclusion": "记录层清理正确"
+    },
+    {
+      "id": "C4",
+      "claim": "磁盘层存在漏删：孤儿目录 f95c1a30（15M）",
+      "observed": "ls -d data/projects/*/ → 0c9a4b2d/、f95c1a30/；du -sh → 32M、15M；但项目列表里已无 f95c1a30",
+      "conclusion": "记录已删、数据未删净"
+    },
+    {
+      "id": "C5",
+      "claim": "f95c1a30 的残留物只有 vector_db",
+      "observed": "目录内：无 project_meta.json；index.json 存在但 0 条目；子目录仅 vector_db/；目录 mtime 2026-11-13 04:29",
+      "conclusion": "元数据与索引已清，唯独 chroma 向量库残留 → 句柄占用特征"
+    },
+    {
+      "id": "C6",
+      "claim": "对照组证明漏删与句柄占用相关，不是普遍现象",
+      "observed": "本次删除的 3 个项目（服务空闲、未持有其 chroma 句柄）→ 删除后 projects/ 下对应目录全部消失，无残留；f95c1a30 被删时（04:29）服务刚完成扫描/向量化",
+      "conclusion": "D19 根因（chroma 不释放 data_level0.bin）在删除路径未兜住"
+    },
+    {
+      "id": "C7",
+      "claim": "接口在漏删时仍报成功（谎报）",
+      "observed": "删除接口返回体固定含 \"data_deleted\": true，未做 os.path.exists 事后校验",
+      "conclusion": "用户看到“已删除（含项目资料）”，磁盘仍占 15M"
+    },
+    {
+      "id": "C8",
+      "claim": "现有 test_delete_sweep 覆盖不到该场景",
+      "observed": "test_delete_sweep 本轮 15/15 通过（7.6s，服务空闲态）",
+      "conclusion": "与 D23 同类：套件绿而现场漏删"
+    },
+    {
+      "id": "C9",
+      "claim": "清理已完成，真实数据未受影响",
+      "observed": "手工删 f95c1a30 成功(存在=False)；删 deleted_自测_20261109_072445_20261110_073256.fgbak 成功；最终 GET /api/status → v0.1.246 / vector_count=1669 / indexed_files=62；马诺诺 62 文件 24 设备 2 车间，updated_at 仍为 2026-11-12 13:04:49",
+      "conclusion": "projects=32M（仅马诺诺）、backups=0、项目总数=1"
+    }
+  ]
+}
