@@ -8,7 +8,7 @@ import json
 import re
 import threading
 import time
-from typing import Union, List
+from typing import Union, List, Optional
 
 from fastapi import Request, FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -155,6 +155,33 @@ def _vector_ready() -> bool:
         return False
 
 
+def _model_status() -> dict:
+    """语义模型状态：是否就绪 / 是否被用户关掉 / 不可用的原因。"""
+    try:
+        from . import vector_store as _vs_m
+        return _vs_m.model_status()
+    except Exception:  # noqa: BLE001
+        return {"ready": False, "enabled": True, "reason": ""}
+
+
+def _semantic_enabled() -> bool:
+    """语义检索是否启用（用户开关，v0.1.249 / D37）。"""
+    try:
+        from . import settings as _st
+        return bool(_st.semantic_enabled())
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _vector_degraded_reason() -> str:
+    """语义模型不可用的原因（降级时给界面/自测看，避免静默降级）。"""
+    try:
+        from . import vector_store as _vs_d
+        return str(_vs_d.model_status().get("reason") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _get_store():
     """按当前项目取向量库；未选项目时用全局库。"""
     try:
@@ -200,6 +227,11 @@ def status():
         # 现场实测每轮扫描都有一个 75.8 秒的 "Loading weights" 空档 ——
         # 那不是卡死，是模型在同步加载。没有这个字段，前端只能显示"没反应"。
         "vector_ready": _vector_ready(),
+        # v0.1.249（D37）：语义检索被用户关闭 / 模型不可用时，
+        # **必须让界面知道原因** —— 否则用户看到「资料库 0 条」，
+        # 根本不知道是文件没内容，还是语义模型卡住了整轮扫描。
+        "semantic_enabled": _semantic_enabled(),
+        "vector_degraded_reason": _vector_degraded_reason(),
         "queue_pending": upload_queue.pending_count(),
         # v0.1.209：这里原来是 len(scanner._load_index())，数的是索引顶层键数
         # （files/devices/workshops/一个sha/ledger_skipped_rows/updated_at → 6），
@@ -4299,6 +4331,11 @@ def workshop_devices(workshop: str = ""):
 #     全部和该设备或车间有关系,可以归在一起,或者建立联系」
 # 车间那一路 v0.1.143 就有（file_path 0.85）；设备这一路此前**只有查询入口、
 # 没有接线**（app/device_link.py），等于没做。
+class SettingsUpdateReq(BaseModel):
+    """本机设置更新请求。只有语义检索开关；None = 不改。"""
+    semantic_enabled: Optional[bool] = None
+
+
 class DeviceLinkConfirmReq(BaseModel):
     sha256: str = ""
     identity_key: str = ""
@@ -4307,6 +4344,49 @@ class DeviceLinkConfirmReq(BaseModel):
 class DeviceLinkRejectReq(BaseModel):
     sha256: str = ""
     reason: str = ""
+
+
+# ---------- 本机设置（v0.1.249 / D37）----------
+# 语义模型加载失败时，程序一直提示用户「可在设置里关闭语义检索」——
+# 而此前项目里**根本没有这个开关**（用户被指了一条走不通的路）。
+# 这里把开关真正做出来，并让扫描/向量库真的尊重它。
+@app.get("/api/settings")
+def get_settings():
+    """本机设置（目前只有语义检索开关）。"""
+    from . import settings as _st
+    return {"ok": True, "settings": _st.get_settings(),
+            "model": _model_status()}
+
+
+def _trigger_semantic_warmup() -> None:
+    """后台预热语义模型（开开关后立刻调用；失败不影响主流程）。"""
+    import threading as _th_w2
+
+    def _w():
+        try:
+            from . import vector_store as _vs_w2
+            _vs_w2.warmup_model()
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        _th_w2.Thread(target=_w, daemon=True, name="fg-warmup-toggle").start()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@app.post("/api/settings")
+def update_settings(req: SettingsUpdateReq):
+    """改本机设置。目前只支持语义检索开关。"""
+    from . import settings as _st
+    if req.semantic_enabled is not None:
+        _st.set_semantic_enabled(req.semantic_enabled)
+        if req.semantic_enabled:
+            # 打开开关后**立刻**在后台预热 ——
+            # 否则「开了没反应」：开关写进磁盘了，模型却要等下一轮扫描才加载。
+            _trigger_semantic_warmup()
+    return {"ok": True, "settings": _st.get_settings(),
+            "model": _model_status()}
 
 
 @app.get("/api/device-links")

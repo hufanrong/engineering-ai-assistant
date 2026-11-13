@@ -124,16 +124,224 @@ def last_close_report() -> dict:
 _MODEL_READY = False
 _MODEL_READY_LOCK = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# v0.1.249（D37）：语义模型是**可选增强**，它不可用绝不能拖住扫描。
+#
+# 真机事故（WORKbuddy 2026-11-13 报告，阶段①「扫描按时结束」失败）：
+#     done 一直是 0/63，心跳停 301s → 判定卡死 → 后续 12 条断言全红
+#     （资料库 0 条 / 检索超时 / 竣工 total_devices=0 / 缺件清单空 …）
+#
+# 根因（现场推演 + 代码定位）：
+#     scanner.scan_folder → store.index_file(res) → VectorStore._get_model()
+#     → 本地无缓存 → **回退联网下载 470MB 模型，且没有任何超时**
+#     → 这段阻塞发生在 `_parse_with_ticks`（120s 文件超时）**之外**，
+#       所以「单文件超时不拖死整轮」那道闸根本没覆盖到它。
+#
+# 两个缺陷，同一个母题：
+#     ① **扫描被可选增强绑架**：模型下不下来 = 整个产品不能用。
+#     ② **逃生通道是假的**：提示语让用户「在设置里关闭语义检索」，
+#        而**项目里根本没有这个开关**（v0.1.249 补上：app/settings.py）。
+#
+# 修法：
+#     · 模型**进程级共享**：此前每个 VectorStore 实例各 load 一次（75s），
+#       扫描起来就是 63×75s。现在全局一份，后面的实例直接复用。
+#     · 联网下载**有上限**：放进后台线程，最多等 EMBED_MODEL_LOAD_TIMEOUT_SEC；
+#       等不到就降级为关键词检索，**扫描继续**，不等、不重试。
+#     · **熔断闩**：一旦确认不可用（或已超时放弃等待），后续文件**立刻**降级，
+#       不再每个文件重复发起 470MB 下载（那是把一次卡死变成 63 次卡死）。
+#     · 用户显式关闭语义检索时，**完全不碰模型**。
+# ---------------------------------------------------------------------------
+_MODEL_LOCK = threading.RLock()
+_SHARED_MODEL = None            # 进程级共享模型（此前是实例级）
+_MODEL_BLOCKED = False          # 熔断闩：已确认不可用 → 后续立刻降级
+_MODEL_BLOCKED_REASON = ""
+_MODEL_DOWNLOADING = False       # 是否已有下载在进行（防止重复发起）
+_MODEL_DOWNLOAD_EVENT = threading.Event()
+
+
+class ModelUnavailable(RuntimeError):
+    """语义模型不可用（未安装 / 本地无缓存且下载失败或超时）。
+
+    这是**可预期**的降级，不是致命错误 —— 调用方应当跳过向量化继续干活。
+    """
+
 
 def model_ready() -> bool:
     """语义模型是否已预热就绪。"""
     return bool(_MODEL_READY)
 
 
+def _local_model_cached() -> bool:
+    """本地有没有语义模型缓存？**只查目录**，不加载模型、不联网。
+
+    用来区分「装了但没缓存（要联网下载）」和「已经缓存（只是还没加载）」——
+    这两种情况给用户的提示完全不同。
+    """
+    raw = str(getattr(config, "EMBED_MODEL", "") or "")
+    if not raw:
+        return False
+    # EMBED_MODEL 直接指向本地目录 → 本身就是缓存
+    if os.path.isdir(raw):
+        return True
+    name = raw.split("/")[-1].lower().replace("_", "-")
+    if not name:
+        return False
+    bases = []
+    for env in ("HF_HOME", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE"):
+        v = os.environ.get(env)
+        if v:
+            bases.append(v)
+    bases.append(os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"))
+    for base in bases:
+        try:
+            if not base or not os.path.isdir(base):
+                continue
+            for entry in os.listdir(base):
+                if name in entry.lower().replace("_", "-"):
+                    return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+# 探针结果记忆：「语义库没装」这件事在一次进程生命周期里不会变，
+# 没必要每次状态查询都重试一次 import（异常不会被 sys.modules 记住）。
+_PROBE_MEMO = {"reason": ""}
+
+
+def _probe_unavailable_reason() -> str:
+    """模型没就绪、且没有已知原因时，廉价地探一下**为什么**。
+
+    绝不下载、绝不加载模型 —— 只 import 一下 + 看一眼缓存目录。
+    返回可直接展示的中文原因。
+    """
+    if _PROBE_MEMO["reason"]:
+        return _PROBE_MEMO["reason"]
+    try:
+        import sentence_transformers  # noqa: F401
+    except Exception as e:  # noqa: BLE001
+        _PROBE_MEMO["reason"] = f"语义库未安装（{type(e).__name__}），已降级为关键词检索"
+        return _PROBE_MEMO["reason"]
+    try:
+        if _local_model_cached():
+            return "语义模型已缓存但尚未加载（首次加载约 1 分钟），当前降级为关键词检索"
+    except Exception:  # noqa: BLE001
+        pass
+    return "语义模型本地无缓存（首次使用需联网下载约 470MB），当前降级为关键词检索"
+
+
+def model_status() -> dict:
+    """语义模型当前状态 —— 给状态接口/界面用，避免「静默降级」。
+
+    三个字段各说一件事：
+        ready    —— 模型此刻可用（可以向量化/语义检索）
+        enabled  —— 用户有没有关掉语义检索
+        reason   —— 不可用时**为什么**（中文，直接可展示）
+    """
+    from . import settings as _settings
+    with _MODEL_LOCK:
+        ready = _SHARED_MODEL is not None or bool(_MODEL_READY)
+        reason = _MODEL_BLOCKED_REASON
+    enabled = bool(_settings.semantic_enabled())
+    if not ready and not reason:
+        # 没就绪却说不出原因 —— 界面只能显示「没反应」，
+        # 用户分不清是「文件没内容」还是「模型没加载出来」。
+        # 这里补一次**廉价探测**（不下载、不加载模型）。
+        reason = ("语义检索已关闭（用户设置）" if not enabled
+                  else _probe_unavailable_reason())
+    return {
+        "ready": bool(ready),
+        "enabled": enabled,
+        "reason": reason or "",
+    }
+
+
+def _set_model_blocked(reason: str) -> None:
+    global _MODEL_BLOCKED, _MODEL_BLOCKED_REASON
+    with _MODEL_LOCK:
+        _MODEL_BLOCKED = True
+        _MODEL_BLOCKED_REASON = reason
+
+
+def _download_worker(SentenceTransformer) -> None:
+    """后台下载语义模型（一次）。
+
+    下载成功 → 填进进程级共享模型并**解除熔断**（后续文件立刻能用上）；
+    下载失败 → 记下原因并置熔断（后续文件立刻降级，不再重试）。
+    """
+    global _SHARED_MODEL, _MODEL_BLOCKED, _MODEL_BLOCKED_REASON
+    try:
+        m = SentenceTransformer(config.EMBED_MODEL)
+    except BaseException as e:  # noqa: BLE001 —— 宿主 sitecustomize 的 SystemExit 也要收
+        with _MODEL_LOCK:
+            _MODEL_BLOCKED = True
+            _MODEL_BLOCKED_REASON = f"语义模型下载失败（{type(e).__name__}），已降级为关键词检索"
+        _MODEL_DOWNLOAD_EVENT.set()
+        return
+    with _MODEL_LOCK:
+        _SHARED_MODEL = m
+        _MODEL_BLOCKED = False
+        _MODEL_BLOCKED_REASON = ""
+    _MODEL_DOWNLOAD_EVENT.set()
+
+
+def _load_model_bounded(timeout=None):
+    """加载语义模型，**有上限**。返回模型或 None（None = 降级，不抛）。
+
+    为什么不能直接把异常抛给调用方：调用方（扫描）需要的是
+    「这次没有向量，但解析结果照常入库」，不是一个异常。
+    """
+    global _MODEL_DOWNLOADING, _SHARED_MODEL
+    timeout = config.EMBED_MODEL_LOAD_TIMEOUT_SEC if timeout is None else timeout
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as e:  # noqa: BLE001
+        _set_model_blocked(f"语义库未安装（{type(e).__name__}），已降级为关键词检索")
+        return None
+
+    # 熔断已生效 → 立刻降级，绝不再发起下载。
+    with _MODEL_LOCK:
+        if _MODEL_BLOCKED:
+            return None
+
+    # ① 本地缓存优先：不走网络，命中即秒回。
+    try:
+        m = SentenceTransformer(config.EMBED_MODEL, local_files_only=True)
+        with _MODEL_LOCK:
+            _SHARED_MODEL = m
+        return m
+    except Exception:  # noqa: BLE001 —— 本地没有缓存是正常情况
+        pass
+
+    # ② 本地没有 → 联网下载：**一次性、有上限、后台进行**。
+    with _MODEL_LOCK:
+        start = not _MODEL_DOWNLOADING
+        if start:
+            _MODEL_DOWNLOADING = True
+            _MODEL_DOWNLOAD_EVENT.clear()
+    if start:
+        th = threading.Thread(target=_download_worker, args=(SentenceTransformer,),
+                              daemon=True, name="fg-embed-download")
+        th.start()
+    # 等它，但只等 config.EMBED_MODEL_LOAD_TIMEOUT_SEC。
+    if _MODEL_DOWNLOAD_EVENT.wait(timeout):
+        with _MODEL_LOCK:
+            return _SHARED_MODEL
+    # 等不到 —— 熔断，扫描继续。下载线程留在后台，跑成了会自动解除熔断。
+    _set_model_blocked(
+        f"语义模型下载超过 {int(timeout)}s 未完成（网络不可达），已降级为关键词检索")
+    return None
+
+
 def warmup_model() -> bool:
     """预热语义模型（应在后台线程调用，避免拖慢启动）。返回是否就绪。"""
     global _MODEL_READY
     try:
+        from . import settings as _settings
+        if not _settings.semantic_enabled():
+            with _MODEL_READY_LOCK:
+                _MODEL_READY = False
+            return False
         st = VectorStore(db_path=os.path.join(config.DATA_DIR, "vectordb"))
         st._get_model()  # noqa: SLF001 —— 就是要触发懒加载
         ok = True
@@ -185,36 +393,31 @@ class VectorStore:
 
     # ---------- 懒加载 ----------
     def _get_model(self):
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-            # v0.1.144：优先本地加载（local_files_only=True），避免网络受限环境下
-            # 向 huggingface.co 发 HEAD 请求检查版本导致扫描卡死/进程退出。
-            # 若本地无缓存则回退联网下载（首次部署场景）。
-            try:
-                self._model = SentenceTransformer(config.EMBED_MODEL, local_files_only=True)
-            except Exception:  # noqa: BLE001
-                # v0.1.177：本地无缓存时**必须先提示**，不能静默去下 ~470MB。
-                # 实测事故：首次解析时程序卡住几分钟、界面无任何变化，
-                # 用户以为程序死了（端口在 LISTEN 但没有响应），实际在后台拉模型；
-                # 断网/内网环境更会直接卡到超时，用户完全不知道发生了什么。
-                import sys
-                import threading as _th
-                msg = (f"\n[繁工AI] 本地未找到语义模型「{config.EMBED_MODEL}」，"
-                       f"首次使用需要联网下载约 470MB，可能需要数分钟。\n"
-                       f"          如下载失败，可在「设置」里关闭语义检索，"
-                       f"关键词检索不受影响。\n")
-                sys.stderr.write(msg)
-                sys.stderr.flush()
-                try:
-                    from . import config as _cfg
-                    _log = os.path.join(_cfg.DATA_DIR, "logs", "model_download.log")
-                    os.makedirs(os.path.dirname(_log), exist_ok=True)
-                    with open(_log, "a", encoding="utf-8") as _lf:
-                        _lf.write(datetime.datetime.now().isoformat() + msg)
-                except Exception:  # noqa: BLE001
-                    pass
-                self._model = SentenceTransformer(config.EMBED_MODEL)
-        return self._model
+        """取语义模型。
+
+        v0.1.249（D37）：模型**进程级共享**，且加载**有上限**。
+        拿不到 → 抛 ModelUnavailable（调用方据此跳过向量化继续干活），
+        绝不把「下不下来」变成「整个扫描卡住」。
+        """
+        global _SHARED_MODEL
+        with _MODEL_LOCK:
+            if _SHARED_MODEL is not None:
+                self._model = _SHARED_MODEL
+                return self._model
+
+        from . import settings as _settings
+        if not _settings.semantic_enabled():
+            raise ModelUnavailable("语义检索已关闭（用户设置），已降级为关键词检索")
+
+        model = _load_model_bounded()
+        if model is None:
+            with _MODEL_LOCK:
+                reason = _MODEL_BLOCKED_REASON or "语义模型不可用，已降级为关键词检索"
+            raise ModelUnavailable(reason)
+        with _MODEL_LOCK:
+            _SHARED_MODEL = model
+        self._model = model
+        return model
 
     def _project_deleted(self) -> bool:
         """本向量库所属的项目目录是否已被删除（D35 墓碑）。"""

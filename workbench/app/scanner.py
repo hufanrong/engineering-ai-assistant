@@ -494,6 +494,19 @@ def _parse_with_ticks(path, timeout=None, on_tick=None, tick_sec=2.0):
     return out.get("res"), False, ""
 
 
+def _semantic_enabled() -> bool:
+    """语义检索是否启用（用户开关，v0.1.249 / D37）。
+
+    读失败一律按「启用」处理 —— 但启用也只是「尝试向量化」，
+    模型不可用时会在 index_file 里降级，不会卡住扫描。
+    """
+    try:
+        from . import settings as _settings
+        return bool(_settings.semantic_enabled())
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None,
                 data_dir=None, stage_cb=None) -> dict:
     """扫描一个或多个文件夹，对每个新文件执行：解析 → 结构化入库 → 分块向量化 → 上传队列。
@@ -610,15 +623,31 @@ def scan_folder(folder, force: bool = False, progress_cb=None, cancel_event=None
                 # 向量化失败不得影响已解析文件的入库（原实现中 index_file 抛异常
                 # 会被外层 except 捕获并把整个文件判为 failed，导致解析成功的文件
                 # 全部无法进入资料库；embedding 模型缺失时这是必然触发路径）
-                _set_stage("向量化", os.path.basename(path))
-                try:
-                    n = store.index_file(res)
-                except Exception as _ve:  # noqa: BLE001
-                    n = 0
-                    res.structure = res.structure or {}
-                    res.structure["vector_error"] = str(_ve)[:200]
-                if n:
-                    stats["vectorized"] += 1
+                # v0.1.249（D37）：语义检索被用户关闭 → **完全不碰模型**。
+                #
+                # 原来这里无条件调 store.index_file() → _get_model()，
+                # 而模型本地无缓存且 huggingface.co 不可达时，_get_model()
+                # 会去下载 470MB 且**没有任何超时**（这段阻塞还在
+                # _parse_with_ticks 的 120s 文件超时**之外**）——
+                # 真机实测扫描卡死在第一个文件，done 永远 0/63，
+                # 后面 12 条断言全红。现在：模型不可用就跳过向量化，
+                # 解析结果照常入库，检索退化为关键词。
+                if not _semantic_enabled():
+                    stats["vector_skipped_disabled"] = stats.get("vector_skipped_disabled", 0) + 1
+                else:
+                    _set_stage("向量化", os.path.basename(path))
+                    try:
+                        n = store.index_file(res)
+                    except Exception as _ve:  # noqa: BLE001
+                        n = 0
+                        res.structure = res.structure or {}
+                        res.structure["vector_error"] = str(_ve)[:200]
+                        # 降级必须**留痕**：否则统计里只有 vectorized=0，
+                        # 用户和自测都分不清「文件没内容」还是「模型没就绪」。
+                        stats["vector_degraded"] = True
+                        stats["vector_degraded_reason"] = str(_ve)[:200]
+                    if n:
+                        stats["vectorized"] += 1
                 # 无论是否成功向量化都进上传队列（云端合并保留原文+解析）
                 _set_stage("归类入库", os.path.basename(path))
                 # v0.1.245：必须带 ddir —— 不带时包落「当前项目」队列。

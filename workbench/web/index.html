@@ -741,6 +741,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
       <div class="quick-item" onclick="switchModule('archive')"><div class="icon">📚</div><div class="name">竣工组卷</div></div>
       <div class="quick-item" onclick="switchModule('update')"><div class="icon">🔄</div><div class="name">版本更新</div></div>
       <div class="quick-item" onclick="showVectorSearch()"><div class="icon">🔍</div><div class="name">向量检索</div></div>
+      <!-- v0.1.249（D37）：语义检索开关。程序一直提示「可在设置里关闭语义检索」，
+           而此前页面里并没有这个入口 —— 用户被指了一条走不通的路。 -->
+      <div class="quick-item" onclick="showSemanticSettings()"><div class="icon">🧠</div><div class="name">语义检索</div></div>
       <div class="quick-item" onclick="showRelations()"><div class="icon">🔗</div><div class="name">关系图谱</div></div>
       <div class="quick-item" onclick="showSpatialModel()"><div class="icon">📐</div><div class="name">空间模型</div></div>
       <div class="quick-item" onclick="showPlatformLib()"><div class="icon">📖</div><div class="name">平台规范库</div></div>
@@ -3199,6 +3202,42 @@ function showVectorSearch() {
             '查询「' + q + '」命中 ' + rows.length + ' 条 · 检索方式：' + mode +
             (d.vector_error ? ' · 向量库提示：' + String(d.vector_error).slice(0, 80) : ''));
     }).catch(function (e) { quickResultError('向量检索', '检索失败：' + e.message); });
+}
+
+// v0.1.249（D37）：语义检索开关。
+// 语义模型（470MB）在内网/断网机器上永远下不下来；此前程序会让扫描卡死在
+// 第一个文件（done 永远 0/63），而提示语让用户「在设置里关闭语义检索」——
+// 这个开关此前并不存在。这里把它真正做出来，并把降级原因摆到明面上。
+function showSemanticSettings() {
+    fetch('/api/settings').then(function (r) { return r.json(); }).then(function (d) {
+        var s = (d && d.settings) || {};
+        var m = (d && d.model) || {};
+        var on = s.semantic_enabled !== false;
+        var reason = m.reason || '';
+        var stateLine = on
+            ? '语义检索：<b>已开启</b>（资料入库时自动向量化）'
+            : '语义检索：<b>已关闭</b>（只做关键词检索，不加载语义模型）';
+        var reasonHtml = reason
+            ? '<div style="margin-top:10px;padding:8px;background:#fff7e6;border:1px solid #ffd591;border-radius:6px;font-size:12px;line-height:1.7">'
+              + '当前状态：<b>语义模型不可用</b><br>' + escapeHtml(reason)
+              + '<br>关键词检索不受影响，资料入库与归档不受影响。</div>'
+            : '';
+        var btn = on
+            ? '<button onclick="setSemanticEnabled(false)" style="margin-top:12px;padding:8px 14px;background:#fff;border:1px solid #d9d9d9;border-radius:6px;cursor:pointer">关闭语义检索</button>'
+            : '<button onclick="setSemanticEnabled(true)" style="margin-top:12px;padding:8px 14px;background:#1E5AA8;color:#fff;border:1px solid #1E5AA8;border-radius:6px;cursor:pointer">开启语义检索</button>';
+        openQuickResult('语义检索',
+            '<div style="font-size:13px;line-height:1.9">' + stateLine + '</div>' + reasonHtml + btn,
+            on ? '语义检索已开启' : '语义检索已关闭');
+    }).catch(function (e) { quickResultError('语义检索', '读取设置失败：' + e.message); });
+}
+
+function setSemanticEnabled(flag) {
+    fetch('/api/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ semantic_enabled: !!flag })
+    }).then(function (r) { return r.json(); }).then(function () {
+        showSemanticSettings();
+    }).catch(function (e) { quickResultError('语义检索', '保存失败：' + e.message); });
 }
 
 // 2. 关系图谱：/api/relations
