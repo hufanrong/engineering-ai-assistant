@@ -69,6 +69,18 @@ _REAL_BEFORE = _snap(_REAL_DATA_DIR)
 from app import equipment_merge as em  # noqa: E402
 
 RESULTS = []
+# v0.1.250：区分「前提缺失」与「断言失败」（同 test_device_identity.py）。
+# 本机没有真实台账 index.json 时，N7 三条断言没有输入 —— 原来的写法直接
+# json.load 一个不存在的文件，整个套件 traceback 崩掉（空机器上必崩）。
+# 现在改为明确 SKIP 并以退出码 2 表示「未验证」，不冒充通过、也不冒充失败。
+SKIPPED = []
+
+
+def skip(name, reason):
+    """记录一条「因前提缺失未执行」的断言（不计失败，但必须被看见）。"""
+    SKIPPED.append({"name": name, "reason": reason})
+    print(f"  [SKIP] {name}")
+    print(f"        前提缺失：{reason}")
 
 
 def check(name, expect, actual, cond, note=""):
@@ -237,33 +249,43 @@ def main():
     # GET /api/relations/layout 报 items 0 —— 合并逻辑只补 devices 与 workshops，
     # 从不补 layout（「同一件事两个答案」在合并路径上的复现）。
     import app.relations as RR  # noqa: E402
-    ledger = json.load(open(os.path.join(real_dir, "index.json"), encoding="utf-8"))["devices"]
-    gg = RR._blank_graph()
-    merged_g = RR._merge_index_devices(gg, ledger)
-    dev_n = len(merged_g.get("devices") or [])
-    lay_rows = [r for r in (merged_g.get("layout") or []) if isinstance(r, dict)]
-    lay_tags = {r.get("tag") for r in lay_rows}
-    dev_tags_with_ws = {d.get("tag") for d in (merged_g.get("devices") or [])
-                        if isinstance(d, dict) and any(w for w in (d.get("workshops") or []))}
-    check("N7a layout 覆盖所有有车间归属的设备（不空着）", len(dev_tags_with_ws),
-          len(lay_tags), lay_tags == dev_tags_with_ws,
-          f"设备 {dev_n} 台 / 有车间归属 {len(dev_tags_with_ws)} 台 / layout {len(lay_tags)} 条")
-    check("N7b layout 非空（原来恒为 0）", True, len(lay_rows) > 0, len(lay_rows) > 0)
+    _ridx_path = os.path.join(real_dir, "index.json")
+    if not os.path.isfile(_ridx_path):
+        # v0.1.250：原来这里直接 json.load 一个可能不存在的文件 → 整套件
+        # traceback 崩掉。空机器（沙箱重建 / 新装）上必然崩。
+        for _n in ("N7a layout 覆盖所有有车间归属的设备（不空着）",
+                   "N7b layout 非空（原来恒为 0）",
+                   "N7c layout 与 devices 对同一设备给出同一车间"):
+            skip(_n, "本机没有真实台账 index.json（%s 不存在），"
+                     "无法把 layout 与 devices 对同一事实做交叉比对" % _ridx_path)
+    else:
+        ledger = json.load(open(_ridx_path, encoding="utf-8"))["devices"]
+        gg = RR._blank_graph()
+        merged_g = RR._merge_index_devices(gg, ledger)
+        dev_n = len(merged_g.get("devices") or [])
+        lay_rows = [r for r in (merged_g.get("layout") or []) if isinstance(r, dict)]
+        lay_tags = {r.get("tag") for r in lay_rows}
+        dev_tags_with_ws = {d.get("tag") for d in (merged_g.get("devices") or [])
+                            if isinstance(d, dict) and any(w for w in (d.get("workshops") or []))}
+        check("N7a layout 覆盖所有有车间归属的设备（不空着）", len(dev_tags_with_ws),
+              len(lay_tags), lay_tags == dev_tags_with_ws,
+              f"设备 {dev_n} 台 / 有车间归属 {len(dev_tags_with_ws)} 台 / layout {len(lay_tags)} 条")
+        check("N7b layout 非空（原来恒为 0）", True, len(lay_rows) > 0, len(lay_rows) > 0)
 
-    _mismatch = []
-    for r in lay_rows:
-        ws = r.get("workshop")
-        if ws is None:
-            continue
-        d = next((x for x in (merged_g.get("devices") or [])
-                  if isinstance(x, dict) and x.get("tag") == r.get("tag")), None)
-        if not d:
-            continue
-        dws = [w for w in (d.get("workshops") or []) if w]
-        if dws and (len(dws) != 1 or dws[0] != ws):
-            _mismatch.append((r.get("tag"), dws, ws))
-    check("N7c layout 与 devices 对同一设备给出同一车间", [], _mismatch[:5], not _mismatch,
-          "这一条正是本项目反复查的「同一件事两个答案」的正面判据")
+        _mismatch = []
+        for r in lay_rows:
+            ws = r.get("workshop")
+            if ws is None:
+                continue
+            d = next((x for x in (merged_g.get("devices") or [])
+                      if isinstance(x, dict) and x.get("tag") == r.get("tag")), None)
+            if not d:
+                continue
+            dws = [w for w in (d.get("workshops") or []) if w]
+            if dws and (len(dws) != 1 or dws[0] != ws):
+                _mismatch.append((r.get("tag"), dws, ws))
+        check("N7c layout 与 devices 对同一设备给出同一车间", [], _mismatch[:5], not _mismatch,
+              "这一条正是本项目反复查的「同一件事两个答案」的正面判据")
 
     # ---------- N5 真实数据未污染 ----------
     after = _snap(_REAL_DATA_DIR)
@@ -274,9 +296,15 @@ def main():
 
     total = len(RESULTS)
     passed = sum(1 for r in RESULTS if r["passed"])
+    failed = total - passed
     print()
-    print(f"结果：通过 {passed} / 失败 {total - passed}（共 {total} 条）")
-    return 0 if passed == total else 1
+    print(f"结果：通过 {passed} / 失败 {failed}（共 {total} 条）"
+          f" / 跳过 {len(SKIPPED)} 条")
+    if SKIPPED:
+        print("⚠ 有断言因前提缺失未执行（退出码 2）：")
+        for s in SKIPPED:
+            print("   -", s["name"])
+    return 1 if failed else (2 if SKIPPED else 0)
 
 
 if __name__ == "__main__":
