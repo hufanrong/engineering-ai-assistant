@@ -1,10 +1,16 @@
-# 繁工AI 云端合并主库（v0.1.14）
+# 繁工AI 云端合并主库（v0.1.19）
 # 部署在服务器/公司主机上，接收各电脑解析节点上传的 payload（data/upload_queue 打包内容），
 # 按 SHA256 去重合并为一个完整云库；手机端/外部 Agent 可在线检索；
 # 支持把云库导出为 .fglib 供任意电脑导入；也支持直接导入工作台导出的 .fglib。
 #
 # 部署：pip install -r requirements.txt → 双击 run_server.bat → http://127.0.0.1:8760
 # 工作台配置：app/config.py 的 CLOUD_ENDPOINT = "http://<服务器IP>:8760"，CLOUD_API_KEY 与下方一致
+#
+# v0.1.250：本文件原先文件头写 (v0.1.14)、FastAPI 又报 version="0.1.19" ——
+# 同一个东西两个答案。现在版本号只有 CLOUD_VERSION 这一个来源。
+# 注意：这是**独立部署的云端服务**，版本线与工作台 app/config.py 的 APP_VERSION
+# 各自独立推进，不要互相套用；但本文件内部必须只有一个答案。
+CLOUD_VERSION = "0.1.19"
 
 import os
 import io
@@ -37,7 +43,7 @@ API_KEY = "fanGong_cloud_2026"
 # 手机 → 云库 → 工作台 AI 助手（本地多库检索+资料生成）；留空则云库本地轻量检索回答。
 AI_WORKBENCH_ENDPOINT = ""
 
-app = FastAPI(title="繁工AI 云端合并主库", version="0.1.19")
+app = FastAPI(title="繁工AI 云端合并主库", version=CLOUD_VERSION)
 
 
 def _load_index() -> dict:
