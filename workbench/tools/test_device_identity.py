@@ -78,6 +78,19 @@ _REAL_BEFORE = _snap(_REAL_DATA_DIR)
 from app import equipment_merge as em  # noqa: E402
 
 RESULTS = []
+# v0.1.250：区分「前提缺失」与「断言失败」。
+# 本机没有真实台账项目时（沙箱重建 / 新装机器 / WORKbuddy 首次安装），
+# 依赖真实数据的断言**没被执行**——这不是「失败」，也不是「通过」。
+# 原实现把它记成 FAIL，于是空机器上永远一条红，真信号被淹没。
+# 现在统一：退出码 0 = 全部通过；1 = 有断言失败；2 = 有断言因前提缺失未执行。
+SKIPPED = []
+
+
+def skip(name, reason):
+    """记录一条「因前提缺失未执行」的断言（不计失败，但必须被看见）。"""
+    SKIPPED.append({"name": name, "reason": reason})
+    print(f"  [SKIP] {name}")
+    print(f"        前提缺失：{reason}")
 
 
 def check(name, expect, actual, cond, note=""):
@@ -268,7 +281,10 @@ def main():
               0, len(bad_key), not bad_key,
               f"已回填 {have_key} 条，其中不一致 {len(bad_key)} 条")
     else:
-        check("I5 真实项目 index.json 存在", True, False, False, "未找到任何项目的 index.json")
+        # v0.1.250：没有真实台账项目时这是「前提缺失」，不是断言失败。
+        skip("I5 真实项目 index.json 存在",
+             "本机没有真实台账项目（沙箱重建 / 新装机器 / 首次安装），"
+             "I5a~I5d 依赖真实数据的断言未执行")
 
     # ---------- I7 真实数据未污染 ----------
     after = _snap(_REAL_DATA_DIR)
@@ -284,9 +300,16 @@ def main():
     failed = len(RESULTS) - passed
     print()
     print("=" * 78)
-    print(f"结果：通过 {passed} / 失败 {failed}（共 {len(RESULTS)} 条）")
+    print(f"结果：通过 {passed} / 失败 {failed}（共 {len(RESULTS)} 条）"
+          f" / 跳过 {len(SKIPPED)} 条")
+    if SKIPPED:
+        print("⚠ 有断言因前提缺失未执行（退出码 2）：")
+        for s in SKIPPED:
+            print("   -", s["name"])
     print("=" * 78)
-    return 0 if failed == 0 else 1
+    if failed:
+        return 1
+    return 2 if SKIPPED else 0
 
 
 if __name__ == "__main__":
